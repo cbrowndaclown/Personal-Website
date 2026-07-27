@@ -6,34 +6,20 @@
   --f-serif: 'Cormorant Garamond', Georgia, serif;
   --f-sans:  'Josefin Sans', system-ui, sans-serif;
   --f-mono:  'DM Mono', 'Courier New', monospace;
+  --f-ribbon: 'Benz Grotesk', 'Josefin Sans', system-ui, sans-serif;
 
-  /* Wall — the page background, warm soft white */
-  --wall:          #F4F1EB;
-  --wall-shadow:   rgba(28, 20, 10, 1);
+  /* Heatmap field */
+  --heat-field: #D2D2D2;
 
-  /* Heatmap pixels — cool gray wall, warm pink under cursor */
-  --heat-cool:     #B8B4AE;
-  --heat-hot:      #E891A8;
+  /* Shared accent — kept in sync with Settings Effect Color (JS) */
+  --accent-r: 255;
+  --accent-g: 52;
+  --accent-b: 158;
+  --accent-rgb: 255, 52, 158;
 
-  /* Alcove — recessed back panel, clearly darker than the painted frame */
-  --alcove-bg:     #C8C4BA;
-
-  /* Shelf plank — painted white, same family as wall */
-  --plank-face:    #F3F0EA;
-  --plank-lit:     #FBFAF6;
-  --plank-shade:   #E2DED6;
-  --plank-h:       22px;   /* visible thickness = architectural depth */
-
-  /* Shadow pigment — warm, never pure black */
-  --sh:            28, 20, 10;
-
-  /* Bookcase sizing */
-  --alcove-w:      min(60vw, 840px);
-  --alcove-min-w:  360px;
-  --shelf-h:       178px;  /* space for items above each plank */
-  --shelf-pad-x:   16px;   /* horizontal padding inside the side rails */
-  --book-gap:      4px;
-
+  /* Nav height — site-frame parks at -navH, reveals at 0 */
+  --topnav-h: 52px;
+  --topnav-divider: rgba(229, 229, 229, 0.5); /* #E5E5E5 @ 50% */
 }
 
 /* ============================================================
@@ -49,96 +35,724 @@ html {
   font-size: 16px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  height: 100%;
+  overflow: hidden; /* site-frame owns motion; no document scroll gap */
 }
 
 a    { text-decoration: none; color: inherit; }
-figure { display: block; }
 
 /* ============================================================
-   WALL — the full-viewport background that contains everything.
-   This IS the room wall. The alcove sits debossed within it.
+   PAGE — viewport clip; unified site-frame moves as one surface
    ============================================================ */
 body {
-  min-height: 100vh;
-  background-color: var(--heat-cool);
+  height: 100%;
+  min-height: 100%;
+  min-height: 100dvh;
+  background-color: #FFFFFF;
   position: relative;
   isolation: isolate;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
 
+/* ============================================================
+   SITE FRAME — nav + page shell as one column; sole transform target
+   Hidden:  translateY(-navH) → frame flush with viewport top
+   Revealed: translateY(0)    → nav slides in attached to the frame
+   ============================================================ */
+.site-frame {
+  position: relative;
+  z-index: 10;
+  width: 100%;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 80px 0 60px;  /* clearance for fixed nameplate + footer */
+  align-items: stretch;
+  background-color: #FFFFFF;
+  overflow: visible;
+  transform: translate3d(0, calc(var(--topnav-h) * -1), 0);
+  transition: transform 0.58s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.site-frame.is-nav-revealed {
+  transform: translate3d(0, 0, 0);
 }
 
 /* ============================================================
-   HEATMAP — fine pixel grid behind the bookcase.
-   Cursor proximity paints pink; idle cools back to gray.
+   TOP NAV — first child of site-frame; zero gap to page-shell below
    ============================================================ */
-.heatmap {
-  position: fixed;
-  inset: 0;
+.topnav {
+  flex: 0 0 var(--topnav-h);
+  height: var(--topnav-h);
+  width: 100%;
+  display: flex;
+  align-items: stretch;
+  position: relative;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 100; /* above nameplate ribbon so the dropdown covers it */
+  /* Glass — same language as settings panel */
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.30) 0%,
+      rgba(255, 255, 255, 0.10) 55%,
+      rgba(255, 255, 255, 0.05) 100%
+    );
+  /* 1px slot always reserved — color only while revealed (no layout shift) */
+  border-bottom: 1px solid transparent;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  -webkit-backdrop-filter: blur(32px) saturate(1.4);
+  backdrop-filter: blur(32px) saturate(1.4);
+  transition: border-bottom-color 0.35s ease;
+}
+
+.site-frame.is-nav-revealed .topnav {
+  pointer-events: auto;
+  border-bottom-color: var(--topnav-divider);
+}
+
+.topnav__inner {
+  --topnav-pad-x: clamp(20px, 3.5vw, 36px);
+  --topnav-link-gap: clamp(28px, 3.2vw, 48px);
+  --topnav-brand-clearance: clamp(56px, 7vw, 96px);
+  --topnav-settings-reserve: 52px; /* gear + breathing room before right cluster */
+
+  position: relative;
+  flex: 1 1 auto;
   width: 100%;
   height: 100%;
-  z-index: 0;
-  pointer-events: none;
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
-}
-
-/* ============================================================
-   NAMEPLATE — centered above the bookshelf, logo mark
-   ============================================================ */
-.nameplate {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
   display: flex;
-  justify-content: center;
-  padding: 48px 44px;
-  z-index: 100;
-  pointer-events: none;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0 var(--topnav-pad-x);
+  min-width: 0;
 }
 
-.nameplate__name {
+/* Mirrored link groups — anchored to center so the brand never shifts */
+.topnav__cluster {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--topnav-link-gap);
+  pointer-events: auto;
+}
+
+.topnav__cluster--left {
+  left: var(--topnav-pad-x);
+  right: calc(50% + var(--topnav-brand-clearance));
+  justify-content: flex-end;
+}
+
+.topnav__cluster--right {
+  left: calc(50% + var(--topnav-brand-clearance));
+  right: calc(var(--topnav-pad-x) + var(--topnav-settings-reserve));
+  justify-content: flex-start;
+}
+
+.topnav__link {
   position: relative;
   display: inline-block;
-  font-family: var(--f-serif);
-  font-weight: 700;
-  font-size: 1.65rem;
-  letter-spacing: -0.01em;
-  color: rgba(58, 50, 40, 0.88);
-  pointer-events: all;
-  transition: color 0.25s ease;
+  flex-shrink: 0;
+  font-family: var(--f-sans);
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: none;
+  color: rgba(58, 50, 40, 0.48);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  /* Leave: ease-in — hover state overrides to ease-out */
+  transition: color 0.26s ease-in;
 }
 
-.nameplate__name::after {
-  content: "";
+.topnav__link::after {
+  content: '';
   position: absolute;
   left: 0;
   right: 0;
   bottom: -4px;
   height: 1px;
-  background: rgba(58, 50, 40, 0.72);
+  background-color: var(--topnav-divider);
   transform: scaleX(0);
-  transform-origin: left center;
-  transition: transform 0.4s ease;
+  transform-origin: center;
+  pointer-events: none;
+  transition: transform 0.26s ease-in;
 }
 
-.nameplate__name:hover {
-  color: rgba(58, 50, 40, 1);
+.topnav__link:hover,
+.topnav__link:focus-visible {
+  color: rgb(var(--accent-rgb));
+  transition: color 0.26s ease-out;
 }
 
-.nameplate__name:hover::after {
+.topnav__link:hover::after,
+.topnav__link:focus-visible::after {
   transform: scaleX(1);
+  transition: transform 0.26s ease-out;
+}
+
+.topnav__link:focus-visible {
+  outline: 2px solid rgba(58, 50, 40, 0.35);
+  outline-offset: 3px;
+}
+
+/* Brand / Home — optically centered; absolute so side items never shift it */
+.topnav__brand {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 2;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-family: var(--f-sans);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  color: rgba(58, 50, 40, 0.78);
+  white-space: nowrap;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.25s ease;
+}
+
+.topnav__brand:hover {
+  color: rgba(58, 50, 40, 0.95);
+}
+
+.topnav__brand:focus-visible {
+  outline: 2px solid rgba(58, 50, 40, 0.35);
+  outline-offset: 3px;
 }
 
 /* ============================================================
-   FOOTER — fixed to base of wall, near-invisible
+   SETTINGS — lives in the top nav; dropdown opens downward
+   ============================================================ */
+.settings {
+  position: relative;
+  margin-left: auto;
+  flex-shrink: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+}
+
+.settings__btn {
+  appearance: none;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  border-radius: 14px;
+  corner-shape: squircle;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: rgba(58, 50, 40, 0.62);
+  /* Match panel Apple glass */
+  background:
+    linear-gradient(
+      165deg,
+      rgba(255, 255, 255, 0.28) 0%,
+      rgba(255, 255, 255, 0.08) 45%,
+      rgba(255, 255, 255, 0.04) 100%
+    );
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.85),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.28),
+    0 1px 2px rgba(28, 20, 10, 0.03),
+    0 8px 24px rgba(28, 20, 10, 0.06);
+  -webkit-backdrop-filter: blur(32px) saturate(1.4);
+  backdrop-filter: blur(32px) saturate(1.4);
+  transition:
+    color 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.settings__btn:hover {
+  color: rgba(58, 50, 40, 0.92);
+  background:
+    linear-gradient(
+      165deg,
+      rgba(255, 255, 255, 0.36) 0%,
+      rgba(255, 255, 255, 0.12) 45%,
+      rgba(255, 255, 255, 0.06) 100%
+    );
+}
+
+.settings__btn:focus-visible {
+  outline: 2px solid rgba(58, 50, 40, 0.35);
+  outline-offset: 2px;
+}
+
+.settings__btn[aria-expanded="true"] {
+  color: rgba(58, 50, 40, 0.92);
+  transform: rotate(45deg);
+}
+
+.settings__icon {
+  display: block;
+  transform-origin: 50% 50%;
+  will-change: transform;
+}
+
+.settings__panel {
+  --settings-radius: 28px;
+  --settings-panel-h: 268px;
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  bottom: auto;
+  left: auto;
+  width: min(300px, calc(100vw - 32px));
+  height: min(var(--settings-panel-h), calc(100dvh - var(--topnav-h) - 24px));
+  max-height: min(var(--settings-panel-h), calc(100dvh - var(--topnav-h) - 24px));
+  display: flex;
+  flex-direction: column;
+  padding: 16px 0 0;
+  border-radius: var(--settings-radius);
+  corner-shape: squircle;
+  overflow: hidden;
+  /* Near-opaque frost — ribbon cannot read through */
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.35),
+    0 1px 2px rgba(28, 20, 10, 0.04),
+    0 14px 44px rgba(28, 20, 10, 0.08);
+  -webkit-backdrop-filter: blur(40px) saturate(1.35);
+  backdrop-filter: blur(40px) saturate(1.35);
+  transform-origin: top right;
+  opacity: 0;
+  visibility: hidden;
+  /* Closed slightly above rest — opens with fade + soft downward settle */
+  transform: translateY(-6px) scale(0.98);
+  pointer-events: none;
+  transition:
+    opacity 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s linear 0.22s;
+}
+
+.settings__panel.is-open {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+  transition-delay: 0s;
+}
+
+.settings__head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 0 16px;
+}
+
+.settings__title {
+  margin: 0;
+  font-family: var(--f-serif);
+  font-size: 1.35rem;
+  font-weight: 400;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  text-transform: none;
+  color: rgba(28, 20, 10, 0.90);
+}
+
+.settings__close {
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(58, 50, 40, 0.45);
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  transition: color 0.18s ease, background 0.18s ease;
+}
+
+.settings__close:hover {
+  color: rgba(58, 50, 40, 0.88);
+  background: rgba(58, 50, 40, 0.06);
+}
+
+.settings__close:focus-visible {
+  outline: 2px solid rgba(58, 50, 40, 0.35);
+  outline-offset: 2px;
+}
+
+.settings__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 0 16px 18px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-behavior: auto; /* responsive wheel / trackpad */
+  -webkit-overflow-scrolling: touch;
+  /* Heavily minimized scrollbar */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.settings__body::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  background: transparent;
+}
+
+.settings__row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings__row.is-disabled {
+  opacity: 0.42;
+  pointer-events: none;
+}
+
+.settings__meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings__meta--row {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings__swatch {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgb(255, 52, 158);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.45),
+    0 0 0 1px rgba(28, 20, 10, 0.08),
+    0 2px 8px rgba(28, 20, 10, 0.08);
+}
+
+.settings__colors {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings__slider {
+  display: grid;
+  grid-template-columns: 14px 1fr 28px;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.settings__slider-label {
+  font-family: var(--f-mono);
+  font-size: 0.62rem;
+  font-weight: 300;
+  letter-spacing: 0.02em;
+  color: rgba(32, 26, 18, 0.55);
+}
+
+.settings__slider-val {
+  font-family: var(--f-mono);
+  font-size: 0.58rem;
+  font-weight: 300;
+  text-align: right;
+  color: rgba(32, 26, 18, 0.48);
+  font-variant-numeric: tabular-nums;
+}
+
+.settings__slider input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(28, 20, 10, 0.12);
+  outline: none;
+  cursor: pointer;
+}
+
+.settings__slider input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 0 0 1px rgba(58, 50, 40, 0.12),
+    0 1px 3px rgba(28, 20, 10, 0.14);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.settings__slider input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 0 0 1px rgba(58, 50, 40, 0.12),
+    0 1px 3px rgba(28, 20, 10, 0.14);
+  cursor: pointer;
+}
+
+.settings__slider input[type="range"]:focus-visible {
+  outline: none;
+}
+
+.settings__slider input[type="range"]:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid rgba(58, 50, 40, 0.35);
+  outline-offset: 2px;
+}
+
+.settings__slider input[type="range"]:focus-visible::-moz-range-thumb {
+  outline: 2px solid rgba(58, 50, 40, 0.35);
+  outline-offset: 2px;
+}
+
+.settings__label {
+  font-family: var(--f-sans);
+  font-size: 0.78rem;
+  font-weight: 300;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  color: rgba(32, 26, 18, 0.72);
+}
+
+.settings__desc {
+  font-family: var(--f-serif);
+  font-size: 0.82rem;
+  font-weight: 300;
+  line-height: 1.35;
+  color: rgba(32, 26, 18, 0.52);
+}
+
+/* Segmented control — native to the settings sheet */
+.settings__seg {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: stretch;
+  width: 100%;
+  height: 34px;
+  padding: 3px;
+  border-radius: 999px;
+  background: rgba(28, 20, 10, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(28, 20, 10, 0.08);
+}
+
+.settings__seg-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: calc(50% - 3px);
+  height: calc(100% - 6px);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    0 1px 2px rgba(28, 20, 10, 0.12),
+    0 0 0 1px rgba(58, 50, 40, 0.06);
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.settings__seg[data-active="off"] .settings__seg-thumb,
+.settings__seg[data-active="wave"] .settings__seg-thumb {
+  transform: translateX(100%);
+}
+
+.settings__seg-opt {
+  position: relative;
+  z-index: 1;
+  appearance: none;
+  border: 0;
+  background: transparent;
+  margin: 0;
+  padding: 0;
+  font-family: var(--f-mono);
+  font-size: 0.68rem;
+  font-weight: 300;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: rgba(58, 50, 40, 0.40);
+  cursor: pointer;
+  border-radius: 999px;
+  transition: color 0.18s ease;
+}
+
+.settings__seg-opt.is-active {
+  color: rgba(28, 20, 10, 0.92);
+}
+
+.settings__seg-opt:focus-visible {
+  outline: 2px solid rgba(58, 50, 40, 0.35);
+  outline-offset: 2px;
+}
+
+.settings__row.is-disabled .settings__seg-opt {
+  cursor: not-allowed;
+}
+
+/* ============================================================
+   PAGE SHELL — framed experience; no independent transform
+   ============================================================ */
+.page-shell {
+  position: relative;
+  flex: 0 0 auto;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  background-color: #FFFFFF;
+  /* Original chrome: top + sides; bottom open */
+  padding:
+    clamp(27px, 3.5vh, 38px)
+    clamp(8px, 1.7vw, 24px)
+    0;
+}
+
+/* ============================================================
+   STAGE — pixel field clipped to a squircle viewport.
+   No border, stroke, or outer shadow — sharp field → white page.
+   Bottom edge stays open.
+   ============================================================ */
+.stage {
+  --stage-radius: clamp(36px, 5.2vw, 68px);
+
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  overflow: hidden;
+  border-radius: var(--stage-radius) var(--stage-radius) 0 0;
+  corner-shape: squircle;
+}
+
+.stage__field {
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 420px;
+  overflow: hidden;
+  background-color: var(--heat-field);
+  border: 0;
+  box-shadow: none;
+
+  border-radius: var(--stage-radius) var(--stage-radius) 0 0;
+  corner-shape: squircle;
+
+  display: block;
+  padding: 0;
+}
+
+/* ============================================================
+   HEATMAP — fine pixel grid inside the clipped stage only.
+   Elastic pressure field: pink under soft cursor force, cool gray at rest.
+   ============================================================ */
+.heatmap {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  display: block;
+}
+
+/* Motion off — plain gray field, no pixel layer */
+body[data-motion="off"] .heatmap {
+  display: none !important;
+}
+
+body[data-motion="off"] .stage__field {
+  background-color: var(--heat-field);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings__btn,
+  .settings__panel,
+  .settings__seg-thumb,
+  .site-frame,
+  .topnav,
+  .topnav__brand,
+  .topnav__link,
+  .topnav__link::after {
+    transition: none;
+  }
+}
+
+.nameplate {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 90;
+  pointer-events: none;
+  margin: 0;
+  padding: 0;
+}
+
+.nameplate__svg {
+  position: absolute;
+  display: block;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.nameplate__text {
+  font-family: var(--f-ribbon);
+  font-weight: 400;
+  fill: rgba(58, 50, 40, 0.72);
+  letter-spacing: 0.04em;
+}
+
+/* ============================================================
+   FOOTER — pinned to base of the page shell, near-invisible
    ============================================================ */
 .site-footer {
-  position: fixed;
+  position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
@@ -149,753 +763,41 @@ body {
   letter-spacing: 0.10em;
   color: rgba(58, 50, 40, 0.22);
   pointer-events: none;
-  z-index: 1;
-}
-
-/* ============================================================
-   ALCOVE — recessed cabinet. Light enters from the upper-left.
-   ============================================================ */
-.alcove {
-  position: relative;
-  z-index: 1;
-  width: var(--alcove-w);
-  min-width: var(--alcove-min-w);
-  overflow: hidden;
-
-  /*
-    Back panel — darker than the frame for recess contrast.
-    Upper-left light, tighter falloff (less haze).
-  */
-  background:
-    radial-gradient(ellipse 70% 42% at 18% 6%,
-      rgba(255, 252, 244, 0.16) 0%, transparent 52%),
-    linear-gradient(165deg,
-      #D2CEC4 0%,
-      var(--alcove-bg) 48%,
-      #BDB9AF 100%);
-
-  /*
-    Recessed interior + outer case — tighter radii, higher local AO.
-    Left softer (lit), right + top stronger (in shadow).
-  */
-  box-shadow:
-    inset 0    14px  22px rgba(var(--sh), 0.18),   /* ceiling AO        */
-    inset 0    -6px  12px rgba(var(--sh), 0.07),   /* floor             */
-    inset 8px    0   14px rgba(var(--sh), 0.07),   /* L wall (lit)      */
-    inset -14px  0   20px rgba(var(--sh), 0.16),   /* R wall (shadow)   */
-    inset 0 0 0 1px       rgba(var(--sh), 0.08),   /* inner hairline    */
-    0  1px  2px  rgba(var(--sh), 0.16),             /* case contact      */
-    0  6px 14px  rgba(var(--sh), 0.09),             /* case object       */
-    0 16px 32px  rgba(var(--sh), 0.05);             /* case ambient      */
-}
-
-/*
-  Frame rails — painted face matching planks.
-  Overlaid on plank ends for a flush case join.
-  Inner edges carry the cabinet recess; outer edges catch light.
-*/
-.alcove__rail {
-  position: absolute;
-  background: linear-gradient(
-    to bottom,
-    var(--plank-lit) 0%,
-    var(--plank-face) 40%,
-    var(--plank-shade) 100%
-  );
-  z-index: 10;
-  pointer-events: none;
-}
-
-.alcove__rail--top {
-  top: 0;
-  left: 0;
-  right: 0;
-  height: var(--plank-h);
-  background: linear-gradient(
-    to bottom,
-    var(--plank-lit) 0%,
-    var(--plank-face) 48%,
-    var(--plank-shade) 100%
-  );
-  box-shadow:
-    inset 0  1px 0   rgba(255, 255, 255, 0.95),    /* top edge highlight */
-    inset 0  4px 0   rgba(255, 255, 255, 0.38),
-    inset 0 -3px 4px rgba(var(--sh), 0.18),         /* underside thickness */
-    0  1px  1px rgba(var(--sh), 0.20),              /* cast contact        */
-    0  4px  9px rgba(var(--sh), 0.09),              /* cast object         */
-    0 10px 18px rgba(var(--sh), 0.04);              /* cast ambient        */
-}
-
-.alcove__rail--left {
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: var(--plank-h);
-  background: linear-gradient(
-    to right,
-    var(--plank-lit) 0%,
-    var(--plank-face) 50%,
-    var(--plank-shade) 100%
-  );
-  box-shadow:
-    inset -5px 0 10px rgba(var(--sh), 0.16),        /* inner recess        */
-    inset -1px 0 0    rgba(var(--sh), 0.22),        /* crisp inner edge AO */
-    inset  2px 0 0    rgba(255, 255, 255, 0.58);    /* outer face light    */
-}
-
-.alcove__rail--right {
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: var(--plank-h);
-  background: linear-gradient(
-    to left,
-    var(--plank-shade) 0%,
-    var(--plank-face) 55%,
-    #EEEBE4 100%
-  );
-  box-shadow:
-    inset  6px 0 12px rgba(var(--sh), 0.18),        /* inner recess        */
-    inset  1px 0 0    rgba(var(--sh), 0.24),        /* crisp inner edge AO */
-    inset -1px 0 0    rgba(255, 255, 255, 0.30);    /* faint outer rim     */
-}
-
-/* ============================================================
-   SHELF — one row (items area + plank below it)
-   ============================================================ */
-.shelf {
-  position: relative;
-  z-index: 1;
-}
-
-/* First shelf clears the top rail */
-.shelf[data-shelf="1"] .shelf__items {
-  padding-top: var(--plank-h);
-  height: calc(var(--shelf-h) + var(--plank-h));
-}
-
-/* ── Items area ─────────────────────────────────────────── */
-.shelf__items {
-  position: relative;
-  z-index: 2;                     /* above plank so contact shadows land on it */
-  height: var(--shelf-h);
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  padding: 0 calc(var(--plank-h) + var(--shelf-pad-x));
-  gap: var(--book-gap);
-  perspective: 900px;
-}
-
-/*
-  Architectural AO — tight, darker wedges in the inside corners
-  (shelf × side rail × back panel). Not a soft vignette.
-*/
-.shelf__items::before,
-.shelf__items::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 18px;
-  pointer-events: none;
-  z-index: 0;
-}
-.shelf__items::before {
-  left: var(--plank-h);
-  background:
-    linear-gradient(to right,
-      rgba(var(--sh), 0.16) 0%,
-      rgba(var(--sh), 0.05) 45%,
-      transparent 100%),
-    linear-gradient(to top,
-      rgba(var(--sh), 0.10) 0%,
-      transparent 28%);
-}
-.shelf__items::after {
-  right: var(--plank-h);
-  background:
-    linear-gradient(to left,
-      rgba(var(--sh), 0.18) 0%,
-      rgba(var(--sh), 0.06) 48%,
-      transparent 100%),
-    linear-gradient(to top,
-      rgba(var(--sh), 0.11) 0%,
-      transparent 28%);
-}
-
-/* ── Group — curated cluster of books / plants / objects */
-.shelf__group {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: flex-end;
-  gap: var(--book-gap);
-  transform-style: preserve-3d;
-}
-
-/* ── Gap — (legacy; kept for possible single-row shelves) ─── */
-.shelf__gap {
-  flex: 0 0 36px;
-}
-
-.shelf__gap--max {
-  flex: 0 0 36px;
-}
-
-/* ── Plank ───────────────────────────────────────────────── */
-/*
-  Painted shelf board. Top edge catches upper-left light;
-  underside reads as thickness; layered cast shadow falls
-  onto the back panel of the bay below.
-*/
-.shelf__plank {
-  position: relative;
-  z-index: 1;
-  height: var(--plank-h);
-  background: linear-gradient(
-    to bottom,
-    var(--plank-lit) 0%,
-    var(--plank-face) 32%,
-    var(--plank-face) 58%,
-    var(--plank-shade) 100%
-  );
-
-  box-shadow:
-    inset 0  1px 0   rgba(255, 255, 255, 0.96),    /* crisp top edge      */
-    inset 0  3px 0   rgba(255, 255, 255, 0.32),    /* lit top plane       */
-    inset 0 -2px 0   rgba(var(--sh), 0.10),        /* underside lip       */
-    inset 0 -5px 6px rgba(var(--sh), 0.16),        /* thickness shade     */
-    /* cast onto back panel — tighter, less hazy */
-    0  1px  1px  rgba(var(--sh), 0.24),             /* contact */
-    0  4px  9px  rgba(var(--sh), 0.11),             /* object  */
-    0 11px 22px  rgba(var(--sh), 0.05);             /* ambient */
-}
-
-/* Corner AO where plank meets side rails — sharper, denser */
-.shelf__plank::before,
-.shelf__plank::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: -22px;
-  width: 16px;
-  pointer-events: none;
-  z-index: 2;
-}
-.shelf__plank::before {
-  left: var(--plank-h);
-  background: linear-gradient(
-    to right,
-    rgba(var(--sh), 0.18) 0%,
-    rgba(var(--sh), 0.06) 50%,
-    transparent 100%
-  );
-}
-.shelf__plank::after {
-  right: var(--plank-h);
-  background: linear-gradient(
-    to left,
-    rgba(var(--sh), 0.20) 0%,
-    rgba(var(--sh), 0.07) 52%,
-    transparent 100%
-  );
-}
-
-.shelf--last .shelf__plank {
-  box-shadow:
-    inset 0  1px 0   rgba(255, 255, 255, 0.96),
-    inset 0  3px 0   rgba(255, 255, 255, 0.32),
-    inset 0 -2px 0   rgba(var(--sh), 0.10),
-    inset 0 -5px 6px rgba(var(--sh), 0.16),
-    0  1px  1px  rgba(var(--sh), 0.20),
-    0  3px  8px  rgba(var(--sh), 0.09),
-    0  9px 18px  rgba(var(--sh), 0.04);
-}
-
-/* ============================================================
-   BOOKS
-   Light from upper-left → left highlight, right edge shade,
-   cast shadows bias down-right onto shelf + back wall.
-   --w drives cast size so thicker books throw a wider shadow.
-   ============================================================ */
-.book {
-  flex-shrink: 0;
-  width:  var(--w, 22px);
-  height: var(--h, 150px);
-  /* Tighter casts — depth from edges/contact, not haze */
-  --cast-x: clamp(1px,   calc(var(--w, 22px) * 0.10), 3.5px);
-  --cast-y: clamp(1px,   calc(var(--w, 22px) * 0.11), 4px);
-  --cast-b: clamp(2.5px, calc(var(--w, 22px) * 0.18), 7px);
-  --depth-z: 0px;
-
-  background: var(--c, #9A9490);
-  background-image:
-    linear-gradient(
-      to right,
-      color-mix(in srgb, var(--c, #9A9490) 72%, #1C140A) 0%,
-      color-mix(in srgb, var(--c, #9A9490) 92%, #fff) 10%,
-      var(--c, #9A9490) 28%,
-      var(--c, #9A9490) 70%,
-      color-mix(in srgb, var(--c, #9A9490) 78%, #1C140A) 100%
-    );
-  border-radius: 1px 1px 0 0;
-  position: relative;
-  overflow: hidden;
-  z-index: 1;
-  transform: translateZ(var(--depth-z));
-
-  box-shadow:
-    /* material edges — highlight / darker side face */
-    inset 1px 0 0 rgba(255, 255, 255, 0.28),
-    inset -1.5px 0 0 rgba(var(--sh), 0.20),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    /* contact — sharp ground on the plank */
-    0 1px 0 rgba(var(--sh), 0.22),
-    0 1px 2px rgba(var(--sh), 0.30),
-    /* object — short wall/shelf cast */
-    var(--cast-x) var(--cast-y) var(--cast-b) rgba(var(--sh), 0.11),
-    /* ambient — very small, not a glow */
-    calc(var(--cast-x) + 1px) calc(var(--cast-y) + 3px) 10px rgba(var(--sh), 0.04);
-}
-
-/*
-  Page-edge at the book top — cream headband catching overhead light.
-*/
-.book::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 7px;
-  background: linear-gradient(to bottom,
-    rgba(245, 240, 230, 0.95) 0%,
-    rgba(245, 240, 230, 0.45) 55%,
-    rgba(245, 240, 230, 0.00) 100%
-  );
-  border-radius: 1px 1px 0 0;
-  z-index: 2;
-  pointer-events: none;
-}
-
-/*
-  Spine surface: crisp left catch-light + darker right face.
-*/
-.book::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(to right,
-      rgba(255, 255, 255, 0.20) 0%,
-      rgba(255, 255, 255, 0.05) 12%,
-      transparent 36%,
-      rgba(var(--sh), 0.08) 100%),
-    linear-gradient(to bottom,
-      rgba(255, 255, 255, 0.08) 0%,
-      transparent 28%,
-      rgba(var(--sh), 0.05) 100%);
-  z-index: 2;
-  pointer-events: none;
-}
-
-/* ── Interactive link books ─────────────────────────────── */
-.book--link {
-  cursor: pointer;
-  z-index: 2;
-}
-
-.book--link:focus-visible {
-  outline: 2px solid rgba(80, 70, 60, 0.40);
-  outline-offset: 3px;
-}
-
-/* ── Spine labels ───────────────────────────────────────── */
-.book__spine {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  color: var(--tc, rgba(255, 255, 255, 0.65));
-  white-space: nowrap;
-  overflow: hidden;
-  z-index: 3;
-  user-select: none;
-  pointer-events: none;
-  font-family: var(--f-mono);
-  font-size: 9px;
-  letter-spacing: 0.16em;
-  font-weight: 300;
-}
-
-.book__spine--cormorant {
-  font-family: var(--f-serif);
-  font-weight: 300;
-  font-style: normal;
-  font-size: 10.5px;
-  letter-spacing: 0.24em;
-}
-
-.book__spine--cormorant-italic {
-  font-family: var(--f-serif);
-  font-weight: 300;
-  font-style: italic;
-  font-size: 10.5px;
-  letter-spacing: 0.20em;
-}
-
-.book__spine--josefin {
-  font-family: var(--f-sans);
-  font-weight: 200;
-  font-style: normal;
-  font-size: 8px;
-  letter-spacing: 0.34em;
-  text-transform: uppercase;
-}
-
-.book__spine--mono {
-  font-family: var(--f-mono);
-  font-weight: 300;
-  font-size: 9px;
-  letter-spacing: 0.18em;
-}
-
-/* ============================================================
-   PLANTS — grounded with layered drop-shadows (shelf + wall).
-   ============================================================ */
-.plant-svg {
-  flex-shrink: 0;
-  align-self: flex-end;
-  margin: 0 8px;
-  display: block;
-  position: relative;
-  z-index: 2;
-  filter:
-    drop-shadow(0 1px 0 rgba(var(--sh), 0.26))       /* contact lip */
-    drop-shadow(0 1px 2px rgba(var(--sh), 0.32))     /* contact body */
-    drop-shadow(2px 3px 5px rgba(var(--sh), 0.11))   /* short object cast */
-    drop-shadow(4px 8px 12px rgba(var(--sh), 0.04)); /* faint ambient */
-}
-
-/* ============================================================
-   DECORATIVE OBJECTS — vases, frames, stacks, candles, bowls.
-   ============================================================ */
-.decor-svg {
-  flex-shrink: 0;
-  align-self: flex-end;
-  margin: 0 4px;
-  display: block;
-  position: relative;
-  z-index: 2;
-  filter:
-    drop-shadow(0 1px 0 rgba(var(--sh), 0.24))
-    drop-shadow(0 1px 2px rgba(var(--sh), 0.30))
-    drop-shadow(2px 3px 5px rgba(var(--sh), 0.10))
-    drop-shadow(3px 7px 11px rgba(var(--sh), 0.035));
-}
-
-/* ============================================================
-   BOOK IMPERFECTION VARIANTS
-   Applied only to aria-hidden decorative books so they never
-   conflict with GSAP hover timelines on .book--link elements.
-   ============================================================ */
-.book--lean-r  { transform: translateZ(var(--depth-z)) rotate( 2.4deg); transform-origin: bottom center; }
-.book--lean-l  { transform: translateZ(var(--depth-z)) rotate(-2.4deg); transform-origin: bottom center; }
-.book--lean-rr { transform: translateZ(var(--depth-z)) rotate( 4.0deg); transform-origin: bottom center; }
-.book--lean-ll { transform: translateZ(var(--depth-z)) rotate(-3.6deg); transform-origin: bottom center; }
-
-/* Yaw — slight turn so a sliver of the cover reads, not just the spine */
-.book--yaw-r {
-  transform: translateZ(var(--depth-z)) rotateY(-14deg);
-  transform-origin: left center;
-}
-.book--yaw-l {
-  transform: translateZ(var(--depth-z)) rotateY(14deg);
-  transform-origin: right center;
-}
-.book--yaw-r.book--lean-r {
-  transform: translateZ(var(--depth-z)) rotate(2.4deg) rotateY(-12deg);
-  transform-origin: bottom left;
-}
-.book--yaw-l.book--lean-l {
-  transform: translateZ(var(--depth-z)) rotate(-2.4deg) rotateY(12deg);
-  transform-origin: bottom right;
-}
-
-/*
-  Z-depth — layering via offset + edge contrast, not blurrier glows.
-*/
-.book--fwd {
-  --depth-z: 5px;
-  z-index: 4;
-  box-shadow:
-    inset 1px 0 0 rgba(255, 255, 255, 0.32),
-    inset -1.5px 0 0 rgba(var(--sh), 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.14),
-    0 1px 0 rgba(var(--sh), 0.26),
-    0 1px 2px rgba(var(--sh), 0.34),
-    calc(var(--cast-x) + 1px) calc(var(--cast-y) + 1px) calc(var(--cast-b) + 1px) rgba(var(--sh), 0.13),
-    calc(var(--cast-x) + 1px) calc(var(--cast-y) + 4px) 12px rgba(var(--sh), 0.045);
-}
-
-.book--fwd-sm {
-  --depth-z: 3px;
-  z-index: 3;
-  box-shadow:
-    inset 1px 0 0 rgba(255, 255, 255, 0.28),
-    inset -1.5px 0 0 rgba(var(--sh), 0.20),
-    inset 0 1px 0 rgba(255, 255, 255, 0.12),
-    0 1px 0 rgba(var(--sh), 0.24),
-    0 1px 2px rgba(var(--sh), 0.32),
-    var(--cast-x) var(--cast-y) var(--cast-b) rgba(var(--sh), 0.12),
-    calc(var(--cast-x) + 1px) calc(var(--cast-y) + 3px) 11px rgba(var(--sh), 0.04);
-}
-
-.book--deep {
-  --depth-z: -3px;
-  z-index: 0;
-  filter: brightness(0.96);
-  box-shadow:
-    inset 1px 0 0 rgba(255, 255, 255, 0.14),
-    inset -1.5px 0 0 rgba(var(--sh), 0.24),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06),
-    0 1px 0 rgba(var(--sh), 0.16),
-    0 1px 1px rgba(var(--sh), 0.20),
-    calc(var(--cast-x) * 0.65) calc(var(--cast-y) * 0.65) calc(var(--cast-b) * 0.7) rgba(var(--sh), 0.08),
-    1px 3px 7px rgba(var(--sh), 0.03);
-}
-
-/* ============================================================
-   BOOK DETAIL MODAL — structure preserved for Phase 2
-   ============================================================ */
-:root {
-  --bm-w:    560px;
-  --bm-h:    380px;
-  --bm-half: 280px;
-}
-
-.bm-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(18, 15, 10, 0);
-  pointer-events: none;
-  transition: background 0.45s ease, backdrop-filter 0.45s ease;
-}
-
-.bm-overlay[hidden] { display: none; }
-
-.bm-overlay.is-open {
-  background: rgba(18, 15, 10, 0.82);
-  backdrop-filter: blur(5px);
-  -webkit-backdrop-filter: blur(5px);
-  pointer-events: all;
-}
-
-.bm-scene { opacity: 0; pointer-events: none; }
-.bm-overlay.is-open .bm-scene { pointer-events: all; }
-
-.bm-book {
-  position: relative;
-  width: var(--bm-w);
-  height: var(--bm-h);
-  perspective: 1400px;
-  box-shadow:
-    0 50px 120px rgba(0, 0, 0, 0.60),
-    0 20px 50px  rgba(0, 0, 0, 0.40);
-}
-
-.bm-back-cover {
-  position: absolute;
-  top: 0; left: 0;
-  width: var(--bm-half);
-  height: var(--bm-h);
-  background: linear-gradient(160deg, var(--cover-c1, #597080) 0%, var(--cover-c2, #3A4A58) 100%);
-  border-radius: 2px 0 0 2px;
-  z-index: 1;
-}
-
-.bm-page,
-.bm-content-page,
-.bm-front-cover {
-  position: absolute;
-  top: 0;
-  left: var(--bm-half);
-  width: var(--bm-half);
-  height: var(--bm-h);
-  transform-origin: left center;
-  backface-visibility: hidden;
-}
-
-.bm-page { background: #F4F0E8; z-index: 5; }
-.bm-page:nth-child(2) { z-index: 12; background: #F5F1EA; }
-.bm-page:nth-child(3) { z-index: 11; background: #F3EFE7; }
-.bm-page:nth-child(4) { z-index: 10; background: #F4F0E8; }
-.bm-page:nth-child(5) { z-index: 9;  background: #F2EEE6; }
-.bm-page:nth-child(6) { z-index: 8;  background: #F5F1E9; }
-.bm-page:nth-child(7) { z-index: 7;  background: #F3EFE7; }
-.bm-page:nth-child(8) { z-index: 6;  background: #F4F0E8; }
-.bm-page:nth-child(9) { z-index: 5;  background: #F2EEE6; }
-
-.bm-content-page {
-  z-index: 4;
-  background: #F6F2EA;
-  border-radius: 0 2px 2px 0;
-  overflow: hidden;
-}
-
-.bm-content {
-  padding: 36px 32px;
-  height: 100%;
-  overflow-y: auto;
-  font-family: var(--f-serif);
-}
-
-.bm-content h3 {
-  font-size: 22px; font-weight: 300; letter-spacing: 0.06em;
-  margin-bottom: 18px; color: #2A2420;
-}
-.bm-content p {
-  font-size: 14px; line-height: 1.7; color: #4A3E36; margin-bottom: 12px;
-}
-.bm-content ol, .bm-content ul {
-  padding-left: 18px; margin-bottom: 12px;
-}
-.bm-content li {
-  font-size: 13px; line-height: 1.65; color: #4A3E36; margin-bottom: 6px;
-}
-.bm-email {
-  display: inline-block; font-family: var(--f-mono); font-size: 12px;
-  color: #4A3E36; border-bottom: 1px solid rgba(74,62,54,0.30); padding-bottom: 2px;
-  transition: border-color 0.2s ease;
-}
-.bm-email:hover { border-color: rgba(74,62,54,0.70); }
-.bm-note { font-size: 12px; font-style: italic; opacity: 0.60; }
-
-.bm-front-cover {
-  z-index: 14;
-  display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(135deg, var(--cover-c1, #597080) 0%, var(--cover-c2, #3A4A58) 100%);
-  border-radius: 0 2px 2px 0;
-}
-
-.bm-cover-title {
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  font-size: 16px; letter-spacing: 0.28em;
-  color: rgba(255,255,255,0.80); text-transform: uppercase;
-}
-
-.bm-spine-strip {
-  position: absolute;
-  top: 0; left: calc(var(--bm-half) - 4px);
-  width: 8px; height: 100%;
-  background: linear-gradient(to right,
-    rgba(0,0,0,0.18) 0%, rgba(0,0,0,0.06) 40%,
-    rgba(0,0,0,0.06) 60%, rgba(0,0,0,0.18) 100%
-  );
-  z-index: 20;
-  pointer-events: none;
-}
-
-.bm-close {
-  position: fixed; top: 28px; right: 36px;
-  width: 40px; height: 40px;
-  border: none; background: rgba(255,255,255,0.10);
-  color: rgba(255,255,255,0.70); font-size: 16px;
-  cursor: pointer; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
-  opacity: 0; pointer-events: none;
-  transition: background 0.2s ease, color 0.2s ease;
-}
-.bm-overlay.is-open .bm-close { opacity: 1; pointer-events: all; }
-.bm-close:hover { background: rgba(255,255,255,0.18); color: rgba(255,255,255,0.95); }
-
-/* ============================================================
-   SCRAPBOOK PAGES — Phase 2 content
-   ============================================================ */
-.sp {
-  width: 100%; height: 100%; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; padding: 24px;
-}
-.sp__bigq   { font-family: var(--f-serif); font-size: 64px; line-height: 0.6; color: rgba(60,48,36,0.15); }
-.sp__qtext  { font-family: var(--f-serif); font-size: 13px; font-style: italic; line-height: 1.6; color: #4A3E36; text-align: center; letter-spacing: 0.02em; }
-.sp__cite   { font-family: var(--f-mono); font-size: 9px; letter-spacing: 0.12em; color: rgba(74,62,54,0.55); text-align: center; }
-.sp__label  { font-family: var(--f-sans); font-size: 8px; letter-spacing: 0.28em; text-transform: uppercase; color: rgba(74,62,54,0.45); }
-.sp__dots   { display: flex; gap: 8px; }
-.sp__dots span { width: 20px; height: 20px; border-radius: 50%; }
-.sp__handwritten { font-family: var(--f-serif); font-size: 16px; font-style: italic; line-height: 1.7; color: rgba(60,48,36,0.65); text-align: center; }
-.sp__terminal { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.08em; color: rgba(60,48,36,0.60); line-height: 2; }
-.split-line { display: block; overflow: hidden; }
-
-/* ============================================================
-   BOOK EXTRACTION — Phase 2
-   ============================================================ */
-
-/*
-  Semi-transparent backdrop shown when a book is extracted.
-  Sits between the shelf (auto z-index) and the floating book (z 900).
-  Clicking it returns the book to the shelf.
-  Using a CSS background dim rather than filter on any ancestor —
-  filter on an ancestor would trap position:fixed descendants.
-*/
-.extraction-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 850;
-  background: rgba(20, 15, 10, 0.32);
-  cursor: default;
-  pointer-events: all;
-}
-
-/*
-  Cursor hint while the book is floating at centre — the next interaction
-  is "open this book", not a standard pointer link action.
-*/
-.book--floating {
-  cursor: pointer;
+  z-index: 50;
 }
 
 /* ============================================================
    RESPONSIVE
    ============================================================ */
 @media (max-width: 1024px) {
-  :root {
-    --alcove-w:   min(80vw, 700px);
-    --shelf-h:    155px;
-    --book-gap:   3px;
-    --shelf-pad-x: 12px;
+  .stage {
+    --stage-radius: clamp(28px, 4.5vw, 48px);
   }
 }
 
 @media (max-width: 680px) {
   :root {
-    --alcove-w:   96vw;
-    --alcove-min-w: 0;
-    --shelf-h:    128px;
-    --book-gap:   3px;
-    --shelf-pad-x: 8px;
-    --plank-h:    15px;
+    --topnav-h: 48px;
   }
 
-  .nameplate { padding: 18px 20px; }
-  .nameplate__name { font-size: 1.35rem; }
+  .topnav__inner {
+    --topnav-link-gap: 16px;
+    --topnav-brand-clearance: 44px;
+    --topnav-settings-reserve: 44px;
+  }
+
+  .nameplate__text { font-size: 16px; }
+  .topnav__brand { font-size: 14px; }
+  .topnav__link { font-size: 11px; letter-spacing: 0.06em; }
   .site-footer { padding: 16px 20px; }
-  body { padding: 70px 0 50px; }
+  .settings__btn { width: 36px; height: 36px; }
 
-  .shelf__gap, .shelf__gap--max { flex: 0 0 16px; }
+  .page-shell {
+    padding: 25px clamp(4px, 1.35vw, 8px) 0;
+  }
+
+  .stage {
+    --stage-radius: 28px;
+  }
 }
 
-/* ============================================================
-   REDUCED MOTION
-   ============================================================ */
-@media (prefers-reduced-motion: reduce) {
-  /* GSAP checks prefers-reduced-motion in JS and skips all animation.
-     These CSS rules guard any remaining CSS-driven transitions. */
-  .bm-overlay, .bm-close { transition: none; }
-}

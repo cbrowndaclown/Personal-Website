@@ -7,506 +7,184 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
-    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,700;1,300&family=Josefin+Sans:wght@200;300&family=DM+Mono:wght@300&display=swap"
+    href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400&family=Josefin+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@300&display=swap"
     rel="stylesheet"
   />
+  <link href="https://fonts.cdnfonts.com/css/benz-grotesk" rel="stylesheet" />
   <link rel="stylesheet" href="css/styles.css" />
 </head>
-<body>
+<body data-motion="on" data-bg-mode="heat">
 
-  <canvas id="heatmap" class="heatmap" aria-hidden="true"></canvas>
-
-  <header class="nameplate">
-    <a href="#" class="nameplate__name">Canaan Brown</a>
-  </header>
-
-  <figure class="alcove" id="bookcase" aria-label="Portfolio bookcase">
-    <div class="alcove__rail alcove__rail--top"   aria-hidden="true"></div>
-    <div class="alcove__rail alcove__rail--left"  aria-hidden="true"></div>
-    <div class="alcove__rail alcove__rail--right" aria-hidden="true"></div>
-
-    <!-- ═══════════════════════════ SHELF 1 ══════════════════════════════════
-         About · Projects · Writing
-         Five groups — rhythm: anchor · cluster · pocket · pair+frame · anchor
-         Composition: heavier left, lighter right, natural breathing throughout
-    ════════════════════════════════════════════════════════════════════════ -->
-    <div class="shelf" data-shelf="1">
-      <div class="shelf__items">
-
-        <!-- ── G1: Succulent anchor ───────────────────────────────────────── -->
-        <div class="shelf__group">
-          <!-- Succulent rosette in glass jar -->
-          <svg class="plant-svg" xmlns="http://www.w3.org/2000/svg"
-               viewBox="0 0 46 47" width="46" height="47" aria-hidden="true">
-            <ellipse cx="23" cy="24" rx="12" ry="7"   fill="#648A54" transform="rotate(-28 23 24)"/>
-            <ellipse cx="23" cy="24" rx="12" ry="7"   fill="#6E9460" transform="rotate( 28 23 24)"/>
-            <ellipse cx="23" cy="24" rx="11" ry="6.5" fill="#608050" transform="rotate(-52 23 24)"/>
-            <ellipse cx="23" cy="24" rx="11" ry="6.5" fill="#6A8C5C" transform="rotate( 52 23 24)"/>
-            <ellipse cx="23" cy="21" rx="9"   ry="6"   fill="#74A266" transform="rotate(-18 23 21)"/>
-            <ellipse cx="23" cy="21" rx="9"   ry="6"   fill="#7AAA6C" transform="rotate( 18 23 21)"/>
-            <ellipse cx="23" cy="21" rx="8.5" ry="5.5" fill="#70A062" transform="rotate(-40 23 21)"/>
-            <ellipse cx="23" cy="21" rx="8.5" ry="5.5" fill="#78A86A" transform="rotate( 40 23 21)"/>
-            <ellipse cx="23" cy="18" rx="7" ry="5" fill="#80B070" transform="rotate(-12 23 18)"/>
-            <ellipse cx="23" cy="18" rx="7" ry="5" fill="#84B474" transform="rotate( 12 23 18)"/>
-            <ellipse cx="23" cy="16" rx="4.5" ry="3.5" fill="#4E7E46"/>
-            <circle  cx="23" cy="15" r="2" fill="#3C6438"/>
-            <rect x="10" y="35" width="26" height="12" rx="3"
-                  fill="rgba(196,192,182,0.28)" stroke="rgba(168,162,150,0.64)" stroke-width="1"/>
-            <rect x="14" y="31" width="18" height="5" rx="1.5"
-                  fill="rgba(196,192,182,0.28)" stroke="rgba(168,162,150,0.64)" stroke-width="1"/>
-          </svg>
-          <div class="book book--fwd-sm" aria-hidden="true" style="--w:18px;--h:150px;--c:#C2BAB2"></div>
-          <div class="book book--lean-r book--yaw-r" aria-hidden="true" style="--w:12px;--h:136px;--c:#726A60"></div>
-          <div class="book book--yaw-l book--fwd" aria-hidden="true" style="--w:23px;--h:154px;--c:#9A9490"></div>
-        </div><!-- /G1 -->
-
-        <!-- ── G2: About cluster with slim ceramic vase ───────────────────── -->
-        <div class="shelf__group">
-          <div class="book book--fwd-sm" aria-hidden="true" style="--w:15px;--h:146px;--c:#B4ACA0"></div>
-          <div class="book book--deep" aria-hidden="true" style="--w:22px;--h:134px;--c:#584E44"></div>
-          <a href="#" class="book book--link" data-book="about"
-            style="--w:28px;--h:156px;--c:#A8B2B4;--tc:rgba(26,20,16,0.58)">
-            <span class="book__spine book__spine--cormorant-italic">About</span>
-          </a>
-          <!-- Slim ceramic vase, matte cream -->
-          <svg class="decor-svg" xmlns="http://www.w3.org/2000/svg"
-               viewBox="0 0 14 60" width="14" height="60" aria-hidden="true">
-            <path d="M4,59 Q2,46 3,32 Q5,18 3,8 Q4,2 7,1 Q10,1 11,8 Q9,18 11,32 Q12,46 10,59Z"
-                  fill="#F0EDE6" stroke="rgba(182,176,164,0.42)" stroke-width="0.8"/>
-            <path d="M5,56 Q4,43 5,30 Q6,17 5,6"
-                  stroke="rgba(255,255,255,0.30)" stroke-width="0.6" fill="none" stroke-linecap="round"/>
-          </svg>
-          <div class="book" aria-hidden="true" style="--w:12px;--h:140px;--c:#CEC6B8"></div>
-          <div class="book book--lean-l book--yaw-l" aria-hidden="true" style="--w:20px;--h:150px;--c:#524A42"></div>
-          <div class="book book--yaw-r" aria-hidden="true" style="--w:16px;--h:142px;--c:#8A8C88"></div>
-        </div><!-- /G2 -->
-
-        <!-- ── G3: Horizontal stack pocket ───────────────────────────────── -->
-        <div class="shelf__group">
-          <div class="book" aria-hidden="true" style="--w:16px;--h:148px;--c:#7A8268"></div>
-          <div class="book book--lean-l" aria-hidden="true" style="--w:10px;--h:140px;--c:#C8C0B4"></div>
-          <!-- Three books lying flat — horizontal stack -->
-          <svg class="decor-svg" xmlns="http://www.w3.org/2000/svg"
-               viewBox="0 0 62 24" width="62" height="24" aria-hidden="true">
-            <rect x="-1" y="16" width="64" height="8" rx="1" fill="#D2CCB8" stroke="rgba(178,170,156,0.42)" stroke-width="0.6"/>
-            <rect x="1"  y="8"  width="60" height="8" rx="1" fill="#EAEADC" stroke="rgba(178,170,156,0.36)" stroke-width="0.6"/>
-            <rect x="0"  y="0"  width="62" height="8" rx="1" fill="#D8D4C6" stroke="rgba(178,170,156,0.42)" stroke-width="0.6"/>
-            <line x1="8"  y1="3"   x2="28" y2="3"   stroke="rgba(100,96,88,0.14)" stroke-width="0.7"/>
-            <line x1="8"  y1="5.5" x2="20" y2="5.5" stroke="rgba(100,96,88,0.10)" stroke-width="0.6"/>
-          </svg>
-          <div class="book" aria-hidden="true" style="--w:18px;--h:152px;--c:#9AA8A4"></div>
-          <div class="book book--lean-r" aria-hidden="true" style="--w:14px;--h:143px;--c:#4A5650"></div>
-        </div><!-- /G3 -->
-
-        <!-- ── G4: Projects · Writing links with framed photo ─────────────── -->
-        <div class="shelf__group">
-          <div class="book" aria-hidden="true" style="--w:14px;--h:144px;--c:#C2BAB0"></div>
-          <a href="#" class="book book--link" data-book="projects"
-            style="--w:38px;--h:170px;--c:#1E2836;--tc:rgba(255,255,255,0.65)">
-            <span class="book__spine book__spine--josefin">Projects</span>
-          </a>
-          <div class="book book--fwd" aria-hidden="true" style="--w:21px;--h:151px;--c:#6A7A8A"></div>
-          <div class="book book--deep" aria-hidden="true" style="--w:13px;--h:134px;--c:#B0A898"></div>
-          <div class="book book--fwd-sm" aria-hidden="true" style="--w:22px;--h:148px;--c:#3A3630"></div>
-          <a href="#" class="book book--link" data-book="writing"
-            style="--w:26px;--h:150px;--c:#BEB0A0;--tc:rgba(26,20,16,0.58)">
-            <span class="book__spine book__spine--cormorant">Writing</span>
-          </a>
-          <div class="book book--lean-r book--yaw-r" aria-hidden="true" style="--w:16px;--h:146px;--c:#8C9290"></div>
-          <div class="book book--yaw-l" aria-hidden="true" style="--w:18px;--h:142px;--c:#C4BAB0"></div>
-          <!-- Framed black-and-white photograph -->
-          <svg class="decor-svg" xmlns="http://www.w3.org/2000/svg"
-               viewBox="0 0 20 28" width="20" height="28" aria-hidden="true">
-            <rect x="0" y="0" width="20" height="28" rx="1" fill="#1C1A18"/>
-            <rect x="2" y="2" width="16" height="24" fill="#F0EDE6"/>
-            <rect x="3" y="4"  width="14" height="10" fill="rgba(90,88,84,0.10)"/>
-            <rect x="3" y="15" width="14" height="6"  fill="rgba(70,68,64,0.07)"/>
-            <rect x="3" y="22" width="14" height="3"  fill="rgba(50,48,44,0.05)"/>
-          </svg>
-        </div><!-- /G4 -->
-
-        <!-- ── G5: Pothos anchor ───────────────────────────────────────────── -->
-        <div class="shelf__group">
-          <div class="book book--lean-l" aria-hidden="true" style="--w:16px;--h:142px;--c:#9A9690"></div>
-          <div class="book" aria-hidden="true" style="--w:22px;--h:148px;--c:#B0ACA0"></div>
-          <!-- Pothos in white ceramic cylinder — trailing vines drape over plank -->
-          <svg class="plant-svg" xmlns="http://www.w3.org/2000/svg"
-               viewBox="0 0 72 100" width="72" height="100"
-               style="overflow:visible" aria-hidden="true">
-            <path d="M36,70 Q29,56 27,42 Q24,29 27,16" stroke="#4A7230" stroke-width="1.4" fill="none" stroke-linecap="round"/>
-            <path d="M36,70 Q23,63 15,52 Q8,43 8,30"   stroke="#4A7230" stroke-width="1.2" fill="none" stroke-linecap="round"/>
-            <path d="M36,70 Q49,62 57,51 Q63,43 64,29"  stroke="#4A7230" stroke-width="1.2" fill="none" stroke-linecap="round"/>
-            <path d="M33,70 Q19,82 11,96 Q6,108 5,120"  stroke="#4A7230" stroke-width="1.1" fill="none" stroke-linecap="round"/>
-            <path d="M39,70 Q51,80 59,93 Q65,104 64,116" stroke="#3E6828" stroke-width="1.0" fill="none" stroke-linecap="round"/>
-            <g transform="translate(27,16) rotate(-15)">
-              <path d="M0,15 C10,10 13,-3 10,-11 C7,-18 2,-18 0,-13 C-2,-18 -7,-18 -10,-11 C-13,-3 -10,10 0,15Z" fill="#4A8C36"/>
-              <line x1="0" y1="-10" x2="0" y2="12" stroke="rgba(200,255,160,0.22)" stroke-width="0.8"/>
-            </g>
-            <g transform="translate(15,52) rotate(-48)">
-              <path d="M0,11 C8,7 10,-1 7,-8 C5,-13 1,-13 0,-9 C-1,-13 -5,-13 -7,-8 C-10,-1 -8,7 0,11Z" fill="#3E7E2E"/>
-              <line x1="0" y1="-7" x2="0" y2="9" stroke="rgba(200,255,160,0.20)" stroke-width="0.7"/>
-            </g>
-            <g transform="translate(57,51) rotate(40)">
-              <path d="M0,11 C8,7 10,-1 7,-8 C5,-13 1,-13 0,-9 C-1,-13 -5,-13 -7,-8 C-10,-1 -8,7 0,11Z" fill="#4C8C3A"/>
-              <line x1="0" y1="-7" x2="0" y2="9" stroke="rgba(200,255,160,0.20)" stroke-width="0.7"/>
-            </g>
-            <g transform="translate(18,62) rotate(-26)">
-              <path d="M0,15 C10,10 13,-3 10,-11 C7,-18 2,-18 0,-13 C-2,-18 -7,-18 -10,-11 C-13,-3 -10,10 0,15Z" fill="#3A7828"/>
-              <line x1="0" y1="-10" x2="0" y2="12" stroke="rgba(200,255,160,0.20)" stroke-width="0.8"/>
-            </g>
-            <g transform="translate(53,61) rotate(27)">
-              <path d="M0,15 C10,10 13,-3 10,-11 C7,-18 2,-18 0,-13 C-2,-18 -7,-18 -10,-11 C-13,-3 -10,10 0,15Z" fill="#52902A"/>
-              <line x1="0" y1="-10" x2="0" y2="12" stroke="rgba(200,255,160,0.20)" stroke-width="0.8"/>
-            </g>
-            <g transform="translate(37,55) rotate(8)">
-              <path d="M0,11 C8,7 10,-1 7,-8 C5,-13 1,-13 0,-9 C-1,-13 -5,-13 -7,-8 C-10,-1 -8,7 0,11Z" fill="#42822E"/>
-            </g>
-            <g transform="translate(30,40) rotate(-30)">
-              <path d="M0,9 C7,6 9,-1 6,-7 C4,-11 1,-11 0,-7 C-1,-11 -4,-11 -6,-7 C-9,-1 -7,6 0,9Z" fill="#5A9A3C"/>
-            </g>
-            <g transform="translate(48,40) rotate(18)">
-              <path d="M0,9 C7,6 9,-1 6,-7 C4,-11 1,-11 0,-7 C-1,-11 -4,-11 -6,-7 C-9,-1 -7,6 0,9Z" fill="#488A30"/>
-            </g>
-            <g transform="translate(11,96) rotate(72)">
-              <path d="M0,8 C6,5 8,-1 5,-6 C3,-9 1,-9 0,-6 C-1,-9 -3,-9 -5,-6 C-8,-1 -6,5 0,8Z" fill="#4A8830"/>
-            </g>
-            <g transform="translate(64,116) rotate(60)">
-              <path d="M0,7 C5,4 7,-1 4,-5 C3,-8 1,-8 0,-5 C-1,-8 -3,-8 -4,-5 C-7,-1 -5,4 0,7Z" fill="#3E7A28"/>
-            </g>
-            <rect x="12" y="70" width="48" height="6"  rx="2" fill="#F4F1EC" stroke="rgba(185,180,170,0.5)" stroke-width="1"/>
-            <rect x="16" y="76" width="40" height="24" rx="2" fill="#F4F1EC" stroke="rgba(185,180,170,0.4)" stroke-width="1"/>
-            <rect x="16" y="91" width="40" height="9"  rx="2" fill="rgba(0,0,0,0.04)" stroke="none"/>
-          </svg>
-        </div><!-- /G5 -->
-
-      </div>
-      <div class="shelf__plank" aria-hidden="true"></div>
-    </div><!-- /shelf 1 -->
-
-
-    <!-- ═══════════════════════════ SHELF 2 ══════════════════════════════════
-         Photography · Experience
-         Four groups — rhythm: Monstera anchor · vase+snake · Experience+bowl · dense cluster
-         Composition: large left anchor, even centre masses, quiet right close
-    ════════════════════════════════════════════════════════════════════════ -->
-    <div class="shelf" data-shelf="2">
-      <div class="shelf__items">
-
-        <!-- ── G1: Monstera + Photography link ───────────────────────────── -->
-        <div class="shelf__group">
-          <!-- Monstera deliciosa — three lobed leaves with fenestration holes -->
-          <svg class="plant-svg" xmlns="http://www.w3.org/2000/svg"
-               viewBox="0 0 92 148" width="92" height="148"
-               style="overflow:visible" aria-hidden="true">
-            <path d="M36,118 Q26,104 20,82"  stroke="#2A5828" stroke-width="2.5" fill="none" stroke-linecap="round"/>
-            <path d="M44,118 Q43,98 42,66"   stroke="#2A5828" stroke-width="2.5" fill="none" stroke-linecap="round"/>
-            <path d="M52,118 Q60,100 66,80"  stroke="#2A5828" stroke-width="2.5" fill="none" stroke-linecap="round"/>
-            <g transform="translate(20,82) rotate(-22) scale(0.74)">
-              <path d="M0,0 C14,-2 30,-10 30,-25 C30,-35 24,-38 22,-38 C22,-40 24,-44 26,-50 C26,-56 20,-60 18,-60 C16,-66 10,-74 0,-80 C-10,-74 -16,-66 -18,-60 C-20,-60 -26,-56 -26,-50 C-24,-44 -22,-40 -22,-38 C-24,-38 -30,-35 -30,-25 C-30,-10 -14,-2 0,0Z" fill="#2C6A2C"/>
-              <ellipse cx="13" cy="-20" rx="3.5" ry="7"   fill="#E0DDD3" opacity="0.87"/>
-              <ellipse cx="-13" cy="-20" rx="3.5" ry="7"  fill="#E0DDD3" opacity="0.87"/>
-              <ellipse cx="8"  cy="-46" rx="2.5" ry="5.5" fill="#E0DDD3" opacity="0.87"/>
-              <ellipse cx="-8" cy="-46" rx="2.5" ry="5.5" fill="#E0DDD3" opacity="0.87"/>
-              <line x1="0" y1="-1" x2="0" y2="-76" stroke="rgba(255,255,255,0.20)" stroke-width="1.8" stroke-linecap="round"/>
-              <path d="M0,-18 Q14,-10 20,-2"  stroke="rgba(255,255,255,0.10)" stroke-width="0.8" fill="none"/>
-              <path d="M0,-18 Q-14,-10 -20,-2" stroke="rgba(255,255,255,0.10)" stroke-width="0.8" fill="none"/>
-            </g>
-            <g transform="translate(42,66) rotate(-4)">
-              <path d="M0,0 C14,-2 30,-10 30,-25 C30,-35 24,-38 22,-38 C22,-40 24,-44 26,-50 C26,-56 20,-60 18,-60 C16,-66 10,-74 0,-80 C-10,-74 -16,-66 -18,-60 C-20,-60 -26,-56 -26,-50 C-24,-44 -22,-40 -22,-38 C-24,-38 -30,-35 -30,-25 C-30,-10 -14,-2 0,0Z" fill="#346A34"/>
-              <ellipse cx="14" cy="-20" rx="4.5" ry="8"  fill="#E0DDD3" opacity="0.87"/>
-              <ellipse cx="-14" cy="-20" rx="4.5" ry="8" fill="#E0DDD3" opacity="0.87"/>
-              <ellipse cx="9"  cy="-46" rx="3"   ry="6"  fill="#E0DDD3" opacity="0.87"/>
-              <ellipse cx="-9" cy="-46" rx="3"   ry="6"  fill="#E0DDD3" opacity="0.87"/>
-              <line x1="0" y1="-1" x2="0" y2="-76" stroke="rgba(255,255,255,0.22)" stroke-width="2" stroke-linecap="round"/>
-              <path d="M0,-20 Q18,-10 26,-2"   stroke="rgba(255,255,255,0.11)" stroke-width="1" fill="none"/>
-              <path d="M0,-20 Q-18,-10 -26,-2"  stroke="rgba(255,255,255,0.11)" stroke-width="1" fill="none"/>
-              <path d="M0,-40 Q18,-28 24,-18"   stroke="rgba(255,255,255,0.09)" stroke-width="0.9" fill="none"/>
-              <path d="M0,-40 Q-18,-28 -24,-18" stroke="rgba(255,255,255,0.09)" stroke-width="0.9" fill="none"/>
-            </g>
-            <g transform="translate(66,80) rotate(20) scale(0.80)">
-              <path d="M0,0 C14,-2 30,-10 30,-25 C30,-35 24,-38 22,-38 C22,-40 24,-44 26,-50 C26,-56 20,-60 18,-60 C16,-66 10,-74 0,-80 C-10,-74 -16,-66 -18,-60 C-20,-60 -26,-56 -26,-50 C-24,-44 -22,-40 -22,-38 C-24,-38 -30,-35 -30,-25 C-30,-10 -14,-2 0,0Z" fill="#2E6830"/>
-              <ellipse cx="13"  cy="-20" rx="3.5" ry="7"  fill="#E0DDD3" opacity="0.87"/>
-              <ellipse cx="-13" cy="-20" rx="3.5" ry="7"  fill="#E0DDD3" opacity="0.87"/>
-              <line x1="0" y1="-1" x2="0" y2="-76" stroke="rgba(255,255,255,0.17)" stroke-width="1.6" stroke-linecap="round"/>
-            </g>
-            <ellipse cx="44" cy="144" rx="26" ry="3.5" fill="rgba(0,0,0,0.18)"/>
-            <path d="M22,118 Q14,130 20,142 L68,142 Q74,130 66,118Z" fill="#282E26" stroke="#1E2420" stroke-width="0.5"/>
-            <rect x="16" y="114" width="60" height="8" rx="3" fill="#30362E" stroke="#1E2420" stroke-width="0.5"/>
-            <ellipse cx="46" cy="120" rx="24" ry="4" fill="#241C0E"/>
-          </svg>
-          <div class="book book--deep" aria-hidden="true" style="--w:14px;--h:146px;--c:#4A4036"></div>
-          <div class="book book--lean-l book--yaw-l book--fwd-sm" aria-hidden="true" style="--w:20px;--h:144px;--c:#B8BCB8"></div>
-          <a href="#" class="book book--link" data-book="photography"
-            style="--w:42px;--h:166px;--c:#1A1816;--tc:rgba(255,255,255,0.62)">
-            <span class="book__spine book__spine--josefin">Photography</span>
-          </a>
-          <div class="book book--yaw-r" aria-hidden="true" style="--w:16px;--h:146px;--c:#7E8878"></div>
-        </div><!-- /G1 -->
-
-        <!-- ── G2: Wide sage vase + snake plant cluster ───────────────────── -->
-        <div class="shelf__group">
-          <div class="book book--lean-r book--yaw-r" aria-hidden="true" style="--w:14px;--h:140px;--c:#9A9490"></div>
-          <div class="book book--yaw-l" aria-hidden="true" style="--w:22px;--h:152px;--c:#4A4640"></div>
-          <!-- Wide sage-green ceramic vase -->
-          <svg class="decor-svg" xmlns="http://www.w3.org/2000/svg"
-               viewBox="0 0 22 46" width="22" height="46" aria-hidden="true">
-            <path d="M7,45 Q4,36 5,26 Q6,18 4,8 Q5,2 11,1 Q17,1 18,8 Q16,18 17,26 Q18,36 15,45Z"
-                  fill="#8A9E84" stroke="rgba(108,124,100,0.50)" stroke-width="0.8"/>
-            <ellipse cx="11" cy="8" rx="7" ry="2" fill="#96AA8E" stroke="rgba(108,124,100,0.4)" stroke-width="0.6"/>
-            <path d="M8,42 Q7,33 8,22 Q9,14 8,6"
-                  stroke="rgba(255,255,255,0.18)" stroke-width="0.7" fill="none" stroke-linecap="round"/>
-          </svg>
-          <div class="book book--fwd" aria-hidden="true" style="--w:17px;--h:150px;--c:#C0BAB0"></div>
-          <div class="book book--deep" aria-hidden="true" style="--w:18px;--h:140px;--c:#7A8268"></div>
-          <!-- Snake plant (Sansevieria) in glass jar -->
-          <svg class="plant-svg" xmlns="http://www.w3.org/2000/svg"
-               viewBox="0 0 40 80" width="40" height="80" aria-hidden="true">
-            <path d="M12 66 C10 52 9.5 34 12.5 10 C13.2 7 15 7 15.8 10 C18.5 34 18 52 16 66Z" fill="#587848"/>
-            <path d="M13.2 60 C12 48 11.5 30 14 12" stroke="rgba(160,205,140,0.22)" stroke-width="1.5" stroke-linecap="round" fill="none"/>
-            <path d="M14.5 58 C13.5 46 13 28 15.5 13" stroke="rgba(255,255,255,0.11)" stroke-width="1" stroke-linecap="round" fill="none"/>
-            <path d="M17 66 C15 50 14.5 28 18 4 C19 1 21 1 22 4 C25.5 28 25 50 23 66Z" fill="#608050"/>
-            <path d="M18.5 60 C17 46 16.5 24 20 6" stroke="rgba(160,205,140,0.22)" stroke-width="1.5" stroke-linecap="round" fill="none"/>
-            <path d="M20 58 C18.5 44 18 22 21 7" stroke="rgba(255,255,255,0.10)" stroke-width="1" stroke-linecap="round" fill="none"/>
-            <path d="M23 66 C22 53 21.5 37 24.5 14 C25.5 11 27.5 11 28.5 14 C31.5 37 31 53 29 66Z" fill="#527044"/>
-            <path d="M24.5 60 C23.5 49 23 33 26 16" stroke="rgba(160,205,140,0.22)" stroke-width="1.5" stroke-linecap="round" fill="none"/>
-            <path d="M26 58 C25 47 24.5 31 27.5 17" stroke="rgba(255,255,255,0.10)" stroke-width="1" stroke-linecap="round" fill="none"/>
-            <rect x="12" y="62" width="16" height="18" rx="2"
-                  fill="rgba(196,192,182,0.28)" stroke="rgba(168,162,150,0.62)" stroke-width="1"/>
-            <rect x="15" y="58" width="10" height="5" rx="1"
-                  fill="rgba(196,192,182,0.28)" stroke="rgba(168,162,150,0.62)" stroke-width="1"/>
-          </svg>
-          <div class="book" aria-hidden="true" style="--w:20px;--h:148px;--c:#B4ACA0"></div>
-        </div><!-- /G2 -->
-
-        <!-- ── G3: Experience link + stone bowl ───────────────────────────── -->
-        <div class="shelf__group">
-          <div class="book book--fwd-sm" aria-hidden="true" style="--w:23px;--h:148px;--c:#686058"></div>
-          <div class="book book--deep" aria-hidden="true" style="--w:13px;--h:138px;--c:#BDB5A8"></div>
-          <a href="#" class="book book--link" data-book="experience"
-            style="--w:32px;--h:162px;--c:#6E7A6A;--tc:rgba(255,255,255,0.70)">
-            <span class="book__spine book__spine--josefin">Experience</span>
-          </a>
-          <div class="book" aria-hidden="true" style="--w:18px;--h:150px;--c:#3E3830"></div>
-          <div class="book book--fwd book--yaw-r" aria-hidden="true" style="--w:20px;--h:144px;--c:#B0ACA0"></div>
-          <!-- Shallow stone bowl -->
-          <svg class="decor-svg" xmlns="http://www.w3.org/2000/svg"
-               viewBox="0 0 30 18" width="30" height="18" aria-hidden="true">
-            <path d="M1,8 Q1,17 15,17 Q29,17 29,8Z"
-                  fill="#BEB8AE" stroke="rgba(168,160,148,0.50)" stroke-width="0.8"/>
-            <ellipse cx="15" cy="8" rx="14" ry="3.5"
-                     fill="#C4BEB2" stroke="rgba(168,160,148,0.42)" stroke-width="0.7"/>
-            <path d="M4,10 Q15,14 26,10"
-                  stroke="rgba(0,0,0,0.05)" stroke-width="3" fill="none" stroke-linecap="round"/>
-          </svg>
-          <div class="book" aria-hidden="true" style="--w:16px;--h:148px;--c:#7A7A80"></div>
-          <div class="book book--lean-r" aria-hidden="true" style="--w:12px;--h:138px;--c:#C8C0B8"></div>
-        </div><!-- /G3 -->
-
-        <!-- ── G4: Dense book cluster with candle ────────────────────────── -->
-        <div class="shelf__group">
-          <div class="book book--fwd-sm" aria-hidden="true" style="--w:19px;--h:154px;--c:#A89E94"></div>
-          <div class="book book--lean-l book--yaw-l book--fwd" aria-hidden="true" style="--w:24px;--h:146px;--c:#4A5650"></div>
-          <div class="book book--yaw-r" aria-hidden="true" style="--w:11px;--h:146px;--c:#C0BAA8"></div>
-          <div class="book" aria-hidden="true" style="--w:20px;--h:151px;--c:#7E8880"></div>
-          <div class="book book--deep" aria-hidden="true" style="--w:14px;--h:138px;--c:#3E3830"></div>
-          <div class="book book--yaw-l book--fwd-sm" aria-hidden="true" style="--w:22px;--h:149px;--c:#B4ACA0"></div>
-        </div><!-- /G4 -->
-
-      </div>
-      <div class="shelf__plank" aria-hidden="true"></div>
-    </div><!-- /shelf 2 -->
-
-
-    <!-- ═══════════════════════════ SHELF 3 ══════════════════════════════════
-         Research · Contact
-         Five groups — rhythm: bowl anchor · stack pocket · candle+Contact · fan+frame · vase close
-         Composition: object-rich left, centre-right has fan as visual peak, quiet right anchor
-    ════════════════════════════════════════════════════════════════════════ -->
-    <div class="shelf shelf--last" data-shelf="3">
-      <div class="shelf__items">
-
-        <!-- ── G1: Mixed succulent bowl + Research link ───────────────────── -->
-        <div class="shelf__group">
-          <!-- Mixed succulent bowl — two rosettes + centre aloe cluster -->
-          <svg class="plant-svg" xmlns="http://www.w3.org/2000/svg"
-               viewBox="0 0 94 70" width="94" height="70" aria-hidden="true">
-            <path d="M8,50 Q4,63 6,66 L88,66 Q90,63 86,50Z"
-                  fill="#C8C2B2" stroke="rgba(168,158,144,0.55)" stroke-width="1"/>
-            <ellipse cx="47" cy="50" rx="39" ry="5.5"
-                     fill="#D4CCBA" stroke="rgba(168,158,144,0.45)" stroke-width="1"/>
-            <ellipse cx="47" cy="51" rx="34" ry="4" fill="#2C2014"/>
-            <g transform="translate(24,50)">
-              <ellipse cx="0" cy="-9" rx="5"   ry="9.5" fill="#7A9E56" transform="rotate(0)"/>
-              <ellipse cx="0" cy="-9" rx="5"   ry="9.5" fill="#6E9250" transform="rotate(51.4)"/>
-              <ellipse cx="0" cy="-9" rx="5"   ry="9.5" fill="#74985C" transform="rotate(102.9)"/>
-              <ellipse cx="0" cy="-9" rx="5"   ry="9.5" fill="#7EA062" transform="rotate(154.3)"/>
-              <ellipse cx="0" cy="-9" rx="5"   ry="9.5" fill="#6E9250" transform="rotate(205.7)"/>
-              <ellipse cx="0" cy="-9" rx="5"   ry="9.5" fill="#74985C" transform="rotate(257.1)"/>
-              <ellipse cx="0" cy="-9" rx="5"   ry="9.5" fill="#7A9E56" transform="rotate(308.6)"/>
-              <ellipse cx="0" cy="-5" rx="3.5" ry="6"   fill="#8AAC68" transform="rotate(25.7)"/>
-              <ellipse cx="0" cy="-5" rx="3.5" ry="6"   fill="#88AA66" transform="rotate(85.7)"/>
-              <ellipse cx="0" cy="-5" rx="3.5" ry="6"   fill="#8CAE6A" transform="rotate(145.7)"/>
-              <ellipse cx="0" cy="-5" rx="3.5" ry="6"   fill="#8AAC68" transform="rotate(205.7)"/>
-              <ellipse cx="0" cy="-5" rx="3.5" ry="6"   fill="#88AA66" transform="rotate(265.7)"/>
-              <ellipse cx="0" cy="-5" rx="3.5" ry="6"   fill="#8CAE6A" transform="rotate(325.7)"/>
-              <ellipse cx="0" cy="-2" rx="3"   ry="4"   fill="#9EBA74" transform="rotate(12.9)"/>
-              <circle r="2" fill="#5A7E42"/>
-            </g>
-            <g transform="translate(48,50)">
-              <path d="M0,0 C-4,-7 -5,-20 -2,-32 C-1.5,-35 1.5,-35 2,-32 C5,-20 4,-7 0,0Z" fill="#6A9458"/>
-              <path d="M0,0 C-2,-4 -9,-13 -11,-22 C-12,-26 -8,-28 -7,-24 C-4,-16 -2,-8 0,0Z" fill="#7AAA60" transform="rotate(-22 0 0)"/>
-              <path d="M0,0 C2,-4 9,-13 11,-22 C12,-26 8,-28 7,-24 C4,-16 2,-8 0,0Z"  fill="#628C50" transform="rotate(22 0 0)"/>
-              <path d="M0,0 C-5,-5 -7,-16 -5,-26 C-4,-29 -2,-29 -1,-26 C-2,-18 -1,-9 0,0Z" fill="#5A8048" transform="rotate(-44 0 0)"/>
-              <path d="M0,0 C5,-5 7,-16 5,-26 C4,-29 2,-29 1,-26 C2,-18 1,-9 0,0Z"  fill="#5A8048" transform="rotate(44 0 0)"/>
-            </g>
-            <g transform="translate(70,51)">
-              <ellipse cx="0" cy="-7" rx="4"   ry="7.5" fill="#8EAA62" transform="rotate(0)"/>
-              <ellipse cx="0" cy="-7" rx="4"   ry="7.5" fill="#82A058" transform="rotate(51.4)"/>
-              <ellipse cx="0" cy="-7" rx="4"   ry="7.5" fill="#88A65E" transform="rotate(102.9)"/>
-              <ellipse cx="0" cy="-7" rx="4"   ry="7.5" fill="#8EAA62" transform="rotate(154.3)"/>
-              <ellipse cx="0" cy="-7" rx="4"   ry="7.5" fill="#82A058" transform="rotate(205.7)"/>
-              <ellipse cx="0" cy="-7" rx="4"   ry="7.5" fill="#88A65E" transform="rotate(257.1)"/>
-              <ellipse cx="0" cy="-7" rx="4"   ry="7.5" fill="#8EAA62" transform="rotate(308.6)"/>
-              <ellipse cx="0" cy="-4" rx="3"   ry="5"   fill="#9AB870" transform="rotate(36)"/>
-              <ellipse cx="0" cy="-4" rx="3"   ry="5"   fill="#96B46C" transform="rotate(108)"/>
-              <ellipse cx="0" cy="-4" rx="3"   ry="5"   fill="#9AB870" transform="rotate(180)"/>
-              <ellipse cx="0" cy="-4" rx="3"   ry="5"   fill="#96B46C" transform="rotate(252)"/>
-              <ellipse cx="0" cy="-4" rx="3"   ry="5"   fill="#9AB870" transform="rotate(324)"/>
-              <circle r="2" fill="#5A7E44"/>
-            </g>
-          </svg>
-          <a href="#" class="book book--link" data-book="research"
-            style="--w:32px;--h:163px;--c:#68786E;--tc:rgba(255,255,255,0.68)">
-            <span class="book__spine book__spine--cormorant-italic">Research</span>
-          </a>
-          <div class="book book--yaw-r book--fwd" aria-hidden="true" style="--w:19px;--h:152px;--c:#BDB5A8"></div>
-          <div class="book book--yaw-l book--deep" aria-hidden="true" style="--w:18px;--h:142px;--c:#9EA4A0"></div>
-        </div><!-- /G1 -->
-
-        <!-- ── G2: Books with a flat horizontal stack ─────────────────────── -->
-        <div class="shelf__group">
-          <div class="book book--lean-l book--yaw-l" aria-hidden="true" style="--w:20px;--h:150px;--c:#C4B8AC"></div>
-          <!-- Three books lying flat — second stack, slightly different palette -->
-          <svg class="decor-svg" xmlns="http://www.w3.org/2000/svg"
-               viewBox="0 0 58 24" width="58" height="24" aria-hidden="true">
-            <rect x="-1" y="16" width="60" height="8" rx="1" fill="#D0C8B4" stroke="rgba(178,170,156,0.42)" stroke-width="0.6"/>
-            <rect x="0"  y="8"  width="58" height="8" rx="1" fill="#E4E2D8" stroke="rgba(178,170,156,0.36)" stroke-width="0.6"/>
-            <rect x="1"  y="0"  width="57" height="8" rx="1" fill="#DCDAC8" stroke="rgba(178,170,156,0.42)" stroke-width="0.6"/>
-            <line x1="6"  y1="3.5" x2="24" y2="3.5" stroke="rgba(100,96,88,0.13)" stroke-width="0.7"/>
-          </svg>
-          <div class="book book--yaw-r" aria-hidden="true" style="--w:16px;--h:148px;--c:#687A76"></div>
-          <div class="book" aria-hidden="true" style="--w:22px;--h:152px;--c:#A09690"></div>
-          <div class="book book--lean-r book--yaw-r" aria-hidden="true" style="--w:14px;--h:140px;--c:#C8C2B6"></div>
-        </div><!-- /G2 -->
-
-        <!-- ── G3: Candle + Contact link ───────────────────────────────────── -->
-        <div class="shelf__group">
-          <!-- Second slim candle, slightly taller -->
-          <svg class="decor-svg" xmlns="http://www.w3.org/2000/svg"
-               viewBox="0 0 10 58" width="10" height="58"
-               style="overflow:visible" aria-hidden="true">
-            <rect x="2" y="5" width="6" height="53" rx="1.5"
-                  fill="#EAE8DE" stroke="rgba(185,178,165,0.38)" stroke-width="0.7"/>
-            <path d="M5,5 Q7,9 6.2,12"
-                  stroke="rgba(234,232,222,0.95)" stroke-width="1.5" fill="none" stroke-linecap="round"/>
-            <line x1="5.2" y1="5" x2="5.5" y2="1.5" stroke="#2A2018" stroke-width="0.8"/>
-            <path d="M5,1.5 Q7,-1 5.5,-4 Q4,-1 3,0.5 Q4,2 5,1.5Z" fill="rgba(255,200,80,0.65)"/>
-            <path d="M5,1.5 Q6,-0.5 5.2,-2.5 Q4.5,-0.5 4,0.8 Q4.5,1.8 5,1.5Z"
-                  fill="rgba(255,240,200,0.80)"/>
-          </svg>
-          <div class="book" aria-hidden="true" style="--w:18px;--h:150px;--c:#6E7A72"></div>
-          <div class="book book--deep" aria-hidden="true" style="--w:12px;--h:140px;--c:#BCB4A8"></div>
-          <a href="#" class="book book--link" data-book="contact"
-            style="--w:34px;--h:160px;--c:#7E7066;--tc:rgba(255,255,255,0.65)">
-            <span class="book__spine book__spine--mono">Contact</span>
-          </a>
-          <div class="book book--lean-l book--yaw-l" aria-hidden="true" style="--w:20px;--h:148px;--c:#4A5856"></div>
-          <div class="book book--yaw-r" aria-hidden="true" style="--w:16px;--h:144px;--c:#C0BAB0"></div>
-        </div><!-- /G3 -->
-
-        <!-- ── G4: Fan plant + framed photo + books ───────────────────────── -->
-        <div class="shelf__group">
-          <div class="book book--lean-r book--yaw-r" aria-hidden="true" style="--w:20px;--h:152px;--c:#4A4A50"></div>
-          <!-- Fan plant (Schefflera-style) in glass jar -->
-          <svg class="plant-svg" xmlns="http://www.w3.org/2000/svg"
-               viewBox="0 0 54 76" width="54" height="76" aria-hidden="true">
-            <path d="M27 64 Q27 54 27 12"  stroke="#7A9068" stroke-width="2"   stroke-linecap="round" fill="none"/>
-            <path d="M27 62 Q24 52 16 26"  stroke="#7A9068" stroke-width="1.5" stroke-linecap="round" fill="none"/>
-            <path d="M27 63 Q22 54  8 40"  stroke="#7A9068" stroke-width="1.5" stroke-linecap="round" fill="none"/>
-            <path d="M27 62 Q30 52 38 26"  stroke="#7A9068" stroke-width="1.5" stroke-linecap="round" fill="none"/>
-            <path d="M27 63 Q32 54 46 40"  stroke="#7A9068" stroke-width="1.5" stroke-linecap="round" fill="none"/>
-            <ellipse cx="27" cy="10" rx="6"   ry="8"   fill="#90A87E"/>
-            <ellipse cx="15" cy="23" rx="5.5" ry="8"   fill="#8AA27A" transform="rotate(-32 15 23)"/>
-            <ellipse cx=" 8" cy="37" rx="5.5" ry="7.5" fill="#96AC80" transform="rotate(-58 8  37)"/>
-            <ellipse cx="39" cy="23" rx="5.5" ry="8"   fill="#92A87E" transform="rotate( 32 39 23)"/>
-            <ellipse cx="46" cy="37" rx="5.5" ry="7.5" fill="#8EAA7A" transform="rotate( 58 46 37)"/>
-            <ellipse cx="21" cy="44" rx="4.5" ry="6.5" fill="#9AB07E" transform="rotate(-18 21 44)"/>
-            <ellipse cx="33" cy="44" rx="4.5" ry="6.5" fill="#98AE7E" transform="rotate( 20 33 44)"/>
-            <rect x="18" y="60" width="18" height="16" rx="2"
-                  fill="rgba(196,192,182,0.28)" stroke="rgba(168,162,150,0.62)" stroke-width="1"/>
-            <rect x="21" y="56" width="12" height="5" rx="1"
-                  fill="rgba(196,192,182,0.28)" stroke="rgba(168,162,150,0.62)" stroke-width="1"/>
-          </svg>
-          <!-- Second framed photograph, slightly different proportions -->
-          <svg class="decor-svg" xmlns="http://www.w3.org/2000/svg"
-               viewBox="0 0 18 24" width="18" height="24" aria-hidden="true">
-            <rect x="0" y="0" width="18" height="24" rx="1" fill="#1C1A18"/>
-            <rect x="1.5" y="1.5" width="15" height="21" fill="#F0EDE6"/>
-            <rect x="3" y="4"  width="12" height="9" fill="rgba(90,88,84,0.10)"/>
-            <rect x="3" y="14" width="12" height="5" fill="rgba(70,68,64,0.07)"/>
-          </svg>
-          <div class="book book--yaw-l" aria-hidden="true" style="--w:16px;--h:148px;--c:#C4B8AC"></div>
-          <div class="book book--yaw-r" aria-hidden="true" style="--w:22px;--h:144px;--c:#687A76"></div>
-          <div class="book book--lean-l" aria-hidden="true" style="--w:18px;--h:150px;--c:#5E6860"></div>
-        </div><!-- /G4 -->
-
-        <!-- ── G5: Quiet right book cluster ───────────────────────────────── -->
-        <div class="shelf__group">
-          <div class="book book--yaw-r book--fwd-sm" aria-hidden="true" style="--w:22px;--h:150px;--c:#A09A90"></div>
-          <div class="book book--lean-r book--yaw-r" aria-hidden="true" style="--w:15px;--h:142px;--c:#28241E"></div>
-          <div class="book book--deep" aria-hidden="true" style="--w:13px;--h:150px;--c:#BCB4A8"></div>
-          <div class="book book--yaw-l book--fwd" aria-hidden="true" style="--w:21px;--h:145px;--c:#6E7A72"></div>
-        </div><!-- /G5 -->
-
-      </div>
-      <div class="shelf__plank" aria-hidden="true"></div>
-    </div><!-- /shelf 3 -->
-
-  </figure>
-
-  <footer class="site-footer">
-    <span>© <span id="year"></span> Canaan Brown</span>
-  </footer>
-
-  <!-- Book detail modal — prepared for Phase 2 GSAP animations -->
-  <div class="bm-overlay" id="bm-overlay" role="dialog" aria-modal="true" aria-label="Book detail" hidden>
-    <div class="bm-scene">
-      <div class="bm-book" id="bm-book">
-        <div class="bm-back-cover"   id="bm-back-cover"></div>
-        <div class="bm-page" data-pi="1"></div>
-        <div class="bm-page" data-pi="2"></div>
-        <div class="bm-page" data-pi="3"></div>
-        <div class="bm-page" data-pi="4"></div>
-        <div class="bm-page" data-pi="5"></div>
-        <div class="bm-page" data-pi="6"></div>
-        <div class="bm-page" data-pi="7"></div>
-        <div class="bm-page" data-pi="8"></div>
-        <div class="bm-content-page" id="bm-content-page">
-          <div class="bm-content" id="bm-content"></div>
+  <!-- One surface: nav + frame. Parked at translateY(-navH) so the frame is flush on load. -->
+  <div class="site-frame" id="site-frame">
+    <nav class="topnav" id="topnav" aria-label="Primary" aria-hidden="true">
+      <div class="topnav__inner">
+        <div class="topnav__cluster topnav__cluster--left">
+          <span class="topnav__link" data-nav="networks">Networks</span>
+          <span class="topnav__link" data-nav="projects">Projects</span>
         </div>
-        <div class="bm-front-cover" id="bm-front-cover">
-          <span class="bm-cover-title" id="bm-cover-title"></span>
-        </div>
-        <div class="bm-spine-strip" aria-hidden="true"></div>
-      </div>
-    </div>
-    <button class="bm-close" id="bm-close" aria-label="Close book">✕</button>
-  </div>
 
-  <script src="lib/gsap/gsap.min.js"></script>
-  <script src="lib/gsap/CustomEase.min.js"></script>
-  <script src="lib/gsap/MotionPathPlugin.min.js"></script>
-  <script src="lib/gsap/SplitText.min.js"></script>
+        <a href="#home" class="topnav__brand" id="nav-home">Canaan Brown</a>
+
+        <div class="topnav__cluster topnav__cluster--right">
+          <span class="topnav__link" data-nav="about">About</span>
+          <span class="topnav__link" data-nav="connect">Connect</span>
+        </div>
+
+        <div class="settings">
+          <button
+            type="button"
+            class="settings__btn"
+            id="settings-btn"
+            aria-label="Open settings"
+            aria-expanded="false"
+            aria-controls="settings-panel"
+          >
+            <svg class="settings__icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path
+                fill="currentColor"
+                d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.06-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.2 7.2 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.55-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94L2.86 14.5a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.3.59.22l2.39-.96c.5.39 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.55 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"
+              />
+            </svg>
+          </button>
+
+          <div
+            class="settings__panel"
+            id="settings-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-title"
+            aria-hidden="true"
+          >
+            <div class="settings__head">
+              <h2 class="settings__title" id="settings-title">Settings</h2>
+              <button type="button" class="settings__close" id="settings-close" aria-label="Close settings">✕</button>
+            </div>
+            <div class="settings__body">
+              <div class="settings__row">
+                <div class="settings__meta">
+                  <span class="settings__label" id="settings-motion-label">Motion</span>
+                  <span class="settings__desc">Animations and pixel field</span>
+                </div>
+                <div
+                  class="settings__seg"
+                  id="settings-motion"
+                  role="group"
+                  aria-labelledby="settings-motion-label"
+                  data-active="on"
+                >
+                  <span class="settings__seg-thumb" aria-hidden="true"></span>
+                  <button type="button" class="settings__seg-opt is-active" data-value="on" aria-pressed="true">On</button>
+                  <button type="button" class="settings__seg-opt" data-value="off" aria-pressed="false">Off</button>
+                </div>
+              </div>
+
+              <div class="settings__row" id="settings-effect-row">
+                <div class="settings__meta">
+                  <span class="settings__label" id="settings-effect-label">Effect</span>
+                  <span class="settings__desc">Pixel field style</span>
+                </div>
+                <div
+                  class="settings__seg"
+                  id="settings-effect"
+                  role="group"
+                  aria-labelledby="settings-effect-label"
+                  data-active="heat"
+                >
+                  <span class="settings__seg-thumb" aria-hidden="true"></span>
+                  <button type="button" class="settings__seg-opt is-active" data-value="heat" aria-pressed="true">Heat</button>
+                  <button type="button" class="settings__seg-opt" data-value="wave" aria-pressed="false">Wave</button>
+                </div>
+              </div>
+
+              <div class="settings__row" id="settings-color-row">
+                <div class="settings__meta settings__meta--row">
+                  <div>
+                    <span class="settings__label" id="settings-color-label">Effect Color</span>
+                    <span class="settings__desc">Shared by Heat and Wave</span>
+                  </div>
+                  <span
+                    class="settings__swatch"
+                    id="settings-color-swatch"
+                    aria-hidden="true"
+                    title="Current effect color"
+                  ></span>
+                </div>
+                <div class="settings__colors" role="group" aria-labelledby="settings-color-label">
+                  <label class="settings__slider">
+                    <span class="settings__slider-label">R</span>
+                    <input
+                      type="range"
+                      id="settings-color-r"
+                      min="0"
+                      max="255"
+                      value="255"
+                      aria-label="Red"
+                    />
+                    <span class="settings__slider-val" id="settings-color-r-val">255</span>
+                  </label>
+                  <label class="settings__slider">
+                    <span class="settings__slider-label">G</span>
+                    <input
+                      type="range"
+                      id="settings-color-g"
+                      min="0"
+                      max="255"
+                      value="52"
+                      aria-label="Green"
+                    />
+                    <span class="settings__slider-val" id="settings-color-g-val">52</span>
+                  </label>
+                  <label class="settings__slider">
+                    <span class="settings__slider-label">B</span>
+                    <input
+                      type="range"
+                      id="settings-color-b"
+                      min="0"
+                      max="255"
+                      value="158"
+                      aria-label="Blue"
+                    />
+                    <span class="settings__slider-val" id="settings-color-b-val">158</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </nav>
+
+    <div class="page-shell" id="home">
+      <header class="nameplate" aria-label="Canaan Brown">
+        <svg class="nameplate__svg" overflow="visible" aria-hidden="true">
+          <defs>
+            <path id="nameplate-rim" fill="none" />
+          </defs>
+          <text class="nameplate__text">
+            <textPath
+              id="nameplate-tp"
+              href="#nameplate-rim"
+              xlink:href="#nameplate-rim"
+              startOffset="0"
+            ></textPath>
+          </text>
+        </svg>
+      </header>
+
+      <!-- Framed display: pixel field lives only inside; bottom edge stays open -->
+      <div class="stage">
+        <div class="stage__field" id="stage">
+          <canvas id="heatmap" class="heatmap" aria-hidden="true"></canvas>
+        </div><!-- /.stage__field -->
+      </div><!-- /.stage -->
+
+      <footer class="site-footer">
+        <span>© <span id="year"></span> Canaan Brown</span>
+      </footer>
+    </div><!-- /.page-shell -->
+  </div><!-- /.site-frame -->
+
   <script src="js/main.js"></script>
 </body>
 </html>
