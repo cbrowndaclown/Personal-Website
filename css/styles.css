@@ -737,6 +737,31 @@ body[data-motion="off"] .stage__field {
   background-color: var(--heat-field);
 }
 
+/* Tiny Lightning-mode cursor marker — driven by shared Lightning theme vars */
+.lightning-cursor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 5px;
+  height: 5px;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  background-color: rgb(var(--lightning-base, var(--accent-rgb)));
+  box-shadow:
+    0 0 0 1px rgba(var(--lightning-highlight, var(--accent-rgb)), 0.35),
+    0 0 6px 1px rgba(var(--lightning-glow, var(--accent-rgb)), 0.42);
+  transition: opacity 0.3s ease, visibility 0.3s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+  will-change: transform;
+  transform: translate3d(-9999px, -9999px, 0);
+}
+
+body[data-motion="on"][data-bg-mode="lightning"] .lightning-cursor.is-in-field {
+  opacity: 0.75;
+  visibility: visible;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .settings__btn,
   .settings__panel,
@@ -746,6 +771,10 @@ body[data-motion="off"] .stage__field {
   .topnav__brand,
   .topnav__link,
   .topnav__link::after {
+    transition: none;
+  }
+
+  .lightning-cursor {
     transition: none;
   }
 }
