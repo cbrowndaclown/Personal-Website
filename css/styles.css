@@ -1,0 +1,901 @@
+/* ============================================================
+   DESIGN TOKENS
+   ============================================================ */
+:root {
+  /* Fonts */
+  --f-serif: 'Cormorant Garamond', Georgia, serif;
+  --f-sans:  'Josefin Sans', system-ui, sans-serif;
+  --f-mono:  'DM Mono', 'Courier New', monospace;
+
+  /* Wall — the page background, warm soft white */
+  --wall:          #F4F1EB;
+  --wall-shadow:   rgba(28, 20, 10, 1);
+
+  /* Heatmap pixels — cool gray wall, warm pink under cursor */
+  --heat-cool:     #B8B4AE;
+  --heat-hot:      #E891A8;
+
+  /* Alcove — recessed back panel, clearly darker than the painted frame */
+  --alcove-bg:     #C8C4BA;
+
+  /* Shelf plank — painted white, same family as wall */
+  --plank-face:    #F3F0EA;
+  --plank-lit:     #FBFAF6;
+  --plank-shade:   #E2DED6;
+  --plank-h:       22px;   /* visible thickness = architectural depth */
+
+  /* Shadow pigment — warm, never pure black */
+  --sh:            28, 20, 10;
+
+  /* Bookcase sizing */
+  --alcove-w:      min(60vw, 840px);
+  --alcove-min-w:  360px;
+  --shelf-h:       178px;  /* space for items above each plank */
+  --shelf-pad-x:   16px;   /* horizontal padding inside the side rails */
+  --book-gap:      4px;
+
+}
+
+/* ============================================================
+   RESET & BASE
+   ============================================================ */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a    { text-decoration: none; color: inherit; }
+figure { display: block; }
+
+/* ============================================================
+   WALL — the full-viewport background that contains everything.
+   This IS the room wall. The alcove sits debossed within it.
+   ============================================================ */
+body {
+  min-height: 100vh;
+  background-color: var(--heat-cool);
+  position: relative;
+  isolation: isolate;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 0 60px;  /* clearance for fixed nameplate + footer */
+}
+
+/* ============================================================
+   HEATMAP — fine pixel grid behind the bookcase.
+   Cursor proximity paints pink; idle cools back to gray.
+   ============================================================ */
+.heatmap {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  pointer-events: none;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* ============================================================
+   NAMEPLATE — centered above the bookshelf, logo mark
+   ============================================================ */
+.nameplate {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  padding: 48px 44px;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.nameplate__name {
+  position: relative;
+  display: inline-block;
+  font-family: var(--f-serif);
+  font-weight: 700;
+  font-size: 1.65rem;
+  letter-spacing: -0.01em;
+  color: rgba(58, 50, 40, 0.88);
+  pointer-events: all;
+  transition: color 0.25s ease;
+}
+
+.nameplate__name::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -4px;
+  height: 1px;
+  background: rgba(58, 50, 40, 0.72);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.4s ease;
+}
+
+.nameplate__name:hover {
+  color: rgba(58, 50, 40, 1);
+}
+
+.nameplate__name:hover::after {
+  transform: scaleX(1);
+}
+
+/* ============================================================
+   FOOTER — fixed to base of wall, near-invisible
+   ============================================================ */
+.site-footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 20px 44px;
+  text-align: center;
+  font-family: var(--f-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.10em;
+  color: rgba(58, 50, 40, 0.22);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* ============================================================
+   ALCOVE — recessed cabinet. Light enters from the upper-left.
+   ============================================================ */
+.alcove {
+  position: relative;
+  z-index: 1;
+  width: var(--alcove-w);
+  min-width: var(--alcove-min-w);
+  overflow: hidden;
+
+  /*
+    Back panel — darker than the frame for recess contrast.
+    Upper-left light, tighter falloff (less haze).
+  */
+  background:
+    radial-gradient(ellipse 70% 42% at 18% 6%,
+      rgba(255, 252, 244, 0.16) 0%, transparent 52%),
+    linear-gradient(165deg,
+      #D2CEC4 0%,
+      var(--alcove-bg) 48%,
+      #BDB9AF 100%);
+
+  /*
+    Recessed interior + outer case — tighter radii, higher local AO.
+    Left softer (lit), right + top stronger (in shadow).
+  */
+  box-shadow:
+    inset 0    14px  22px rgba(var(--sh), 0.18),   /* ceiling AO        */
+    inset 0    -6px  12px rgba(var(--sh), 0.07),   /* floor             */
+    inset 8px    0   14px rgba(var(--sh), 0.07),   /* L wall (lit)      */
+    inset -14px  0   20px rgba(var(--sh), 0.16),   /* R wall (shadow)   */
+    inset 0 0 0 1px       rgba(var(--sh), 0.08),   /* inner hairline    */
+    0  1px  2px  rgba(var(--sh), 0.16),             /* case contact      */
+    0  6px 14px  rgba(var(--sh), 0.09),             /* case object       */
+    0 16px 32px  rgba(var(--sh), 0.05);             /* case ambient      */
+}
+
+/*
+  Frame rails — painted face matching planks.
+  Overlaid on plank ends for a flush case join.
+  Inner edges carry the cabinet recess; outer edges catch light.
+*/
+.alcove__rail {
+  position: absolute;
+  background: linear-gradient(
+    to bottom,
+    var(--plank-lit) 0%,
+    var(--plank-face) 40%,
+    var(--plank-shade) 100%
+  );
+  z-index: 10;
+  pointer-events: none;
+}
+
+.alcove__rail--top {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--plank-h);
+  background: linear-gradient(
+    to bottom,
+    var(--plank-lit) 0%,
+    var(--plank-face) 48%,
+    var(--plank-shade) 100%
+  );
+  box-shadow:
+    inset 0  1px 0   rgba(255, 255, 255, 0.95),    /* top edge highlight */
+    inset 0  4px 0   rgba(255, 255, 255, 0.38),
+    inset 0 -3px 4px rgba(var(--sh), 0.18),         /* underside thickness */
+    0  1px  1px rgba(var(--sh), 0.20),              /* cast contact        */
+    0  4px  9px rgba(var(--sh), 0.09),              /* cast object         */
+    0 10px 18px rgba(var(--sh), 0.04);              /* cast ambient        */
+}
+
+.alcove__rail--left {
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--plank-h);
+  background: linear-gradient(
+    to right,
+    var(--plank-lit) 0%,
+    var(--plank-face) 50%,
+    var(--plank-shade) 100%
+  );
+  box-shadow:
+    inset -5px 0 10px rgba(var(--sh), 0.16),        /* inner recess        */
+    inset -1px 0 0    rgba(var(--sh), 0.22),        /* crisp inner edge AO */
+    inset  2px 0 0    rgba(255, 255, 255, 0.58);    /* outer face light    */
+}
+
+.alcove__rail--right {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: var(--plank-h);
+  background: linear-gradient(
+    to left,
+    var(--plank-shade) 0%,
+    var(--plank-face) 55%,
+    #EEEBE4 100%
+  );
+  box-shadow:
+    inset  6px 0 12px rgba(var(--sh), 0.18),        /* inner recess        */
+    inset  1px 0 0    rgba(var(--sh), 0.24),        /* crisp inner edge AO */
+    inset -1px 0 0    rgba(255, 255, 255, 0.30);    /* faint outer rim     */
+}
+
+/* ============================================================
+   SHELF — one row (items area + plank below it)
+   ============================================================ */
+.shelf {
+  position: relative;
+  z-index: 1;
+}
+
+/* First shelf clears the top rail */
+.shelf[data-shelf="1"] .shelf__items {
+  padding-top: var(--plank-h);
+  height: calc(var(--shelf-h) + var(--plank-h));
+}
+
+/* ── Items area ─────────────────────────────────────────── */
+.shelf__items {
+  position: relative;
+  z-index: 2;                     /* above plank so contact shadows land on it */
+  height: var(--shelf-h);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  padding: 0 calc(var(--plank-h) + var(--shelf-pad-x));
+  gap: var(--book-gap);
+  perspective: 900px;
+}
+
+/*
+  Architectural AO — tight, darker wedges in the inside corners
+  (shelf × side rail × back panel). Not a soft vignette.
+*/
+.shelf__items::before,
+.shelf__items::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 18px;
+  pointer-events: none;
+  z-index: 0;
+}
+.shelf__items::before {
+  left: var(--plank-h);
+  background:
+    linear-gradient(to right,
+      rgba(var(--sh), 0.16) 0%,
+      rgba(var(--sh), 0.05) 45%,
+      transparent 100%),
+    linear-gradient(to top,
+      rgba(var(--sh), 0.10) 0%,
+      transparent 28%);
+}
+.shelf__items::after {
+  right: var(--plank-h);
+  background:
+    linear-gradient(to left,
+      rgba(var(--sh), 0.18) 0%,
+      rgba(var(--sh), 0.06) 48%,
+      transparent 100%),
+    linear-gradient(to top,
+      rgba(var(--sh), 0.11) 0%,
+      transparent 28%);
+}
+
+/* ── Group — curated cluster of books / plants / objects */
+.shelf__group {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--book-gap);
+  transform-style: preserve-3d;
+}
+
+/* ── Gap — (legacy; kept for possible single-row shelves) ─── */
+.shelf__gap {
+  flex: 0 0 36px;
+}
+
+.shelf__gap--max {
+  flex: 0 0 36px;
+}
+
+/* ── Plank ───────────────────────────────────────────────── */
+/*
+  Painted shelf board. Top edge catches upper-left light;
+  underside reads as thickness; layered cast shadow falls
+  onto the back panel of the bay below.
+*/
+.shelf__plank {
+  position: relative;
+  z-index: 1;
+  height: var(--plank-h);
+  background: linear-gradient(
+    to bottom,
+    var(--plank-lit) 0%,
+    var(--plank-face) 32%,
+    var(--plank-face) 58%,
+    var(--plank-shade) 100%
+  );
+
+  box-shadow:
+    inset 0  1px 0   rgba(255, 255, 255, 0.96),    /* crisp top edge      */
+    inset 0  3px 0   rgba(255, 255, 255, 0.32),    /* lit top plane       */
+    inset 0 -2px 0   rgba(var(--sh), 0.10),        /* underside lip       */
+    inset 0 -5px 6px rgba(var(--sh), 0.16),        /* thickness shade     */
+    /* cast onto back panel — tighter, less hazy */
+    0  1px  1px  rgba(var(--sh), 0.24),             /* contact */
+    0  4px  9px  rgba(var(--sh), 0.11),             /* object  */
+    0 11px 22px  rgba(var(--sh), 0.05);             /* ambient */
+}
+
+/* Corner AO where plank meets side rails — sharper, denser */
+.shelf__plank::before,
+.shelf__plank::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: -22px;
+  width: 16px;
+  pointer-events: none;
+  z-index: 2;
+}
+.shelf__plank::before {
+  left: var(--plank-h);
+  background: linear-gradient(
+    to right,
+    rgba(var(--sh), 0.18) 0%,
+    rgba(var(--sh), 0.06) 50%,
+    transparent 100%
+  );
+}
+.shelf__plank::after {
+  right: var(--plank-h);
+  background: linear-gradient(
+    to left,
+    rgba(var(--sh), 0.20) 0%,
+    rgba(var(--sh), 0.07) 52%,
+    transparent 100%
+  );
+}
+
+.shelf--last .shelf__plank {
+  box-shadow:
+    inset 0  1px 0   rgba(255, 255, 255, 0.96),
+    inset 0  3px 0   rgba(255, 255, 255, 0.32),
+    inset 0 -2px 0   rgba(var(--sh), 0.10),
+    inset 0 -5px 6px rgba(var(--sh), 0.16),
+    0  1px  1px  rgba(var(--sh), 0.20),
+    0  3px  8px  rgba(var(--sh), 0.09),
+    0  9px 18px  rgba(var(--sh), 0.04);
+}
+
+/* ============================================================
+   BOOKS
+   Light from upper-left → left highlight, right edge shade,
+   cast shadows bias down-right onto shelf + back wall.
+   --w drives cast size so thicker books throw a wider shadow.
+   ============================================================ */
+.book {
+  flex-shrink: 0;
+  width:  var(--w, 22px);
+  height: var(--h, 150px);
+  /* Tighter casts — depth from edges/contact, not haze */
+  --cast-x: clamp(1px,   calc(var(--w, 22px) * 0.10), 3.5px);
+  --cast-y: clamp(1px,   calc(var(--w, 22px) * 0.11), 4px);
+  --cast-b: clamp(2.5px, calc(var(--w, 22px) * 0.18), 7px);
+  --depth-z: 0px;
+
+  background: var(--c, #9A9490);
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--c, #9A9490) 72%, #1C140A) 0%,
+      color-mix(in srgb, var(--c, #9A9490) 92%, #fff) 10%,
+      var(--c, #9A9490) 28%,
+      var(--c, #9A9490) 70%,
+      color-mix(in srgb, var(--c, #9A9490) 78%, #1C140A) 100%
+    );
+  border-radius: 1px 1px 0 0;
+  position: relative;
+  overflow: hidden;
+  z-index: 1;
+  transform: translateZ(var(--depth-z));
+
+  box-shadow:
+    /* material edges — highlight / darker side face */
+    inset 1px 0 0 rgba(255, 255, 255, 0.28),
+    inset -1.5px 0 0 rgba(var(--sh), 0.20),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    /* contact — sharp ground on the plank */
+    0 1px 0 rgba(var(--sh), 0.22),
+    0 1px 2px rgba(var(--sh), 0.30),
+    /* object — short wall/shelf cast */
+    var(--cast-x) var(--cast-y) var(--cast-b) rgba(var(--sh), 0.11),
+    /* ambient — very small, not a glow */
+    calc(var(--cast-x) + 1px) calc(var(--cast-y) + 3px) 10px rgba(var(--sh), 0.04);
+}
+
+/*
+  Page-edge at the book top — cream headband catching overhead light.
+*/
+.book::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 7px;
+  background: linear-gradient(to bottom,
+    rgba(245, 240, 230, 0.95) 0%,
+    rgba(245, 240, 230, 0.45) 55%,
+    rgba(245, 240, 230, 0.00) 100%
+  );
+  border-radius: 1px 1px 0 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/*
+  Spine surface: crisp left catch-light + darker right face.
+*/
+.book::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to right,
+      rgba(255, 255, 255, 0.20) 0%,
+      rgba(255, 255, 255, 0.05) 12%,
+      transparent 36%,
+      rgba(var(--sh), 0.08) 100%),
+    linear-gradient(to bottom,
+      rgba(255, 255, 255, 0.08) 0%,
+      transparent 28%,
+      rgba(var(--sh), 0.05) 100%);
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* ── Interactive link books ─────────────────────────────── */
+.book--link {
+  cursor: pointer;
+  z-index: 2;
+}
+
+.book--link:focus-visible {
+  outline: 2px solid rgba(80, 70, 60, 0.40);
+  outline-offset: 3px;
+}
+
+/* ── Spine labels ───────────────────────────────────────── */
+.book__spine {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  color: var(--tc, rgba(255, 255, 255, 0.65));
+  white-space: nowrap;
+  overflow: hidden;
+  z-index: 3;
+  user-select: none;
+  pointer-events: none;
+  font-family: var(--f-mono);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  font-weight: 300;
+}
+
+.book__spine--cormorant {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-style: normal;
+  font-size: 10.5px;
+  letter-spacing: 0.24em;
+}
+
+.book__spine--cormorant-italic {
+  font-family: var(--f-serif);
+  font-weight: 300;
+  font-style: italic;
+  font-size: 10.5px;
+  letter-spacing: 0.20em;
+}
+
+.book__spine--josefin {
+  font-family: var(--f-sans);
+  font-weight: 200;
+  font-style: normal;
+  font-size: 8px;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+}
+
+.book__spine--mono {
+  font-family: var(--f-mono);
+  font-weight: 300;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+}
+
+/* ============================================================
+   PLANTS — grounded with layered drop-shadows (shelf + wall).
+   ============================================================ */
+.plant-svg {
+  flex-shrink: 0;
+  align-self: flex-end;
+  margin: 0 8px;
+  display: block;
+  position: relative;
+  z-index: 2;
+  filter:
+    drop-shadow(0 1px 0 rgba(var(--sh), 0.26))       /* contact lip */
+    drop-shadow(0 1px 2px rgba(var(--sh), 0.32))     /* contact body */
+    drop-shadow(2px 3px 5px rgba(var(--sh), 0.11))   /* short object cast */
+    drop-shadow(4px 8px 12px rgba(var(--sh), 0.04)); /* faint ambient */
+}
+
+/* ============================================================
+   DECORATIVE OBJECTS — vases, frames, stacks, candles, bowls.
+   ============================================================ */
+.decor-svg {
+  flex-shrink: 0;
+  align-self: flex-end;
+  margin: 0 4px;
+  display: block;
+  position: relative;
+  z-index: 2;
+  filter:
+    drop-shadow(0 1px 0 rgba(var(--sh), 0.24))
+    drop-shadow(0 1px 2px rgba(var(--sh), 0.30))
+    drop-shadow(2px 3px 5px rgba(var(--sh), 0.10))
+    drop-shadow(3px 7px 11px rgba(var(--sh), 0.035));
+}
+
+/* ============================================================
+   BOOK IMPERFECTION VARIANTS
+   Applied only to aria-hidden decorative books so they never
+   conflict with GSAP hover timelines on .book--link elements.
+   ============================================================ */
+.book--lean-r  { transform: translateZ(var(--depth-z)) rotate( 2.4deg); transform-origin: bottom center; }
+.book--lean-l  { transform: translateZ(var(--depth-z)) rotate(-2.4deg); transform-origin: bottom center; }
+.book--lean-rr { transform: translateZ(var(--depth-z)) rotate( 4.0deg); transform-origin: bottom center; }
+.book--lean-ll { transform: translateZ(var(--depth-z)) rotate(-3.6deg); transform-origin: bottom center; }
+
+/* Yaw — slight turn so a sliver of the cover reads, not just the spine */
+.book--yaw-r {
+  transform: translateZ(var(--depth-z)) rotateY(-14deg);
+  transform-origin: left center;
+}
+.book--yaw-l {
+  transform: translateZ(var(--depth-z)) rotateY(14deg);
+  transform-origin: right center;
+}
+.book--yaw-r.book--lean-r {
+  transform: translateZ(var(--depth-z)) rotate(2.4deg) rotateY(-12deg);
+  transform-origin: bottom left;
+}
+.book--yaw-l.book--lean-l {
+  transform: translateZ(var(--depth-z)) rotate(-2.4deg) rotateY(12deg);
+  transform-origin: bottom right;
+}
+
+/*
+  Z-depth — layering via offset + edge contrast, not blurrier glows.
+*/
+.book--fwd {
+  --depth-z: 5px;
+  z-index: 4;
+  box-shadow:
+    inset 1px 0 0 rgba(255, 255, 255, 0.32),
+    inset -1.5px 0 0 rgba(var(--sh), 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 1px 0 rgba(var(--sh), 0.26),
+    0 1px 2px rgba(var(--sh), 0.34),
+    calc(var(--cast-x) + 1px) calc(var(--cast-y) + 1px) calc(var(--cast-b) + 1px) rgba(var(--sh), 0.13),
+    calc(var(--cast-x) + 1px) calc(var(--cast-y) + 4px) 12px rgba(var(--sh), 0.045);
+}
+
+.book--fwd-sm {
+  --depth-z: 3px;
+  z-index: 3;
+  box-shadow:
+    inset 1px 0 0 rgba(255, 255, 255, 0.28),
+    inset -1.5px 0 0 rgba(var(--sh), 0.20),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 1px 0 rgba(var(--sh), 0.24),
+    0 1px 2px rgba(var(--sh), 0.32),
+    var(--cast-x) var(--cast-y) var(--cast-b) rgba(var(--sh), 0.12),
+    calc(var(--cast-x) + 1px) calc(var(--cast-y) + 3px) 11px rgba(var(--sh), 0.04);
+}
+
+.book--deep {
+  --depth-z: -3px;
+  z-index: 0;
+  filter: brightness(0.96);
+  box-shadow:
+    inset 1px 0 0 rgba(255, 255, 255, 0.14),
+    inset -1.5px 0 0 rgba(var(--sh), 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 1px 0 rgba(var(--sh), 0.16),
+    0 1px 1px rgba(var(--sh), 0.20),
+    calc(var(--cast-x) * 0.65) calc(var(--cast-y) * 0.65) calc(var(--cast-b) * 0.7) rgba(var(--sh), 0.08),
+    1px 3px 7px rgba(var(--sh), 0.03);
+}
+
+/* ============================================================
+   BOOK DETAIL MODAL — structure preserved for Phase 2
+   ============================================================ */
+:root {
+  --bm-w:    560px;
+  --bm-h:    380px;
+  --bm-half: 280px;
+}
+
+.bm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(18, 15, 10, 0);
+  pointer-events: none;
+  transition: background 0.45s ease, backdrop-filter 0.45s ease;
+}
+
+.bm-overlay[hidden] { display: none; }
+
+.bm-overlay.is-open {
+  background: rgba(18, 15, 10, 0.82);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  pointer-events: all;
+}
+
+.bm-scene { opacity: 0; pointer-events: none; }
+.bm-overlay.is-open .bm-scene { pointer-events: all; }
+
+.bm-book {
+  position: relative;
+  width: var(--bm-w);
+  height: var(--bm-h);
+  perspective: 1400px;
+  box-shadow:
+    0 50px 120px rgba(0, 0, 0, 0.60),
+    0 20px 50px  rgba(0, 0, 0, 0.40);
+}
+
+.bm-back-cover {
+  position: absolute;
+  top: 0; left: 0;
+  width: var(--bm-half);
+  height: var(--bm-h);
+  background: linear-gradient(160deg, var(--cover-c1, #597080) 0%, var(--cover-c2, #3A4A58) 100%);
+  border-radius: 2px 0 0 2px;
+  z-index: 1;
+}
+
+.bm-page,
+.bm-content-page,
+.bm-front-cover {
+  position: absolute;
+  top: 0;
+  left: var(--bm-half);
+  width: var(--bm-half);
+  height: var(--bm-h);
+  transform-origin: left center;
+  backface-visibility: hidden;
+}
+
+.bm-page { background: #F4F0E8; z-index: 5; }
+.bm-page:nth-child(2) { z-index: 12; background: #F5F1EA; }
+.bm-page:nth-child(3) { z-index: 11; background: #F3EFE7; }
+.bm-page:nth-child(4) { z-index: 10; background: #F4F0E8; }
+.bm-page:nth-child(5) { z-index: 9;  background: #F2EEE6; }
+.bm-page:nth-child(6) { z-index: 8;  background: #F5F1E9; }
+.bm-page:nth-child(7) { z-index: 7;  background: #F3EFE7; }
+.bm-page:nth-child(8) { z-index: 6;  background: #F4F0E8; }
+.bm-page:nth-child(9) { z-index: 5;  background: #F2EEE6; }
+
+.bm-content-page {
+  z-index: 4;
+  background: #F6F2EA;
+  border-radius: 0 2px 2px 0;
+  overflow: hidden;
+}
+
+.bm-content {
+  padding: 36px 32px;
+  height: 100%;
+  overflow-y: auto;
+  font-family: var(--f-serif);
+}
+
+.bm-content h3 {
+  font-size: 22px; font-weight: 300; letter-spacing: 0.06em;
+  margin-bottom: 18px; color: #2A2420;
+}
+.bm-content p {
+  font-size: 14px; line-height: 1.7; color: #4A3E36; margin-bottom: 12px;
+}
+.bm-content ol, .bm-content ul {
+  padding-left: 18px; margin-bottom: 12px;
+}
+.bm-content li {
+  font-size: 13px; line-height: 1.65; color: #4A3E36; margin-bottom: 6px;
+}
+.bm-email {
+  display: inline-block; font-family: var(--f-mono); font-size: 12px;
+  color: #4A3E36; border-bottom: 1px solid rgba(74,62,54,0.30); padding-bottom: 2px;
+  transition: border-color 0.2s ease;
+}
+.bm-email:hover { border-color: rgba(74,62,54,0.70); }
+.bm-note { font-size: 12px; font-style: italic; opacity: 0.60; }
+
+.bm-front-cover {
+  z-index: 14;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--cover-c1, #597080) 0%, var(--cover-c2, #3A4A58) 100%);
+  border-radius: 0 2px 2px 0;
+}
+
+.bm-cover-title {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 16px; letter-spacing: 0.28em;
+  color: rgba(255,255,255,0.80); text-transform: uppercase;
+}
+
+.bm-spine-strip {
+  position: absolute;
+  top: 0; left: calc(var(--bm-half) - 4px);
+  width: 8px; height: 100%;
+  background: linear-gradient(to right,
+    rgba(0,0,0,0.18) 0%, rgba(0,0,0,0.06) 40%,
+    rgba(0,0,0,0.06) 60%, rgba(0,0,0,0.18) 100%
+  );
+  z-index: 20;
+  pointer-events: none;
+}
+
+.bm-close {
+  position: fixed; top: 28px; right: 36px;
+  width: 40px; height: 40px;
+  border: none; background: rgba(255,255,255,0.10);
+  color: rgba(255,255,255,0.70); font-size: 16px;
+  cursor: pointer; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.bm-overlay.is-open .bm-close { opacity: 1; pointer-events: all; }
+.bm-close:hover { background: rgba(255,255,255,0.18); color: rgba(255,255,255,0.95); }
+
+/* ============================================================
+   SCRAPBOOK PAGES — Phase 2 content
+   ============================================================ */
+.sp {
+  width: 100%; height: 100%; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; padding: 24px;
+}
+.sp__bigq   { font-family: var(--f-serif); font-size: 64px; line-height: 0.6; color: rgba(60,48,36,0.15); }
+.sp__qtext  { font-family: var(--f-serif); font-size: 13px; font-style: italic; line-height: 1.6; color: #4A3E36; text-align: center; letter-spacing: 0.02em; }
+.sp__cite   { font-family: var(--f-mono); font-size: 9px; letter-spacing: 0.12em; color: rgba(74,62,54,0.55); text-align: center; }
+.sp__label  { font-family: var(--f-sans); font-size: 8px; letter-spacing: 0.28em; text-transform: uppercase; color: rgba(74,62,54,0.45); }
+.sp__dots   { display: flex; gap: 8px; }
+.sp__dots span { width: 20px; height: 20px; border-radius: 50%; }
+.sp__handwritten { font-family: var(--f-serif); font-size: 16px; font-style: italic; line-height: 1.7; color: rgba(60,48,36,0.65); text-align: center; }
+.sp__terminal { font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.08em; color: rgba(60,48,36,0.60); line-height: 2; }
+.split-line { display: block; overflow: hidden; }
+
+/* ============================================================
+   BOOK EXTRACTION — Phase 2
+   ============================================================ */
+
+/*
+  Semi-transparent backdrop shown when a book is extracted.
+  Sits between the shelf (auto z-index) and the floating book (z 900).
+  Clicking it returns the book to the shelf.
+  Using a CSS background dim rather than filter on any ancestor —
+  filter on an ancestor would trap position:fixed descendants.
+*/
+.extraction-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 850;
+  background: rgba(20, 15, 10, 0.32);
+  cursor: default;
+  pointer-events: all;
+}
+
+/*
+  Cursor hint while the book is floating at centre — the next interaction
+  is "open this book", not a standard pointer link action.
+*/
+.book--floating {
+  cursor: pointer;
+}
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width: 1024px) {
+  :root {
+    --alcove-w:   min(80vw, 700px);
+    --shelf-h:    155px;
+    --book-gap:   3px;
+    --shelf-pad-x: 12px;
+  }
+}
+
+@media (max-width: 680px) {
+  :root {
+    --alcove-w:   96vw;
+    --alcove-min-w: 0;
+    --shelf-h:    128px;
+    --book-gap:   3px;
+    --shelf-pad-x: 8px;
+    --plank-h:    15px;
+  }
+
+  .nameplate { padding: 18px 20px; }
+  .nameplate__name { font-size: 1.35rem; }
+  .site-footer { padding: 16px 20px; }
+  body { padding: 70px 0 50px; }
+
+  .shelf__gap, .shelf__gap--max { flex: 0 0 16px; }
+}
+
+/* ============================================================
+   REDUCED MOTION
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  /* GSAP checks prefers-reduced-motion in JS and skips all animation.
+     These CSS rules guard any remaining CSS-driven transitions. */
+  .bm-overlay, .bm-close { transition: none; }
+}
