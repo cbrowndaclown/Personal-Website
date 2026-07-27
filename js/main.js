@@ -10,12 +10,28 @@
   ───────────────────────────────────────────────────────────────────────── */
   const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+  /* Pixel-field styles — each mode owns its own update/render system below. */
+  const PIXEL_FIELD_STYLES = {
+    heat:      { implemented: true },
+    wave:      { implemented: true },
+    lightning: { implemented: true },
+  };
+
   const animConfig = {
     motion: !prefersReduced,
-    bgMode: 'heat', /* remembered while Motion is off */
-    /* Shared Heat / Wave cursor color — default neon hot pink */
+    bgMode: 'heat', /* default; remembered while Motion is off */
+    /* Last fully implemented mode — used if a future placeholder is selected */
+    lastImplementedBgMode: 'heat',
+    /* Shared accent across Heat / Wave / Lightning */
     effectColor: { r: 255, g: 52, b: 158 },
   };
+
+  function resolveActiveBgMode() {
+    if (!animConfig.motion) return null;
+    const style = PIXEL_FIELD_STYLES[animConfig.bgMode];
+    if (style && style.implemented) return animConfig.bgMode;
+    return animConfig.lastImplementedBgMode || 'heat';
+  }
 
   function syncAnimDom() {
     document.body.dataset.motion = animConfig.motion ? 'on' : 'off';
@@ -30,29 +46,44 @@
 
   function publishAnimConfig() {
     syncAnimDom();
+    const activeMode = resolveActiveBgMode();
     const detail = {
       motion: animConfig.motion,
-      bgMode: animConfig.bgMode,
+      bgMode: animConfig.bgMode, /* UI / remembered selection (may be placeholder) */
+      activeBgMode: activeMode,  /* simulation currently driving the canvas */
       effectColor: { ...animConfig.effectColor },
     };
     window.dispatchEvent(new CustomEvent('animconfigchange', { detail }));
-    /* Legacy alias for pixel systems that already listen for mode changes */
+    /* Legacy alias for pixel systems that already listen for mode changes.
+       Emits the active (implemented) mode so placeholders don't blank the field. */
     window.dispatchEvent(new CustomEvent('bgmodechange', {
-      detail: { mode: animConfig.motion ? animConfig.bgMode : null },
+      detail: { mode: activeMode, selected: animConfig.bgMode },
     }));
   }
 
   function setMotion(on) {
     const next = !!on;
     if (animConfig.motion === next) return;
+    const turningOn = next && !animConfig.motion;
     animConfig.motion = next;
     publishAnimConfig();
+    /* Fired after bgmodechange listeners so field systems are already re-enabled */
+    if (turningOn) {
+      window.dispatchEvent(new CustomEvent('motionreenabled'));
+    }
   }
 
   function setBgMode(mode) {
-    if (mode !== 'heat' && mode !== 'wave') return;
+    if (!Object.prototype.hasOwnProperty.call(PIXEL_FIELD_STYLES, mode)) return;
     if (animConfig.bgMode === mode) return;
+    const prev = PIXEL_FIELD_STYLES[animConfig.bgMode];
+    if (prev && prev.implemented) {
+      animConfig.lastImplementedBgMode = animConfig.bgMode;
+    }
     animConfig.bgMode = mode;
+    if (PIXEL_FIELD_STYLES[mode].implemented) {
+      animConfig.lastImplementedBgMode = mode;
+    }
     publishAnimConfig();
   }
 
@@ -185,7 +216,8 @@
       });
     }
 
-    /* Document scroll is locked; wheel is the sole reveal gesture */
+    /* Document scroll is locked; wheel is the sole reveal gesture.
+       Allowed during directory assemble so nav can open mid-animation. */
     window.addEventListener(
       'wheel',
       (e) => {
@@ -197,7 +229,7 @@
   })();
 
   /* ─────────────────────────────────────────────────────────────────────────
-     1b. Settings panel — Motion + Effect (Heat / Wave)
+     1b. Settings panel — Motion + Effect (Heat / Wave / Lightning)
   ───────────────────────────────────────────────────────────────────────── */
   (function initSettings() {
     const root  = document.querySelector('.settings');
@@ -587,9 +619,1421 @@
 
   /* ═══════════════════════════════════════════════════════════════════════════
      BACKGROUND MODE — driven by settings Effect toggle
-     (Heat / Wave selection lives in animConfig; no standalone UI.)
+     (Heat / Wave / Lightning selection lives in animConfig; no standalone UI.)
   ═══════════════════════════════════════════════════════════════════════════ */
 
+
+  /* ═══════════════════════════════════════════════════════════════════════════
+     INTRO CONTROLLER — single owner of the entire landing sequence
+
+       boot → intro (greeting / name) → directory → idle
+
+     Exactly ONE GSAP master timeline exists at a time.
+     Fast-forward = timeline.timeScale(FF_RATE).
+     Space = skip() → kill timeline → final directory hold.
+     LED phases read elapsed time from the master timeline — no competing clocks.
+  ═══════════════════════════════════════════════════════════════════════════ */
+  const introController = (function createIntroController() {
+    const FF_RATE = 4;
+
+    const INTRO_IDLE_MS      = 800;
+    const INTRO_HOLD_MS      = 3500;
+    const INTRO_LINE_PAUSE   = 720;
+    const INTRO_MS_PER_COL   = 22;
+    const INTRO_REVEAL_MIN   = 1400;
+    const INTRO_REVEAL_MAX   = 3200;
+    const INTRO_JITTER_MS    = 32;
+    const INTRO_CLUSTER_MS   = 42;
+    const INTRO_SPARK_RATIO  = 0.055;
+    const INTRO_DRIFT_MIN    = 10;
+    const INTRO_DRIFT_MAX    = 30;
+    const INTRO_DRIFT_MS_MIN = 180;
+    const INTRO_DRIFT_MS_MAX = 340;
+    const INTRO_DISSOLVE_SCALE = 0.40;
+    const INTRO_DISSOLVE_PAUSE = 280;
+
+    const DIR_DELAY_SEC      = 0.85;
+    const DIR_MS_PER_COL     = 30;
+    const DIR_REVEAL_MIN     = 1600;
+    const DIR_REVEAL_MAX     = 3800;
+    const DIR_LINE_PAUSE     = 880;
+    const DIR_JITTER_MS      = 36;
+    const DIR_CLUSTER_MS     = 48;
+    const DIR_SPARK_RATIO    = 0.04;
+    const DIR_DRIFT_MIN      = 10;
+    const DIR_DRIFT_MAX      = 28;
+    const HOLD_SENTINEL      = 1e15;
+
+    /* Organic idle float — per-word decisions, easeInOutSine steps (CSS px) */
+    const IDLE_STEP_MIN_PX   = 2.2;
+    const IDLE_STEP_MAX_PX   = 5.0;
+    const IDLE_LIMIT_PX      = 8;
+    const IDLE_DECIDE_MIN_MS = 600;
+    const IDLE_DECIDE_MAX_MS = 1800;
+    const IDLE_MOVE_MIN_MS   = 420;
+    const IDLE_MOVE_MAX_MS   = 980;
+    const IDLE_START_MIN_MS  = 180;
+    const IDLE_START_MAX_MS  = 1400;
+    /* Must match heatmap / wave CELL — idle Y (px) → fractional row shift */
+    const LED_CELL           = 5;
+
+    const INTRO_LINES = [
+      { text: 'Hey there,',                pace: 1.00 },
+      { text: 'My name is Canaan Brown.',  pace: 1.40 },
+      { text: 'Welcome to my website.',    pace: 1.12 },
+      { text: 'Are you ready to explore?', pace: 1.30 },
+    ];
+
+    const DIR_LINES = [
+      { text: 'Scroll up for menu',   arrow: 'up',   pace: 1.20 },
+      { text: 'Scroll down for more', arrow: 'down', pace: 1.25 },
+    ];
+
+    const DIR_FONT =
+      '"Josefin Sans", "Apple Symbols", "Segoe UI Symbol", "Noto Sans Symbols", system-ui, sans-serif';
+
+    /* ── controller state ─────────────────────────────────────────────────── */
+    let phase = 'boot'; /* boot | intro | directory | idle | skipped */
+    let timeline = null; /* THE only landing GSAP timeline */
+    let timeScale = 1;
+    let holdingFF = false;
+    let killed = false; /* true after skip/cancel — blocks late timeline callbacks */
+    let started = false;
+    let phaseStartTime = 0; /* timeline.time() when current LED phase began */
+    let touchGuardUntil = 0;
+
+    let cols = 0;
+    let rows = 0;
+    let introTotalMs = 0;
+    let assembleMs = 0;
+
+    /* Intro LED buffers */
+    let iTarget = null, iOn = null, iLevel = null, iOnAt = null;
+    let iDetachAt = null, iGoneAt = null, iLine = null;
+    let iDriftX = null, iDriftY = null, iOx = null, iOy = null;
+    let iWordId = null;
+    let iIdleWords = [];
+
+    /* Directory LED buffers */
+    let dTarget = null, dOn = null, dLevel = null, dOnAt = null;
+    let dDetachAt = null, dGoneAt = null;
+    let dDriftX = null, dDriftY = null, dOx = null, dOy = null;
+    let dWordId = null;
+    let dIdleWords = [];
+    /* Immutable completed glyph bitmap — idle never writes here */
+    let dBitmap = null;
+    let idleYCache = null; /* scratch: per-word Y for the current frame */
+
+    function hash01(i, salt) {
+      let x = Math.imul(i ^ (salt | 0), 0x27d4eb2d);
+      x = Math.imul(x ^ (x >>> 15), 0x85ebca6b);
+      x = Math.imul(x ^ (x >>> 13), 0xc2b2ae35);
+      return ((x >>> 0) / 4294967296);
+    }
+
+    function easeOutCubic(u) {
+      const t = 1 - u;
+      return 1 - t * t * t;
+    }
+
+    function easeInOutSine(u) {
+      return -(Math.cos(Math.PI * u) - 1) * 0.5;
+    }
+
+    function randRange(a, b) {
+      return a + Math.random() * (b - a);
+    }
+
+    function createIdleWord(readyAtMs) {
+      return {
+        readyAt: readyAtMs,
+        armed: false,
+        y: 0,
+        fromY: 0,
+        toY: 0,
+        animStart: 0,
+        animDur: 0,
+        nextAt: 0,
+        streakDir: 0,
+        streakCount: 0,
+        paused: false,
+        pauseAt: 0,
+      };
+    }
+
+    /* Left-edge word bands in the same coordinate space as glyph sampling. */
+    function wordBandsAt(octx, text, startX) {
+      const bands = [];
+      const re = /\S+/g;
+      let m;
+      while ((m = re.exec(text))) {
+        const wBefore = octx.measureText(text.slice(0, m.index)).width;
+        const wWord = octx.measureText(m[0]).width;
+        bands.push({
+          x0: startX + wBefore,
+          x1: startX + wBefore + wWord,
+        });
+      }
+      return bands;
+    }
+
+    function bandIndexForX(x, bands) {
+      if (!bands.length) return 0;
+      for (let b = 0; b < bands.length; b++) {
+        if (x >= bands[b].x0 - 0.85 && x <= bands[b].x1 + 0.85) return b;
+      }
+      let best = 0;
+      let bestD = Infinity;
+      for (let b = 0; b < bands.length; b++) {
+        const mid = (bands[b].x0 + bands[b].x1) * 0.5;
+        const d = Math.abs(x - mid);
+        if (d < bestD) {
+          bestD = d;
+          best = b;
+        }
+      }
+      return best;
+    }
+
+    function sampleIdleWordY(word, wallNow) {
+      if (!(word.animDur > 0)) return word.toY;
+      const u = Math.max(0, Math.min(1, (wallNow - word.animStart) / word.animDur));
+      return word.fromY + (word.toY - word.fromY) * easeInOutSine(u);
+    }
+
+    function decideIdleWord(word, wallNow) {
+      const pos = sampleIdleWordY(word, wallNow);
+      word.fromY = pos;
+      word.y = pos;
+
+      const nearTop = pos >= IDLE_LIMIT_PX - 1.25;
+      const nearBot = pos <= -IDLE_LIMIT_PX + 1.25;
+      const biasDown = pos > 3.5;
+      const biasUp = pos < -3.5;
+
+      /* Weighted UP / STAY / DOWN — consecutive + limit rules applied */
+      let wUp = 1;
+      let wStay = 0.85;
+      let wDown = 1;
+
+      if (word.streakCount >= 2 && word.streakDir === 1) wUp = 0;
+      if (word.streakCount >= 2 && word.streakDir === -1) wDown = 0;
+      if (nearTop) {
+        wUp = 0;
+        wDown *= 2.4;
+        wStay *= 1.2;
+      } else if (biasDown) {
+        wDown *= 1.7;
+        wUp *= 0.45;
+      }
+      if (nearBot) {
+        wDown = 0;
+        wUp *= 2.4;
+        wStay *= 1.2;
+      } else if (biasUp) {
+        wUp *= 1.7;
+        wDown *= 0.45;
+      }
+
+      const total = wUp + wStay + wDown;
+      let pick = Math.random() * total;
+      let dir = 0;
+      if (pick < wUp) dir = 1;
+      else if (pick < wUp + wStay) dir = 0;
+      else dir = -1;
+
+      let target = pos;
+      if (dir !== 0) {
+        const step = randRange(IDLE_STEP_MIN_PX, IDLE_STEP_MAX_PX);
+        target = Math.max(-IDLE_LIMIT_PX, Math.min(IDLE_LIMIT_PX, pos + dir * step));
+        if (Math.abs(target - pos) < 0.2) {
+          dir = 0;
+          target = pos;
+        }
+      }
+
+      word.toY = target;
+      word.animStart = wallNow;
+      word.animDur = dir === 0 ? 0 : randRange(IDLE_MOVE_MIN_MS, IDLE_MOVE_MAX_MS);
+
+      if (dir === 0) {
+        word.streakDir = 0;
+        word.streakCount = 0;
+      } else if (dir === word.streakDir) {
+        word.streakCount += 1;
+      } else {
+        word.streakDir = dir;
+        word.streakCount = 1;
+      }
+
+      const gap = randRange(IDLE_DECIDE_MIN_MS, IDLE_DECIDE_MAX_MS);
+      word.nextAt = wallNow + Math.max(gap, word.animDur + 40);
+    }
+
+    /* Returns current idle Y (px). Pauses cleanly; resumes without snapping. */
+    function tickIdleWord(word, localT, wallNow, hardPause) {
+      if (prefersReduced || !animConfig.motion) {
+        word.y = 0;
+        word.fromY = 0;
+        word.toY = 0;
+        word.armed = false;
+        word.paused = false;
+        return 0;
+      }
+      if (!(word.readyAt >= 0) || localT < word.readyAt) return 0;
+
+      const paused = !!(hardPause || holdingFF);
+      if (paused) {
+        if (!word.paused) {
+          /* Show exact source bitmap while another animation owns the stage */
+          word.y = 0;
+          word.fromY = 0;
+          word.toY = 0;
+          word.animDur = 0;
+          word.paused = true;
+          word.pauseAt = wallNow;
+        }
+        return 0;
+      }
+
+      if (word.paused) {
+        const dt = wallNow - word.pauseAt;
+        word.nextAt += dt;
+        word.animStart += dt;
+        word.paused = false;
+      }
+
+      if (!word.armed) {
+        word.armed = true;
+        word.y = 0;
+        word.fromY = 0;
+        word.toY = 0;
+        word.animDur = 0;
+        word.streakDir = 0;
+        word.streakCount = 0;
+        word.nextAt = wallNow + randRange(IDLE_START_MIN_MS, IDLE_START_MAX_MS);
+      }
+
+      if (wallNow >= word.nextAt) decideIdleWord(word, wallNow);
+      word.y = sampleIdleWordY(word, wallNow);
+      return word.y;
+    }
+
+    /* Tick every word once; returns Float32Array of current Y offsets (px). */
+    function tickAllIdleWords(words, localT, hardPause) {
+      const wallNow = performance.now();
+      const n = words.length;
+      if (!idleYCache || idleYCache.length < n) idleYCache = new Float32Array(n);
+      for (let w = 0; w < n; w++) {
+        idleYCache[w] = tickIdleWord(words[w], localT, wallNow, hardPause);
+      }
+      return idleYCache;
+    }
+
+    /*
+      Fixed-grid light flow: keep every LED at its home cell, but redistribute
+      brightness into neighboring rows from idle Y (px → fractional row).
+      Positive Y lights rows below; negative Y lights rows above. Fractional
+      shifts crossfade both rows so the glyph appears to drift through the matrix.
+    */
+    function scatterIdleLight(buf, x, y, level, shiftPx) {
+      if (!(level > 0)) return;
+      const dest = y + shiftPx / LED_CELL;
+      const yFloor = Math.floor(dest);
+      const f = dest - yFloor;
+      const y1 = yFloor + 1;
+
+      if (yFloor >= 0 && yFloor < rows) {
+        const i0 = yFloor * cols + x;
+        const v0 = level * (1 - f);
+        if (v0 > buf[i0]) buf[i0] = v0;
+      }
+      if (f > 1e-5 && y1 >= 0 && y1 < rows) {
+        const i1 = y1 * cols + x;
+        const v1 = level * f;
+        if (v1 > buf[i1]) buf[i1] = v1;
+      }
+    }
+
+    function pauseIdleWords(words, localT) {
+      const wallNow = performance.now();
+      for (let w = 0; w < words.length; w++) {
+        tickIdleWord(words[w], localT, wallNow, true);
+      }
+    }
+
+    function isOnLanding() {
+      const home = document.getElementById('home');
+      if (!home) return true;
+      const rect = home.getBoundingClientRect();
+      return rect.bottom > 40 && rect.top < window.innerHeight - 40;
+    }
+
+    function ensureGrid() {
+      if (cols >= 12 && rows >= 8) return;
+      const stage = document.getElementById('stage');
+      if (!stage) return;
+      const rect = stage.getBoundingClientRect();
+      cols = Math.max(cols, Math.ceil(Math.max(1, rect.width) / 5) | 0);
+      rows = Math.max(rows, Math.ceil(Math.max(1, rect.height) / 5) | 0);
+    }
+
+    function setBoot(flag) {
+      if (flag) document.body.dataset.boot = flag;
+      else delete document.body.dataset.boot;
+    }
+
+    function isActivePhase() {
+      return phase === 'boot' || phase === 'intro' || phase === 'directory';
+    }
+
+    /* ── master timeline ──────────────────────────────────────────────────── */
+
+    function killMasterTimeline() {
+      if (timeline) {
+        timeline.kill();
+        timeline = null;
+      }
+    }
+
+    function setTimeScale(rate) {
+      const next = rate > 0 ? rate : 1;
+      timeScale = next;
+      if (timeline) timeline.timeScale(next);
+    }
+
+    function phaseElapsedMs() {
+      if (!timeline) return 0;
+      return Math.max(0, (timeline.time() - phaseStartTime) * 1000);
+    }
+
+    /* ── intro LED bake / clear ───────────────────────────────────────────── */
+
+    function clearIntroLeds() {
+      if (!iOn) return;
+      iOn.fill(0);
+      if (iTarget) iTarget.fill(0);
+      if (iLevel) iLevel.fill(0);
+      if (iOnAt) iOnAt.fill(0);
+      if (iDetachAt) iDetachAt.fill(0);
+      if (iGoneAt) iGoneAt.fill(0);
+      if (iLine) iLine.fill(0);
+      if (iDriftX) iDriftX.fill(0);
+      if (iDriftY) iDriftY.fill(0);
+      if (iOx) iOx.fill(0);
+      if (iOy) iOy.fill(0);
+      if (iWordId) iWordId.fill(-1);
+      iIdleWords = [];
+    }
+
+    function fitIntroFont(octx, lines, maxWidth, startPx) {
+      let fontPx = startPx;
+      for (let attempt = 0; attempt < 14; attempt++) {
+        octx.font = `600 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
+        let widest = 0;
+        for (let L = 0; L < lines.length; L++) {
+          widest = Math.max(widest, octx.measureText(lines[L].text).width);
+        }
+        if (widest <= maxWidth) break;
+        fontPx = Math.max(4, fontPx - 1);
+      }
+      return fontPx;
+    }
+
+    function sampleLineGlyphs(octx, text, cx, cy) {
+      octx.fillStyle = '#000';
+      octx.fillRect(0, 0, cols, rows);
+      octx.fillStyle = '#fff';
+      octx.textAlign = 'center';
+      octx.textBaseline = 'middle';
+      octx.fillText(text, cx, cy);
+
+      const data = octx.getImageData(0, 0, cols, rows).data;
+      const glyph = [];
+      let minX = cols, maxX = -1, minY = rows, maxY = -1;
+      for (let i = 0, n = cols * rows; i < n; i++) {
+        if (data[i * 4] <= 140) continue;
+        glyph.push(i);
+        const x = i % cols;
+        const y = (i / cols) | 0;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+      return { glyph, minX, maxX, minY, maxY };
+    }
+
+    function bakeIntro() {
+      const n = cols * rows;
+      iTarget = new Float32Array(n);
+      iOn = new Float32Array(n);
+      iLevel = new Float32Array(n);
+      iOnAt = new Float32Array(n);
+      iDetachAt = new Float32Array(n);
+      iGoneAt = new Float32Array(n);
+      iLine = new Uint8Array(n);
+      iDriftX = new Float32Array(n);
+      iDriftY = new Float32Array(n);
+      iOx = new Float32Array(n);
+      iOy = new Float32Array(n);
+      iWordId = new Int16Array(n);
+      iWordId.fill(-1);
+      iIdleWords = [];
+      introTotalMs = 0;
+
+      if (cols < 16 || rows < 16) return;
+
+      const off = document.createElement('canvas');
+      off.width = cols;
+      off.height = rows;
+      const octx = off.getContext('2d', { alpha: false });
+      if (!octx) return;
+
+      const lineCount = INTRO_LINES.length;
+      let fontPx = Math.max(5, Math.floor(rows * 0.085));
+      fontPx = fitIntroFont(octx, INTRO_LINES, cols * 0.90, fontPx);
+
+      let lineGap = fontPx * 1.55;
+      while (lineGap * (lineCount - 1) > rows * 0.72 && fontPx > 4) {
+        fontPx -= 1;
+        octx.font = `600 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
+        lineGap = fontPx * 1.55;
+      }
+      fontPx = fitIntroFont(octx, INTRO_LINES, cols * 0.90, fontPx);
+      octx.font = `600 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
+      lineGap = fontPx * 1.55;
+
+      const blockH = lineGap * (lineCount - 1);
+      const startY = rows * 0.5 - blockH * 0.5;
+      const cx = cols * 0.5;
+
+      let cursor = 0;
+      const lineMeta = [];
+
+      for (let L = 0; L < lineCount; L++) {
+        const cy = startY + L * lineGap;
+        const sampled = sampleLineGlyphs(octx, INTRO_LINES[L].text, cx, cy);
+        if (!sampled.glyph.length) {
+          lineMeta.push(null);
+          continue;
+        }
+
+        const spanX = Math.max(1, sampled.maxX - sampled.minX);
+        const spanY = Math.max(1, sampled.maxY - sampled.minY);
+        const revealMs = Math.min(
+          INTRO_REVEAL_MAX,
+          Math.max(INTRO_REVEAL_MIN, spanX * INTRO_MS_PER_COL * INTRO_LINES[L].pace)
+        );
+        const lineStart = cursor;
+        const lineCx = (sampled.minX + sampled.maxX) * 0.5;
+        const lineCy = (sampled.minY + sampled.maxY) * 0.5;
+
+        const lineText = INTRO_LINES[L].text;
+        const textW = octx.measureText(lineText).width;
+        const bands = wordBandsAt(octx, lineText, cx - textW * 0.5);
+        const bandCount = Math.max(1, bands.length);
+        const baseWid = iIdleWords.length;
+        const wordReady = new Float32Array(bandCount);
+        for (let b = 0; b < bandCount; b++) {
+          wordReady[b] = lineStart;
+          iIdleWords.push(createIdleWord(lineStart));
+        }
+
+        for (let g = 0; g < sampled.glyph.length; g++) {
+          const i = sampled.glyph[g];
+          const x = i % cols;
+          const y = (i / cols) | 0;
+          const xNorm = (x - sampled.minX) / spanX;
+          const yRipple = ((y - sampled.minY) / spanY - 0.5) * 24;
+          const clusterX = (x / 2) | 0;
+          const clusterY = (y / 2) | 0;
+          const clusterId = clusterX + clusterY * 4099 + L * 9176;
+          const clusterOff = (hash01(clusterId, 0xf01) - 0.5) * INTRO_CLUSTER_MS;
+          const jitter = (hash01(i, 0xa11 + L) - 0.5) * INTRO_JITTER_MS;
+          const n1 = hash01(i, 0xb22 + L);
+
+          let onAt = lineStart + xNorm * revealMs + yRipple + clusterOff + jitter;
+          onAt = Math.max(lineStart, Math.min(lineStart + revealMs - 8, onAt));
+
+          const bi = bands.length ? bandIndexForX(x, bands) : 0;
+          const wid = baseWid + bi;
+          if (onAt > wordReady[bi]) wordReady[bi] = onAt;
+
+          iTarget[i] = 1;
+          iLine[i] = L + 1;
+          iOnAt[i] = onAt;
+          iLevel[i] = 0.90 + n1 * 0.10;
+          iWordId[i] = wid;
+
+          const nAng = hash01(clusterId, 0xd01);
+          const nDist = hash01(i, 0xd02 + L);
+          const nSpin = (hash01(i, 0xd03) - 0.5) * 0.85;
+          let baseAng = Math.atan2(y - lineCy, x - lineCx);
+          if (!isFinite(baseAng) || (x === lineCx && y === lineCy)) {
+            baseAng = nAng * Math.PI * 2;
+          }
+          const ang = baseAng + nSpin + (nAng - 0.5) * 0.55;
+          const dist = INTRO_DRIFT_MIN + nDist * (INTRO_DRIFT_MAX - INTRO_DRIFT_MIN);
+          iDriftX[i] = Math.cos(ang) * dist;
+          iDriftY[i] = Math.sin(ang) * dist;
+        }
+
+        for (let b = 0; b < bandCount; b++) {
+          iIdleWords[baseWid + b].readyAt = wordReady[b];
+        }
+
+        const pad = Math.max(2, Math.round(fontPx * 0.35));
+        const bx0 = Math.max(0, sampled.minX - pad);
+        const bx1 = Math.min(cols - 1, sampled.maxX + pad);
+        const by0 = Math.max(0, sampled.minY - pad);
+        const by1 = Math.min(rows - 1, sampled.maxY + pad);
+        const lineEnd = lineStart + revealMs;
+
+        for (let y = by0; y <= by1; y++) {
+          for (let x = bx0; x <= bx1; x++) {
+            const i = y * cols + x;
+            if (iTarget[i]) continue;
+            if (hash01(i, 0xd44 + L * 17) > INTRO_SPARK_RATIO) continue;
+            const xNorm = (x - sampled.minX) / spanX;
+            const n1 = hash01(i, 0xe55 + L);
+            const n2 = hash01(i, 0xf66 + L);
+            const waveT = lineStart + Math.max(0, Math.min(revealMs, xNorm * revealMs));
+            const onAt = Math.max(lineStart, waveT - 45 + (n1 - 0.5) * 55);
+            const life = 80 + n2 * 170;
+            const goneAt = Math.min(lineEnd - 16, onAt + life);
+            if (goneAt <= onAt) continue;
+            iOnAt[i] = onAt;
+            iDetachAt[i] = goneAt;
+            iGoneAt[i] = goneAt;
+            iLevel[i] = 0.52 + n1 * 0.28;
+          }
+        }
+
+        lineMeta.push({
+          revealMs,
+          minX: sampled.minX,
+          spanX,
+          glyph: sampled.glyph,
+        });
+
+        cursor = lineEnd;
+        if (L < lineCount - 1) cursor += INTRO_LINE_PAUSE;
+      }
+
+      const holdEnd = cursor + INTRO_HOLD_MS;
+      let dissolveCursor = holdEnd;
+      let maxGone = holdEnd;
+
+      for (let L = 0; L < lineCount; L++) {
+        const meta = lineMeta[L];
+        if (!meta || !meta.glyph.length) continue;
+        const dissolveMs = meta.revealMs * INTRO_DISSOLVE_SCALE;
+        const lineStart = dissolveCursor;
+
+        for (let g = 0; g < meta.glyph.length; g++) {
+          const i = meta.glyph[g];
+          const x = i % cols;
+          const y = (i / cols) | 0;
+          const xNorm = (x - meta.minX) / meta.spanX;
+          const clusterX = (x / 2) | 0;
+          const clusterY = (y / 2) | 0;
+          const clusterId = clusterX + clusterY * 4099 + L * 9176;
+          const clusterOff = (hash01(clusterId, 0xe01) - 0.5) * INTRO_CLUSTER_MS;
+          const jitter = (hash01(i, 0xe11 + L) - 0.5) * INTRO_JITTER_MS;
+
+          let detachAt = lineStart + xNorm * dissolveMs + clusterOff + jitter;
+          detachAt = Math.max(lineStart, Math.min(lineStart + dissolveMs - 8, detachAt));
+          const driftMs =
+            INTRO_DRIFT_MS_MIN +
+            hash01(i, 0xe22) * (INTRO_DRIFT_MS_MAX - INTRO_DRIFT_MS_MIN);
+          iDetachAt[i] = detachAt;
+          iGoneAt[i] = detachAt + driftMs;
+          if (iGoneAt[i] > maxGone) maxGone = iGoneAt[i];
+        }
+
+        dissolveCursor = lineStart + dissolveMs;
+        if (L < lineCount - 1) dissolveCursor += INTRO_DISSOLVE_PAUSE;
+      }
+
+      introTotalMs = maxGone + 120;
+    }
+
+    /* ── directory LED bake / clear ───────────────────────────────────────── */
+
+    function clearDirectoryLeds() {
+      if (!dOn) return;
+      dOn.fill(0);
+      if (dTarget) dTarget.fill(0);
+      if (dLevel) dLevel.fill(0);
+      if (dOnAt) dOnAt.fill(0);
+      if (dDetachAt) dDetachAt.fill(0);
+      if (dGoneAt) dGoneAt.fill(0);
+      if (dDriftX) dDriftX.fill(0);
+      if (dDriftY) dDriftY.fill(0);
+      if (dOx) dOx.fill(0);
+      if (dOy) dOy.fill(0);
+      if (dWordId) dWordId.fill(-1);
+      dIdleWords = [];
+      dBitmap = null;
+    }
+
+    function arrowSizeFor(fontPx) {
+      return Math.max(fontPx * 1.15, fontPx + 2);
+    }
+
+    function lineLayoutWidth(octx, line, fontPx) {
+      octx.font = `600 ${fontPx}px ${DIR_FONT}`;
+      const textW = octx.measureText(line.text).width;
+      const arrowW = arrowSizeFor(fontPx) * 1.05;
+      const gap = Math.max(3, Math.round(fontPx * 0.35));
+      return textW + gap + arrowW;
+    }
+
+    function fitDirFont(octx, lines, maxWidth, startPx) {
+      let fontPx = startPx;
+      for (let attempt = 0; attempt < 14; attempt++) {
+        let widest = 0;
+        for (let L = 0; L < lines.length; L++) {
+          widest = Math.max(widest, lineLayoutWidth(octx, lines[L], fontPx));
+        }
+        if (widest <= maxWidth) break;
+        fontPx = Math.max(4, fontPx - 1);
+      }
+      return fontPx;
+    }
+
+    function drawPixelArrow(octx, cx, cy, size, dir) {
+      const s = size;
+      const stroke = Math.max(1.5, s * 0.26);
+      octx.save();
+      octx.translate(cx, cy);
+      if (dir === 'down') octx.scale(1, -1);
+      octx.strokeStyle = '#fff';
+      octx.fillStyle = '#fff';
+      octx.lineWidth = stroke;
+      octx.lineCap = 'round';
+      octx.lineJoin = 'round';
+      octx.beginPath();
+      octx.moveTo(-s * 0.52, s * 0.30);
+      octx.lineTo(s * 0.02, s * 0.30);
+      octx.quadraticCurveTo(s * 0.28, s * 0.30, s * 0.28, s * 0.04);
+      octx.lineTo(s * 0.28, -s * 0.18);
+      octx.stroke();
+      octx.beginPath();
+      octx.moveTo(s * 0.28, -s * 0.48);
+      octx.lineTo(s * 0.28 + s * 0.30, -s * 0.10);
+      octx.lineTo(s * 0.28 - s * 0.30, -s * 0.10);
+      octx.closePath();
+      octx.fill();
+      octx.restore();
+    }
+
+    function sampleLineWithArrow(octx, line, cx, cy, fontPx) {
+      octx.fillStyle = '#000';
+      octx.fillRect(0, 0, cols, rows);
+      octx.fillStyle = '#fff';
+      octx.font = `600 ${fontPx}px ${DIR_FONT}`;
+      octx.textAlign = 'left';
+      octx.textBaseline = 'middle';
+
+      const arrowSize = arrowSizeFor(fontPx);
+      const gap = Math.max(3, Math.round(fontPx * 0.35));
+      const textW = octx.measureText(line.text).width;
+      const arrowW = arrowSize * 1.05;
+      const totalW = textW + gap + arrowW;
+      const startX = cx - totalW * 0.5;
+
+      octx.fillText(line.text, startX, cy);
+      drawPixelArrow(
+        octx,
+        startX + textW + gap + arrowW * 0.5,
+        cy,
+        arrowSize,
+        line.arrow
+      );
+
+      const data = octx.getImageData(0, 0, cols, rows).data;
+      const glyph = [];
+      let minX = cols, maxX = -1, minY = rows, maxY = -1;
+      for (let i = 0, n = cols * rows; i < n; i++) {
+        if (data[i * 4] <= 140) continue;
+        glyph.push(i);
+        const x = i % cols;
+        const y = (i / cols) | 0;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+      return { glyph, minX, maxX, minY, maxY };
+    }
+
+    function bakeDirectory(opts) {
+      const instant = !!(opts && opts.instant);
+      const n = cols * rows;
+      dTarget = new Float32Array(n);
+      dOn = new Float32Array(n);
+      dLevel = new Float32Array(n);
+      dOnAt = new Float32Array(n);
+      dDetachAt = new Float32Array(n);
+      dGoneAt = new Float32Array(n);
+      dDriftX = new Float32Array(n);
+      dDriftY = new Float32Array(n);
+      dOx = new Float32Array(n);
+      dOy = new Float32Array(n);
+      dWordId = new Int16Array(n);
+      dWordId.fill(-1);
+      dIdleWords = [];
+      dBitmap = null;
+      assembleMs = 0;
+
+      if (cols < 16 || rows < 16) return;
+
+      const off = document.createElement('canvas');
+      off.width = cols;
+      off.height = rows;
+      const octx = off.getContext('2d', { alpha: false });
+      if (!octx) return;
+
+      const lineCount = DIR_LINES.length;
+      let fontPx = Math.max(5, Math.floor(rows * 0.078));
+      fontPx = fitDirFont(octx, DIR_LINES, cols * 0.90, fontPx);
+
+      let lineGap = fontPx * 1.85;
+      while (lineGap * (lineCount - 1) > rows * 0.46 && fontPx > 4) {
+        fontPx -= 1;
+        lineGap = fontPx * 1.85;
+      }
+      fontPx = fitDirFont(octx, DIR_LINES, cols * 0.90, fontPx);
+      octx.font = `600 ${fontPx}px ${DIR_FONT}`;
+      lineGap = fontPx * 1.85;
+
+      const blockH = lineGap * (lineCount - 1);
+      const startY = rows * 0.5 - blockH * 0.5;
+      const cx = cols * 0.5;
+      let cursor = 0;
+
+      for (let L = 0; L < lineCount; L++) {
+        const cy = startY + L * lineGap;
+        const sampled = sampleLineWithArrow(octx, DIR_LINES[L], cx, cy, fontPx);
+        if (!sampled.glyph.length) continue;
+
+        const spanX = Math.max(1, sampled.maxX - sampled.minX);
+        const spanY = Math.max(1, sampled.maxY - sampled.minY);
+        const revealMs = instant
+          ? 0
+          : Math.min(
+              DIR_REVEAL_MAX,
+              Math.max(DIR_REVEAL_MIN, spanX * DIR_MS_PER_COL * DIR_LINES[L].pace)
+            );
+        const lineStart = cursor;
+        const lineCx = (sampled.minX + sampled.maxX) * 0.5;
+        const lineCy = (sampled.minY + sampled.maxY) * 0.5;
+
+        const arrowSize = arrowSizeFor(fontPx);
+        const gap = Math.max(3, Math.round(fontPx * 0.35));
+        const textW = octx.measureText(DIR_LINES[L].text).width;
+        const arrowW = arrowSize * 1.05;
+        const totalW = textW + gap + arrowW;
+        const startX = cx - totalW * 0.5;
+        const bands = wordBandsAt(octx, DIR_LINES[L].text, startX);
+        /* Arrow glyphs ride as their own idle word */
+        bands.push({
+          x0: startX + textW + gap * 0.35,
+          x1: startX + totalW + 1,
+        });
+        const bandCount = Math.max(1, bands.length);
+        const baseWid = dIdleWords.length;
+        const wordReady = new Float32Array(bandCount);
+        for (let b = 0; b < bandCount; b++) {
+          wordReady[b] = lineStart;
+          dIdleWords.push(createIdleWord(lineStart));
+        }
+
+        for (let g = 0; g < sampled.glyph.length; g++) {
+          const i = sampled.glyph[g];
+          const x = i % cols;
+          const y = (i / cols) | 0;
+          const xNorm = (x - sampled.minX) / spanX;
+          const yRipple = ((y - sampled.minY) / spanY - 0.5) * 22;
+          const clusterX = (x / 2) | 0;
+          const clusterY = (y / 2) | 0;
+          const clusterId = clusterX + clusterY * 4099 + L * 9176;
+          const clusterOff = (hash01(clusterId, 0xc01) - 0.5) * DIR_CLUSTER_MS;
+          const jitter = (hash01(i, 0xc11 + L) - 0.5) * DIR_JITTER_MS;
+          const n1 = hash01(i, 0xc22 + L);
+
+          let litAt = instant
+            ? 0
+            : lineStart + xNorm * revealMs + yRipple + clusterOff + jitter;
+          if (!instant) {
+            litAt = Math.max(lineStart, Math.min(lineStart + revealMs - 8, litAt));
+          }
+
+          const bi = bandIndexForX(x, bands);
+          if (litAt > wordReady[bi]) wordReady[bi] = litAt;
+
+          dTarget[i] = 1;
+          dOnAt[i] = litAt;
+          dDetachAt[i] = HOLD_SENTINEL;
+          dGoneAt[i] = HOLD_SENTINEL;
+          dLevel[i] = 0.90 + n1 * 0.10;
+          dWordId[i] = baseWid + bi;
+
+          const nAng = hash01(clusterId, 0xc31);
+          const nDist = hash01(i, 0xc32 + L);
+          const nSpin = (hash01(i, 0xc33) - 0.5) * 0.85;
+          let baseAng = Math.atan2(y - lineCy, x - lineCx);
+          if (!isFinite(baseAng) || (x === lineCx && y === lineCy)) {
+            baseAng = nAng * Math.PI * 2;
+          }
+          const ang = baseAng + nSpin + (nAng - 0.5) * 0.55;
+          const dist = DIR_DRIFT_MIN + nDist * (DIR_DRIFT_MAX - DIR_DRIFT_MIN);
+          dDriftX[i] = Math.cos(ang) * dist;
+          dDriftY[i] = Math.sin(ang) * dist;
+        }
+
+        for (let b = 0; b < bandCount; b++) {
+          dIdleWords[baseWid + b].readyAt = instant ? 0 : wordReady[b];
+        }
+
+        if (!instant) {
+          const pad = Math.max(2, Math.round(fontPx * 0.35));
+          const bx0 = Math.max(0, sampled.minX - pad);
+          const bx1 = Math.min(cols - 1, sampled.maxX + pad);
+          const by0 = Math.max(0, sampled.minY - pad);
+          const by1 = Math.min(rows - 1, sampled.maxY + pad);
+          const lineEnd = lineStart + revealMs;
+
+          for (let y = by0; y <= by1; y++) {
+            for (let x = bx0; x <= bx1; x++) {
+              const i = y * cols + x;
+              if (dTarget[i]) continue;
+              if (hash01(i, 0xc44 + L * 17) > DIR_SPARK_RATIO) continue;
+              const xNorm = (x - sampled.minX) / spanX;
+              const n1 = hash01(i, 0xc55 + L);
+              const n2 = hash01(i, 0xc66 + L);
+              const waveT = lineStart + Math.max(0, Math.min(revealMs, xNorm * revealMs));
+              const sparkOn = Math.max(lineStart, waveT - 45 + (n1 - 0.5) * 55);
+              const life = 80 + n2 * 170;
+              const sparkGone = Math.min(lineEnd - 16, sparkOn + life);
+              if (sparkGone <= sparkOn) continue;
+              dOnAt[i] = sparkOn;
+              dDetachAt[i] = sparkGone;
+              dGoneAt[i] = sparkGone;
+              dLevel[i] = 0.48 + n1 * 0.28;
+            }
+          }
+        }
+
+        cursor = lineStart + revealMs;
+        if (L < lineCount - 1) cursor += instant ? 0 : DIR_LINE_PAUSE;
+      }
+
+      assembleMs = cursor;
+      freezeDirectoryBitmap();
+    }
+
+    /* Snapshot completed target glyphs once — read-only for all idle renders. */
+    function freezeDirectoryBitmap() {
+      const n = cols * rows;
+      dBitmap = new Float32Array(n);
+      if (!dTarget || !dLevel) return;
+      for (let i = 0; i < n; i++) {
+        if (dTarget[i]) dBitmap[i] = dLevel[i];
+      }
+    }
+
+    /*
+      Temporary render only: rebuild dOn from immutable dBitmap + per-word idle Y.
+      Never mutates dBitmap / dTarget / dLevel.
+    */
+    function renderDirectoryFromBitmap(yCache) {
+      if (!dOn || !dBitmap) return false;
+      const n = cols * rows;
+      dOn.fill(0);
+      if (dOx) dOx.fill(0);
+      if (dOy) dOy.fill(0);
+      let any = false;
+      for (let i = 0; i < n; i++) {
+        const level = dBitmap[i];
+        if (!(level > 0)) continue;
+        any = true;
+        const wid = dWordId ? dWordId[i] : -1;
+        const shiftPx =
+          yCache && wid >= 0 && wid < yCache.length ? yCache[wid] : 0;
+        const x = i % cols;
+        const y = (i / cols) | 0;
+        scatterIdleLight(dOn, x, y, level, shiftPx);
+      }
+      return any;
+    }
+
+    function paintDirectoryHold() {
+      /* Exact post-generation bitmap — zero idle offset */
+      if (!dBitmap) freezeDirectoryBitmap();
+      renderDirectoryFromBitmap(null);
+    }
+
+    /* ── phase entry (called ONLY from the master timeline) ─────────────── */
+
+    function enterIntroPhase() {
+      if (killed) return;
+      phase = 'intro';
+      phaseStartTime = timeline ? timeline.time() : 0;
+      setBoot('intro');
+      window.dispatchEvent(new CustomEvent('pixelintrostart'));
+    }
+
+    function enterDirectoryPhase() {
+      if (killed) return;
+      /* Sole visual entry — mask was baked once when the master timeline was built */
+      console.info('[IntroController] enterDirectoryPhase (sole entry)');
+      clearIntroLeds();
+      if (!dOn) bakeDirectory(); /* safety if build skipped prebake */
+      phase = 'directory';
+      phaseStartTime = timeline ? timeline.time() : 0;
+      setBoot('directory');
+      window.dispatchEvent(new CustomEvent('pixeldirectorystart'));
+    }
+
+    function enterIdle() {
+      if (killed && phase === 'idle') return;
+      phase = 'idle';
+      holdingFF = false;
+      timeScale = 1;
+      setBoot(null);
+      paintDirectoryHold();
+      window.dispatchEvent(new CustomEvent('pixeldirectoryhold'));
+    }
+
+    function renderFinalHold() {
+      ensureGrid();
+      clearIntroLeds();
+      if (cols >= 12 && rows >= 8 && animConfig.motion && !prefersReduced) {
+        bakeDirectory({ instant: true });
+        paintDirectoryHold();
+      } else {
+        clearDirectoryLeds();
+      }
+      phase = 'idle';
+      holdingFF = false;
+      timeScale = 1;
+      setBoot(null);
+      window.dispatchEvent(new CustomEvent('pixeldirectorystart'));
+      window.dispatchEvent(new CustomEvent('pixeldirectoryhold'));
+    }
+
+    /* ── build + play the single master timeline ──────────────────────────── */
+
+    function buildAndPlayMasterTimeline(opts) {
+      opts = opts || {};
+      const skipIntroPhase = !!opts.skipIntroPhase;
+
+      killMasterTimeline();
+      killed = false;
+      clearIntroLeds();
+      clearDirectoryLeds();
+
+      ensureGrid();
+      if (prefersReduced || !animConfig.motion || cols < 12 || rows < 8) {
+        phase = 'skipped';
+        setBoot(null);
+        return false;
+      }
+
+      if (!skipIntroPhase) {
+        bakeIntro();
+      } else {
+        introTotalMs = 0;
+      }
+
+      /* Bake directory once here — enterDirectoryPhase only reveals it */
+      bakeDirectory();
+      const dirAssembleSec = Math.max(0.05, assembleMs / 1000);
+
+      const idleSec = skipIntroPhase ? 0 : INTRO_IDLE_MS / 1000;
+      const introSec = skipIntroPhase ? 0 : Math.max(0.05, introTotalMs / 1000);
+      const dirDelaySec = DIR_DELAY_SEC;
+
+      if (!window.gsap) {
+        console.error('[IntroController] GSAP required for landing sequence');
+        phase = 'skipped';
+        return false;
+      }
+
+      phase = 'boot';
+      started = true;
+      setBoot(skipIntroPhase ? 'directory' : 'intro');
+
+      timeline = window.gsap.timeline({
+        defaults: { ease: 'none' },
+        onComplete: function () {
+          if (killed) return;
+          timeline = null;
+        },
+      });
+      timeline.timeScale(timeScale);
+
+      /* Wake Heat/Wave rAF for the boot delay (before intro LEDs appear) */
+      window.dispatchEvent(new CustomEvent('pixelintrostart'));
+
+      if (!skipIntroPhase) {
+        timeline.addLabel('boot');
+        if (idleSec > 0) timeline.to({}, { duration: idleSec });
+
+        timeline.addLabel('intro');
+        timeline.call(enterIntroPhase);
+        timeline.to({}, { duration: introSec });
+        timeline.call(function () {
+          if (killed) return;
+          clearIntroLeds();
+        });
+      }
+
+      timeline.addLabel('dirDelay');
+      if (dirDelaySec > 0) timeline.to({}, { duration: dirDelaySec });
+
+      timeline.addLabel('directory');
+      timeline.call(enterDirectoryPhase);
+      timeline.to({}, { duration: dirAssembleSec });
+
+      timeline.addLabel('idle');
+      timeline.call(function () {
+        if (killed) return;
+        enterIdle();
+      });
+
+      return true;
+    }
+
+    /* ── public control API ───────────────────────────────────────────────── */
+
+    function beginFastForward() {
+      if (!isActivePhase()) return;
+      if (holdingFF) return;
+      holdingFF = true;
+      setTimeScale(FF_RATE);
+    }
+
+    function endFastForward() {
+      if (!holdingFF) return;
+      holdingFF = false;
+      setTimeScale(1);
+    }
+
+    function skip() {
+      if (phase === 'idle' || phase === 'skipped') return;
+      killed = true;
+      killMasterTimeline();
+      renderFinalHold();
+    }
+
+    function cancel() {
+      killed = true;
+      killMasterTimeline();
+      clearIntroLeds();
+      clearDirectoryLeds();
+      phase = 'skipped';
+      holdingFF = false;
+      timeScale = 1;
+      started = false;
+      setBoot(null);
+    }
+
+    function schedule() {
+      if (prefersReduced || !animConfig.motion || resolveActiveBgMode() !== 'heat') {
+        phase = 'skipped';
+        return;
+      }
+      if (started) return;
+
+      const kick = function () {
+        if (started || killed) return;
+        buildAndPlayMasterTimeline();
+      };
+
+      if (document.fonts && document.fonts.ready) {
+        document.fonts.ready.then(kick).catch(kick);
+      } else {
+        kick();
+      }
+    }
+
+    function replayDirectoryAfterMotionOn() {
+      requestAnimationFrame(function () {
+        if (!animConfig.motion) return;
+        if (!isOnLanding()) return;
+        killed = false;
+        started = false;
+        holdingFF = false;
+        timeScale = 1;
+        buildAndPlayMasterTimeline({ skipIntroPhase: true });
+        window.dispatchEvent(new CustomEvent('pixeldirectorystart'));
+      });
+    }
+
+    /* ── per-frame LED update (time from master timeline) ─────────────────── */
+
+    function updateIntroLeds(t) {
+      if (!iOn) return false;
+      let anyLit = false;
+      let dissolving = false;
+      const n = cols * rows;
+
+      /* Detect dissolve first — geometric drift owns those frames */
+      for (let i = 0; i < n; i++) {
+        if (!iTarget || !iTarget[i]) continue;
+        if (!(iGoneAt && iGoneAt[i] > iOnAt[i])) continue;
+        if (t < iOnAt[i] || t >= iGoneAt[i]) continue;
+        const detachAt = iDetachAt[i];
+        if (t >= detachAt && iGoneAt[i] > detachAt) {
+          dissolving = true;
+          break;
+        }
+      }
+
+      if (dissolving) {
+        pauseIdleWords(iIdleWords, t);
+        for (let i = 0; i < n; i++) {
+          if (!(iGoneAt && iGoneAt[i] > iOnAt[i])) {
+            iOn[i] = 0; iOx[i] = 0; iOy[i] = 0;
+            continue;
+          }
+          if (t < iOnAt[i] || t >= iGoneAt[i]) {
+            iOn[i] = 0; iOx[i] = 0; iOy[i] = 0;
+            continue;
+          }
+          iOn[i] = iLevel[i];
+          anyLit = true;
+          const detachAt = iDetachAt[i];
+          if (iTarget[i] && t >= detachAt && iGoneAt[i] > detachAt) {
+            const u = (t - detachAt) / (iGoneAt[i] - detachAt);
+            const e = easeOutCubic(Math.max(0, Math.min(1, u)));
+            iOx[i] = iDriftX[i] * e;
+            iOy[i] = iDriftY[i] * e;
+          } else {
+            iOx[i] = 0;
+            iOy[i] = 0;
+          }
+        }
+        return anyLit;
+      }
+
+      /* Holding: rebuild brightness via fixed-grid light flow from idle Y */
+      const yCache = iIdleWords.length
+        ? tickAllIdleWords(iIdleWords, t, false)
+        : null;
+      iOn.fill(0);
+
+      for (let i = 0; i < n; i++) {
+        iOx[i] = 0;
+        iOy[i] = 0;
+        if (!(iGoneAt && iGoneAt[i] > iOnAt[i])) continue;
+        if (t < iOnAt[i] || t >= iGoneAt[i]) continue;
+        anyLit = true;
+        const level = iLevel[i];
+        if (iTarget && iTarget[i]) {
+          const wid = iWordId ? iWordId[i] : -1;
+          const shiftPx = yCache && wid >= 0 ? yCache[wid] : 0;
+          const x = i % cols;
+          const y = (i / cols) | 0;
+          scatterIdleLight(iOn, x, y, level, shiftPx);
+        } else {
+          /* Sparks stay pinned to their home cell */
+          iOn[i] = level;
+        }
+      }
+      return anyLit;
+    }
+
+    function updateDirectoryLeds(t) {
+      if (!dOn) return false;
+      if (!dBitmap) freezeDirectoryBitmap();
+      let anyLit = false;
+      const n = cols * rows;
+      const yCache = dIdleWords.length
+        ? tickAllIdleWords(dIdleWords, t, false)
+        : null;
+      /* Render buffer only — source bitmap stays untouched */
+      dOn.fill(0);
+
+      for (let i = 0; i < n; i++) {
+        if (dOx) dOx[i] = 0;
+        if (dOy) dOy[i] = 0;
+        if (!(dGoneAt && dGoneAt[i] > dOnAt[i])) continue;
+        if (t < dOnAt[i] || t >= dGoneAt[i]) continue;
+        anyLit = true;
+
+        if (dTarget && dTarget[i]) {
+          /* Always sample the frozen bitmap at the home cell */
+          const level = dBitmap ? dBitmap[i] : dLevel[i];
+          const wid = dWordId ? dWordId[i] : -1;
+          const shiftPx =
+            yCache && wid >= 0 && wid < yCache.length ? yCache[wid] : 0;
+          const x = i % cols;
+          const y = (i / cols) | 0;
+          scatterIdleLight(dOn, x, y, level, shiftPx);
+        } else {
+          /* Transient sparks — not part of the frozen bitmap */
+          dOn[i] = dLevel[i];
+        }
+      }
+      return anyLit;
+    }
+
+    function update(/* now */) {
+      if (phase === 'idle') {
+        /*
+          Idle hold: render ONLY from the immutable bitmap.
+          Do NOT reuse assemble timing (Infinity >= HOLD_SENTINEL wiped the field).
+        */
+        if (!dBitmap) return false;
+        const yCache = dIdleWords.length
+          ? tickAllIdleWords(dIdleWords, assembleMs + 1, false)
+          : null;
+        renderDirectoryFromBitmap(yCache);
+        return true;
+      }
+      if (phase === 'intro') {
+        return updateIntroLeds(phaseElapsedMs()) || !!timeline;
+      }
+      if (phase === 'directory') {
+        return updateDirectoryLeds(phaseElapsedMs()) || !!timeline;
+      }
+      /* boot / dirDelay — keep rAF alive while master timeline runs */
+      return !!timeline;
+    }
+
+    function brightness(i) {
+      const a = iOn ? iOn[i] : 0;
+      const b = dOn ? dOn[i] : 0;
+      return a > b ? a : b;
+    }
+
+    function offsetX(i) {
+      const d = dOx ? dOx[i] : 0;
+      if (d) return d;
+      return iOx ? iOx[i] : 0;
+    }
+
+    function offsetY(i) {
+      const d = dOy ? dOy[i] : 0;
+      if (d) return d;
+      return iOy ? iOy[i] : 0;
+    }
+
+    function isActive() {
+      return isActivePhase() || phase === 'idle' || !!timeline;
+    }
+
+    function onResize(nextCols, nextRows) {
+      const c = nextCols | 0;
+      const r = nextRows | 0;
+      if (c === cols && r === rows) return;
+      cols = c;
+      rows = r;
+
+      if (phase === 'intro') {
+        bakeIntro();
+        /* Elapsed still comes from master timeline — no clock reset / restart */
+      } else if (phase === 'directory') {
+        bakeDirectory();
+      } else if (phase === 'idle') {
+        bakeDirectory({ instant: true });
+        paintDirectoryHold();
+      }
+    }
+
+    /* ── input wiring ─────────────────────────────────────────────────────── */
+
+    function bindInputs() {
+      const stage = document.getElementById('stage');
+      if (stage) {
+        stage.addEventListener('mousedown', function (e) {
+          if (performance.now() < touchGuardUntil) return;
+          if (e.button != null && e.button !== 0) return;
+          beginFastForward();
+        });
+        stage.addEventListener('mouseleave', endFastForward);
+        stage.addEventListener(
+          'touchstart',
+          function (e) {
+            if (!isActivePhase()) return;
+            touchGuardUntil = performance.now() + 650;
+            if (e.cancelable) e.preventDefault();
+            beginFastForward();
+          },
+          { passive: false }
+        );
+        stage.addEventListener('touchend', endFastForward, { passive: true });
+        stage.addEventListener('touchcancel', endFastForward, { passive: true });
+      }
+
+      window.addEventListener('mouseup', endFastForward);
+
+      window.addEventListener('keydown', function (e) {
+        if (e.code !== 'Space' && e.key !== ' ') return;
+        if (e.repeat) return;
+        const tag = e.target && e.target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        if (e.target && e.target.isContentEditable) return;
+        if (phase === 'idle' || phase === 'skipped') return;
+        e.preventDefault();
+        skip();
+      });
+
+      window.addEventListener('motionreenabled', replayDirectoryAfterMotionOn);
+      window.addEventListener('animconfigchange', function (e) {
+        if (e.detail && e.detail.motion === false) cancel();
+      });
+    }
+
+    bindInputs();
+
+    return {
+      brightness: brightness,
+      offsetX: offsetX,
+      offsetY: offsetY,
+      update: update,
+      isActive: isActive,
+      onResize: onResize,
+      cancel: cancel,
+      schedule: schedule,
+      beginFastForward: beginFastForward,
+      endFastForward: endFastForward,
+      skip: skip,
+      skipIntro: skip,
+      finishIntro: skip,
+      timeScale: setTimeScale,
+      getPhase: function () { return phase; },
+      isControllable: isActivePhase,
+    };
+  })();
+
+  /* Compatibility surface — heatmap / wave still talk to pixelField + schedule */
+  const pixelField = {
+    brightness: function (i) { return introController.brightness(i); },
+    offsetX: function (i) { return introController.offsetX(i); },
+    offsetY: function (i) { return introController.offsetY(i); },
+    update: function (now) { return introController.update(now); },
+    isActive: function () { return introController.isActive(); },
+    onResize: function (c, r) { introController.onResize(c, r); },
+    cancel: function () { introController.cancel(); },
+  };
+
+  const pixelIntro = {
+    schedule: function () { introController.schedule(); },
+    cancel: function () { introController.cancel(); },
+    isRunning: function () {
+      const p = introController.getPhase();
+      return p === 'intro' || p === 'boot';
+    },
+  };
+
+  window.bootSequence = introController;
+  window.introController = introController;
 
   /* ═══════════════════════════════════════════════════════════════════════════
      SYSTEM 6 · PIXEL HEATMAP
@@ -607,8 +2051,8 @@
 
     const CELL     = 5;      /* CSS pixels per cell — finer grid */
     const MAX_DISP = 0.40;   /* subtler max yield — expensive restraint */
-    const HEAT_IN  = 0.09;   /* color lags motion */
-    const HEAT_OUT = 0.05;   /* gentle cool, no ribbon */
+    const HEAT_IN  = 0.09;   /* color lags motion — keep snappy under cursor */
+    const HEAT_OUT = 0.018;  /* slow atmospheric cool — path lingers, same peak */
     const MOUSE_NEAR = 0.11; /* soft when cursor is close to sample */
     const MOUSE_FAR  = 0.26; /* catches up when pointer leaps */
     const DOT      = CELL - 2;
@@ -648,7 +2092,8 @@
     const TRAIL_DECAY    = 0.50; /* tip-led; history only softens the wave */
     const TRAIL_MIN_STEP = 0.36; /* dense samples — liquid continuity */
     const TRAIL_FORCE    = 0.90; /* displacement gain */
-    const TRAIL_FADE     = 0.91; /* linger, then dissolve */
+    const TRAIL_FADE     = 0.965; /* slow wake dissolve after pointer leaves */
+    const TRAIL_FADE_CUT = 0.015; /* drop samples only once nearly invisible */
 
     const ctx = canvas.getContext('2d', { alpha: false });
     let cols = 0;
@@ -666,7 +2111,7 @@
     let smY  = -1;
     let pointerIn = false;
     let running = false;
-    let enabled = animConfig.motion && animConfig.bgMode === 'heat';
+    let enabled = animConfig.motion && resolveActiveBgMode() === 'heat';
     let viewW = 0;
     let viewH = 0;
     let dpr = 1;
@@ -676,231 +2121,6 @@
     /* Short cursor history in cell-space: newest at index 0.
        Each entry: { x, y, w } — w is relative strength (1 at tip). */
     const trail = [];
-
-    /* ── Intro LED text — lights the same dots via HOT accent (Settings RGB) ── */
-    const INTRO_IDLE_MS      = 700;   /* pure idle field before first LEDs */
-    const INTRO_REVEAL_MS    = 2100;  /* staggered discovery window */
-    const INTRO_HOLD_MS      = 1600;  /* fully formed brand hold */
-    const INTRO_DISSOLVE_MS  = 1200;  /* individual LEDs turn off */
-    const INTRO_SPARK_RATIO  = 0.11;  /* exploratory non-glyph flashes */
-
-    let introTarget = null;  /* 1 = glyph cell */
-    let introOn     = null;  /* live LED brightness (snaps — no fades) */
-    let introLevel  = null;  /* per-LED peak 0.84–1 → tint through HOT */
-    let introOnAt   = null;  /* ms from reveal clock when LED snaps on */
-    let introOffAt  = null;  /* ms from reveal clock when LED snaps off */
-    let introPhase  = 'pending'; /* pending | running | done | skipped */
-    let introOrigin = 0;
-    let introTimer  = 0;
-
-    function hash01(i, salt) {
-      let x = Math.imul(i ^ (salt | 0), 0x27d4eb2d);
-      x = Math.imul(x ^ (x >>> 15), 0x85ebca6b);
-      x = Math.imul(x ^ (x >>> 13), 0xc2b2ae35);
-      return ((x >>> 0) / 4294967296);
-    }
-
-    function clearIntroArrays() {
-      if (!introOn) return;
-      introOn.fill(0);
-      if (introTarget) introTarget.fill(0);
-      if (introLevel) introLevel.fill(0);
-      if (introOnAt) introOnAt.fill(0);
-      if (introOffAt) introOffAt.fill(0);
-    }
-
-    function cancelIntro() {
-      if (introTimer) {
-        clearTimeout(introTimer);
-        introTimer = 0;
-      }
-      if (introPhase === 'running' || introPhase === 'pending') {
-        introPhase = 'done';
-      }
-      clearIntroArrays();
-    }
-
-    /* Sample brand text into the cell grid — each lit sample is one LED. */
-    function bakeIntroMask() {
-      const n = cols * rows;
-      introTarget = new Float32Array(n);
-      introOn     = new Float32Array(n);
-      introLevel  = new Float32Array(n);
-      introOnAt   = new Float32Array(n);
-      introOffAt  = new Float32Array(n);
-
-      if (cols < 12 || rows < 8) return;
-
-      const off = document.createElement('canvas');
-      off.width = cols;
-      off.height = rows;
-      const octx = off.getContext('2d', { alpha: false });
-      if (!octx) return;
-
-      octx.fillStyle = '#000';
-      octx.fillRect(0, 0, cols, rows);
-      octx.fillStyle = '#fff';
-      octx.textAlign = 'center';
-      octx.textBaseline = 'middle';
-
-      const dual = cols < 72;
-      const lines = dual ? ['CANAAN', 'BROWN'] : ['CANAAN BROWN'];
-      let fontPx = dual
-        ? Math.max(5, Math.floor(rows * 0.16))
-        : Math.max(6, Math.floor(rows * 0.20));
-
-      for (let attempt = 0; attempt < 8; attempt++) {
-        octx.font = `600 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
-        let widest = 0;
-        for (let L = 0; L < lines.length; L++) {
-          widest = Math.max(widest, octx.measureText(lines[L]).width);
-        }
-        if (widest <= cols * 0.86) break;
-        fontPx = Math.max(5, fontPx - 1);
-      }
-
-      octx.font = `600 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
-      const lineGap = dual ? fontPx * 1.35 : 0;
-      const startY = rows * 0.5 - lineGap * 0.5;
-
-      for (let L = 0; L < lines.length; L++) {
-        octx.fillText(lines[L], cols * 0.5, startY + L * lineGap);
-      }
-
-      const data = octx.getImageData(0, 0, cols, rows).data;
-      let minX = cols;
-      let maxX = -1;
-      let minY = rows;
-      let maxY = -1;
-      const glyph = [];
-
-      for (let i = 0; i < n; i++) {
-        /* Hard threshold — crisp LED silhouette, no soft alpha fades */
-        if (data[i * 4] > 140) {
-          introTarget[i] = 1;
-          glyph.push(i);
-          const x = i % cols;
-          const y = (i / cols) | 0;
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
-      }
-
-      if (!glyph.length) return;
-
-      const pad = Math.max(3, Math.round(Math.min(cols, rows) * 0.04));
-      const bx0 = Math.max(0, minX - pad);
-      const bx1 = Math.min(cols - 1, maxX + pad);
-      const by0 = Math.max(0, minY - pad);
-      const by1 = Math.min(rows - 1, maxY + pad);
-
-      const revealEnd = INTRO_REVEAL_MS;
-      const holdEnd   = revealEnd + INTRO_HOLD_MS;
-      const cx = (minX + maxX) * 0.5;
-      const cy = (minY + maxY) * 0.5;
-      const diag = Math.hypot(maxX - minX, maxY - minY) + 1;
-
-      /* Glyph LEDs — spatial + noise order so letters assemble, not stamp */
-      for (let g = 0; g < glyph.length; g++) {
-        const i = glyph[g];
-        const x = i % cols;
-        const y = (i / cols) | 0;
-        const radial = Math.hypot(x - cx, y - cy) / diag;
-        const n1 = hash01(i, 0xa11);
-        const n2 = hash01(i, 0xb22);
-        const order = Math.min(1, radial * 0.45 + n1 * 0.55);
-        introOnAt[i]  = order * INTRO_REVEAL_MS;
-        introOffAt[i] = holdEnd + n2 * INTRO_DISSOLVE_MS;
-        introLevel[i] = 0.88 + n1 * 0.12;
-      }
-
-      /* Exploratory flashes — light, then realize they don't belong */
-      for (let y = by0; y <= by1; y++) {
-        for (let x = bx0; x <= bx1; x++) {
-          const i = y * cols + x;
-          if (introTarget[i]) continue;
-          if (hash01(i, 0xc33) > INTRO_SPARK_RATIO) continue;
-          const n1 = hash01(i, 0xd44);
-          const n2 = hash01(i, 0xe55);
-          const onAt = n1 * INTRO_REVEAL_MS * 0.72;
-          const life = 90 + n2 * 280;
-          introOnAt[i]  = onAt;
-          introOffAt[i] = Math.min(revealEnd - 40, onAt + life);
-          introLevel[i] = 0.62 + n1 * 0.28;
-        }
-      }
-    }
-
-    function introScheduled(i) {
-      return introOffAt && introOffAt[i] > introOnAt[i];
-    }
-
-    /* Snap LEDs on/off from the intro clock — discrete, not faded. */
-    function updateIntro(now) {
-      if (introPhase !== 'running' || !introOn) return false;
-
-      const t = now - introOrigin;
-      const total = INTRO_REVEAL_MS + INTRO_HOLD_MS + INTRO_DISSOLVE_MS + 40;
-      let anyLit = false;
-      const n = cols * rows;
-
-      for (let i = 0; i < n; i++) {
-        if (!introScheduled(i)) {
-          introOn[i] = 0;
-          continue;
-        }
-        if (t >= introOnAt[i] && t < introOffAt[i]) {
-          introOn[i] = introLevel[i];
-          anyLit = true;
-        } else {
-          introOn[i] = 0;
-        }
-      }
-
-      if (t >= total) {
-        introPhase = 'done';
-        clearIntroArrays();
-        return false;
-      }
-
-      return anyLit || t < total;
-    }
-
-    function beginIntro() {
-      introTimer = 0;
-      if (!enabled || prefersReduced || introPhase === 'done' || introPhase === 'skipped') {
-        return;
-      }
-      if (!heat || cols < 12) {
-        introPhase = 'skipped';
-        return;
-      }
-      bakeIntroMask();
-      introOrigin = performance.now();
-      introPhase = 'running';
-      start();
-    }
-
-    function scheduleIntro() {
-      if (prefersReduced || !animConfig.motion || animConfig.bgMode !== 'heat') {
-        introPhase = 'skipped';
-        return;
-      }
-      if (introPhase !== 'pending') return;
-
-      const kick = () => {
-        if (introPhase !== 'pending') return;
-        introTimer = window.setTimeout(beginIntro, INTRO_IDLE_MS);
-      };
-
-      if (document.fonts && document.fonts.ready) {
-        document.fonts.ready.then(kick).catch(kick);
-      } else {
-        kick();
-      }
-    }
 
     function smoothstep(t) {
       if (t <= 0) return 0;
@@ -936,28 +2156,29 @@
       viewH = Math.max(1, Math.round(rect.height));
       dpr = Math.min(window.devicePixelRatio || 1, 2);
 
-      cols = Math.ceil(viewW / CELL);
-      rows = Math.ceil(viewH / CELL);
+      const nextCols = Math.ceil(viewW / CELL);
+      const nextRows = Math.ceil(viewH / CELL);
+      const gridChanged = nextCols !== cols || nextRows !== rows;
+
+      cols = nextCols;
+      rows = nextRows;
       const n = cols * rows;
 
-      heat  = new Float32Array(n);
-      ox    = new Float32Array(n);
-      oy    = new Float32Array(n);
-      vx    = new Float32Array(n);
-      vy    = new Float32Array(n);
-      trail.length = 0;
-
-      /* Rebuild intro mask if mid-play; otherwise keep pending/done */
-      if (introPhase === 'running') {
-        bakeIntroMask();
-        introOrigin = performance.now();
+      if (gridChanged || !heat) {
+        heat  = new Float32Array(n);
+        ox    = new Float32Array(n);
+        oy    = new Float32Array(n);
+        vx    = new Float32Array(n);
+        vy    = new Float32Array(n);
+        trail.length = 0;
       }
+      if (gridChanged) pixelField.onResize(cols, rows);
 
       /* Shared canvas — only claim the surface while Heat is active */
       if (!enabled) return;
       applySurface();
       paintRest();
-      if (introPhase === 'running') start();
+      if (pixelField.isActive()) start();
     }
 
     function paintRest() {
@@ -1041,7 +2262,7 @@
         for (let t = 0; t < trail.length; t++) {
           trail[t].w *= TRAIL_FADE;
         }
-        while (trail.length && trail[trail.length - 1].w < 0.04) trail.pop();
+        while (trail.length && trail[trail.length - 1].w < TRAIL_FADE_CUT) trail.pop();
       }
     }
 
@@ -1058,7 +2279,7 @@
         animConfig.effectColor.b,
       ];
 
-      const introAlive = updateIntro(performance.now());
+      const introAlive = pixelField.update(performance.now());
 
       /* Adaptive chase — responsive across gaps, velvet up close */
       if (pointerIn) {
@@ -1175,7 +2396,10 @@
         springAxis(oy[i], vy[i], targetY);
         oy[i] = _s.pos; vy[i] = _s.vel;
 
-        const introHv = introOn ? introOn[i] : 0;
+        const introHv = pixelField.brightness(i);
+        const introDX = pixelField.offsetX(i);
+        const introDY = pixelField.offsetY(i);
+        const introDrift = introDX !== 0 || introDY !== 0;
 
         /* Microscopic sleep only — never hard-stop a visible settle */
         if (
@@ -1201,7 +2425,7 @@
         }
 
         /* Intro LEDs share the heat tint path → live Settings RGB accent */
-        const hv = Math.max(heat[i], introHv);
+        const hv = Math.max(heat[i], introDrift ? 0 : introHv);
         /* Soft radial heat: strong under cursor → medium → subtle rim → cool.
            COLOR_FALLOFF < 1 keeps a gentle pink fringe; GLOW_OPACITY caps peak. */
         const eased = hv * hv * (3 - 2 * hv);
@@ -1211,16 +2435,28 @@
         const disp = Math.min(1, Math.hypot(ox[i], oy[i]) / (MAX_DISP + EPS));
         const depth = Math.min(1, heat[i] * 0.5 + disp * 0.45);
         const scale = 1 - smootherstep(depth) * 0.24;
-        const size  = DOT * scale * (1 + (heat[i] > 0 ? tint : 0) * GLOW_SIZE);
+        const size  = DOT * scale * (1 + (heat[i] > 0 ? tint * GLOW_SIZE : 0));
 
-        const cx = x * CELL + CELL * 0.5 + ox[i] * CELL;
-        const cy = y * CELL + CELL * 0.5 + oy[i] * CELL;
+        const homeX = x * CELL + CELL * 0.5 + ox[i] * CELL;
+        const homeY = y * CELL + CELL * 0.5 + oy[i] * CELL;
+        const cx = homeX + introDX;
+        const cy = homeY + introDY;
+
+        /* While a glyph LED drifts away, restore the idle white dot at home */
+        if (introDrift && heat[i] < EPS) {
+          ctx.fillStyle = `rgb(${COOL[0]},${COOL[1]},${COOL[2]})`;
+          ctx.fillRect(homeX - DOT * 0.5, homeY - DOT * 0.5, DOT, DOT);
+        }
 
         /* Faint feathered bloom — warm light through frosted glass.
            Driven by tint so it dissolves with the heat field. */
-        if (tint > BLOOM_THRESHOLD) {
+        const drawTint = introDrift
+          ? Math.min(1, Math.pow(introHv * introHv * (3 - 2 * introHv), COLOR_FALLOFF) * GLOW_OPACITY)
+          : tint;
+
+        if (drawTint > BLOOM_THRESHOLD) {
           const bloom = smootherstep(
-            (tint - BLOOM_THRESHOLD) / (1 - BLOOM_THRESHOLD)
+            (drawTint - BLOOM_THRESHOLD) / (1 - BLOOM_THRESHOLD)
           );
           const br = (HOT[0] + (255 - HOT[0]) * 0.58) | 0;
           const bg = (HOT[1] + (255 - HOT[1]) * 0.58) | 0;
@@ -1237,11 +2473,11 @@
         }
 
         /* Base accent tint, then a whisper of warm brightness with influence */
-        let r = COOL[0] + (HOT[0] - COOL[0]) * tint;
-        let g = COOL[1] + (HOT[1] - COOL[1]) * tint;
-        let b = COOL[2] + (HOT[2] - COOL[2]) * tint;
-        if (tint > 0) {
-          const lift = tint * BLOOM_BRIGHTNESS;
+        let r = COOL[0] + (HOT[0] - COOL[0]) * drawTint;
+        let g = COOL[1] + (HOT[1] - COOL[1]) * drawTint;
+        let b = COOL[2] + (HOT[2] - COOL[2]) * drawTint;
+        if (drawTint > 0) {
+          const lift = drawTint * BLOOM_BRIGHTNESS;
           r += (255 - r) * lift;
           g += (248 - g) * lift;
           b += (250 - b) * lift;
@@ -1270,7 +2506,7 @@
     function setEnabled(on) {
       enabled = on;
       if (!enabled) {
-        cancelIntro();
+        /* Keep pixelField running across Heat ↔ Wave ↔ Lightning switches */
         pointerIn = false;
         ptrX = ptrY = -1;
         smX = smY = -1;
@@ -1292,10 +2528,21 @@
       } else {
         resize();
       }
+      if (pixelField.isActive()) start();
     }
 
     window.addEventListener('bgmodechange', (e) => {
-      setEnabled(e.detail && e.detail.mode === 'heat');
+      const mode = e.detail && e.detail.mode;
+      setEnabled(mode === 'heat');
+      if (mode == null) pixelField.cancel();
+    });
+
+    window.addEventListener('pixelintrostart', () => {
+      if (enabled) start();
+    });
+
+    window.addEventListener('pixeldirectorystart', () => {
+      if (enabled) start();
     });
 
     window.addEventListener('animconfigchange', () => {
@@ -1334,7 +2581,7 @@
     });
 
     resize();
-    scheduleIntro();
+    pixelIntro.schedule();
   })();
 
 
@@ -1398,7 +2645,7 @@
     let viewW = 0;
     let viewH = 0;
     let dpr = 1;
-    let enabled = animConfig.motion && animConfig.bgMode === 'wave';
+    let enabled = animConfig.motion && resolveActiveBgMode() === 'wave';
     let running = false;
     let lastPtrX = -1;
     let lastPtrY = -1;
@@ -1459,16 +2706,24 @@
       viewH = Math.max(1, Math.round(rect.height));
       dpr = Math.min(window.devicePixelRatio || 1, 2);
 
-      cols = Math.ceil(viewW / CELL);
-      rows = Math.ceil(viewH / CELL);
+      const nextCols = Math.ceil(viewW / CELL);
+      const nextRows = Math.ceil(viewH / CELL);
+      const gridChanged = nextCols !== cols || nextRows !== rows;
+
+      cols = nextCols;
+      rows = nextRows;
       const n = cols * rows;
-      u = new Float32Array(n);
-      v = new Float32Array(n);
-      lastPtrX = lastPtrY = -1;
+      if (gridChanged || !u) {
+        u = new Float32Array(n);
+        v = new Float32Array(n);
+        lastPtrX = lastPtrY = -1;
+      }
+      if (gridChanged) pixelField.onResize(cols, rows);
 
       if (!enabled) return;
       applySurface();
       paintRest();
+      if (pixelField.isActive()) start();
     }
 
     /* Soft wake brush — hand through water; strength & width follow cursor speed. */
@@ -1543,8 +2798,9 @@
         animConfig.effectColor.b,
       ];
 
+      const introAlive = pixelField.update(performance.now());
       const n = cols * rows;
-      let alive = false;
+      let alive = !!introAlive;
 
       /* Pass 1 — neighbor exchange (4-way + soft diagonals), shoreline damp */
       for (let i = 0; i < n; i++) {
@@ -1609,19 +2865,36 @@
         u[i] = disp;
 
         const mag = Math.abs(disp);
-        /* Wave energy → neon pink intensity (crest brightest, fades with calm) */
+        /* Wave energy → accent intensity; intro LEDs use same HOT path */
         let energy = mag * invU + Math.abs(vel) * invV * 0.4;
         if (energy > 1) energy = 1;
+        const introHv = pixelField.brightness(i);
+        const introDX = pixelField.offsetX(i);
+        const introDY = pixelField.offsetY(i);
+        const introDrift = introDX !== 0 || introDY !== 0;
+        if (!introDrift && introHv > energy) energy = introHv;
+        if (introHv > 0) alive = true;
         const eased = energy * energy * (3 - 2 * energy);
         const tint  = Math.min(1, Math.pow(eased, COLOR_FALLOFF));
 
         const size = DOT * (1 + mag * SIZE_RESP);
-        const cx = x * CELL + CELL * 0.5;
-        const cy = y * CELL + CELL * 0.5 + disp * DISP_PX;
+        const homeX = x * CELL + CELL * 0.5;
+        const homeY = y * CELL + CELL * 0.5 + disp * DISP_PX;
+        const cx = homeX + introDX;
+        const cy = homeY + introDY;
+
+        if (introDrift && Math.abs(disp) < EPS && Math.abs(vel) < EPS) {
+          ctx.fillStyle = `rgb(${COOL[0]},${COOL[1]},${COOL[2]})`;
+          ctx.fillRect(homeX - DOT * 0.5, homeY - DOT * 0.5, DOT, DOT);
+        }
+
+        const drawTint = introDrift
+          ? Math.min(1, Math.pow(introHv * introHv * (3 - 2 * introHv), COLOR_FALLOFF))
+          : tint;
 
         /* Subtle bloom on the brightest crests — premium neon, not harsh */
-        if (tint > BLOOM_THRESHOLD) {
-          const bloom = (tint - BLOOM_THRESHOLD) / (1 - BLOOM_THRESHOLD);
+        if (drawTint > BLOOM_THRESHOLD) {
+          const bloom = (drawTint - BLOOM_THRESHOLD) / (1 - BLOOM_THRESHOLD);
           const bEase = bloom * bloom * (3 - 2 * bloom);
           const br = (HOT[0] + (255 - HOT[0]) * 0.35) | 0;
           const bg = (HOT[1] + (255 - HOT[1]) * 0.35) | 0;
@@ -1634,11 +2907,11 @@
           ctx.fillRect(cx - sInner * 0.5, cy - sInner * 0.5, sInner, sInner);
         }
 
-        let r = COOL[0] + (HOT[0] - COOL[0]) * tint;
-        let g = COOL[1] + (HOT[1] - COOL[1]) * tint;
-        let b = COOL[2] + (HOT[2] - COOL[2]) * tint;
-        if (tint > 0) {
-          const lift = tint * BLOOM_BRIGHTNESS;
+        let r = COOL[0] + (HOT[0] - COOL[0]) * drawTint;
+        let g = COOL[1] + (HOT[1] - COOL[1]) * drawTint;
+        let b = COOL[2] + (HOT[2] - COOL[2]) * drawTint;
+        if (drawTint > 0) {
+          const lift = drawTint * BLOOM_BRIGHTNESS;
           r += (255 - r) * lift;
           g += (220 - g) * lift * 0.35;
           b += (240 - b) * lift * 0.45;
@@ -1681,10 +2954,22 @@
       } else {
         resize();
       }
+      /* Continue shared LED field if still playing after Heat → Wave switch */
+      if (pixelField.isActive()) start();
     }
 
     window.addEventListener('bgmodechange', (e) => {
-      setEnabled(e.detail && e.detail.mode === 'wave');
+      const mode = e.detail && e.detail.mode;
+      setEnabled(mode === 'wave');
+      if (mode == null) pixelField.cancel();
+    });
+
+    window.addEventListener('pixelintrostart', () => {
+      if (enabled) start();
+    });
+
+    window.addEventListener('pixeldirectorystart', () => {
+      if (enabled) start();
     });
 
     window.addEventListener('animconfigchange', () => {
@@ -1714,6 +2999,315 @@
     });
 
     /* Measure grid now; paint only if Wave is already active */
+    resize();
+  })();
+
+
+  /* ═══════════════════════════════════════════════════════════════════════════
+     SYSTEM 8 · LIGHTNING MODE
+     ═══════════════════════════════════════════════════════════════════════════
+
+     Independent weather field on the shared heatmap canvas / dot grid.
+     Each weather layer owns its own update + render so strikes, clouds, rain,
+     and future effects can grow without touching Heat or Wave.
+
+     Current scaffold: rest field + intro/directory LED composite.
+     Weather layers below are wired into the frame loop as no-op stubs.
+  ═══════════════════════════════════════════════════════════════════════════ */
+
+  (function initLightningMode() {
+    const canvas = document.getElementById('heatmap');
+    const stage  = document.getElementById('stage');
+    if (!canvas || !stage) return;
+
+    const CELL  = 5;
+    const DOT   = CELL - 2;
+    const FIELD = [210, 210, 210];
+    const COOL  = [255, 255, 255];
+
+    /* Soft bloom knobs — match Heat/Wave LED presence language */
+    const COLOR_FALLOFF   = 0.72;
+    const BLOOM_THRESHOLD = 0.22;
+    const BLOOM_STRENGTH  = 0.55;
+    const BLOOM_SPREAD    = 1.35;
+    const BLOOM_BRIGHTNESS = 0.28;
+
+    const ctx = canvas.getContext('2d', { alpha: false });
+    if (!ctx) return;
+
+    let cols = 0;
+    let rows = 0;
+    let viewW = 0;
+    let viewH = 0;
+    let dpr = 1;
+    let stageLeft = 0;
+    let stageTop = 0;
+    let running = false;
+    let enabled = animConfig.motion && resolveActiveBgMode() === 'lightning';
+
+    /* ── Weather layers (independent update/render; expand later) ─────────── */
+    const clouds = {
+      update: function (/* dt, now */) {
+        /* Thunderclouds — rolling density across the upper field */
+      },
+      render: function (/* ctx, cols, rows, CELL, DOT */) {
+        /* Draw cloud silhouette into the fixed pixel grid */
+      },
+      reset: function () {},
+      onResize: function (/* cols, rows */) {},
+    };
+
+    const rain = {
+      update: function (/* dt, now */) {
+        /* Falling rain particles through the grid */
+      },
+      render: function (/* ctx, cols, rows, CELL, DOT */) {
+        /* Illuminate rain streaks as brief cell flashes */
+      },
+      reset: function () {},
+      onResize: function (/* cols, rows */) {},
+    };
+
+    const strikes = {
+      update: function (/* dt, now */) {
+        /* Lightning bolt paths + flash envelopes */
+      },
+      render: function (/* ctx, cols, rows, CELL, DOT */) {
+        /* Branching strike illumination on the fixed grid */
+      },
+      reset: function () {},
+      onResize: function (/* cols, rows */) {},
+    };
+
+    const weatherLayers = [clouds, rain, strikes];
+
+    let lastNow = 0;
+
+    function applySurface() {
+      canvas.width = Math.round(viewW * dpr);
+      canvas.height = Math.round(viewH * dpr);
+      canvas.style.width = viewW + 'px';
+      canvas.style.height = viewH + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function syncStageRect() {
+      const rect = stage.getBoundingClientRect();
+      stageLeft = rect.left;
+      stageTop = rect.top;
+      return rect;
+    }
+
+    function paintRest() {
+      ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
+      ctx.fillRect(0, 0, viewW, viewH);
+
+      const half = (CELL - DOT) * 0.5;
+      ctx.fillStyle = `rgb(${COOL[0]},${COOL[1]},${COOL[2]})`;
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          ctx.fillRect(x * CELL + half, y * CELL + half, DOT, DOT);
+        }
+      }
+    }
+
+    function resize() {
+      const rect = syncStageRect();
+      viewW = Math.max(1, Math.round(rect.width));
+      viewH = Math.max(1, Math.round(rect.height));
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+      const nextCols = Math.ceil(viewW / CELL);
+      const nextRows = Math.ceil(viewH / CELL);
+      const gridChanged = nextCols !== cols || nextRows !== rows;
+
+      cols = nextCols;
+      rows = nextRows;
+
+      if (gridChanged) {
+        pixelField.onResize(cols, rows);
+        for (let i = 0; i < weatherLayers.length; i++) {
+          weatherLayers[i].onResize(cols, rows);
+        }
+      }
+
+      if (!enabled) return;
+      applySurface();
+      paintRest();
+      if (pixelField.isActive()) start();
+    }
+
+    function renderIntroLeds() {
+      const HOT = [
+        animConfig.effectColor.r,
+        animConfig.effectColor.g,
+        animConfig.effectColor.b,
+      ];
+      const n = cols * rows;
+      let any = false;
+
+      for (let i = 0; i < n; i++) {
+        const introHv = pixelField.brightness(i);
+        const introDX = pixelField.offsetX(i);
+        const introDY = pixelField.offsetY(i);
+        const introDrift = introDX !== 0 || introDY !== 0;
+        if (!(introHv > 0) && !introDrift) continue;
+        any = true;
+
+        const x = i % cols;
+        const y = (i / cols) | 0;
+        const homeX = x * CELL + CELL * 0.5;
+        const homeY = y * CELL + CELL * 0.5;
+        const cx = homeX + introDX;
+        const cy = homeY + introDY;
+        const size = DOT;
+
+        if (introDrift) {
+          ctx.fillStyle = `rgb(${COOL[0]},${COOL[1]},${COOL[2]})`;
+          ctx.fillRect(homeX - DOT * 0.5, homeY - DOT * 0.5, DOT, DOT);
+        }
+
+        const energy = introHv;
+        const eased = energy * energy * (3 - 2 * energy);
+        const tint = Math.min(1, Math.pow(eased, COLOR_FALLOFF));
+
+        if (tint > BLOOM_THRESHOLD) {
+          const bloom = (tint - BLOOM_THRESHOLD) / (1 - BLOOM_THRESHOLD);
+          const bEase = bloom * bloom * (3 - 2 * bloom);
+          const br = (HOT[0] + (255 - HOT[0]) * 0.35) | 0;
+          const bg = (HOT[1] + (255 - HOT[1]) * 0.35) | 0;
+          const bb = (HOT[2] + (255 - HOT[2]) * 0.35) | 0;
+          const sOuter = size + DOT * BLOOM_SPREAD;
+          const sInner = size + DOT * BLOOM_SPREAD * 0.45;
+          ctx.fillStyle = `rgba(${br},${bg},${bb},${bEase * BLOOM_STRENGTH * 0.34})`;
+          ctx.fillRect(cx - sOuter * 0.5, cy - sOuter * 0.5, sOuter, sOuter);
+          ctx.fillStyle = `rgba(${br},${bg},${bb},${bEase * BLOOM_STRENGTH * 0.55})`;
+          ctx.fillRect(cx - sInner * 0.5, cy - sInner * 0.5, sInner, sInner);
+        }
+
+        let r = COOL[0] + (HOT[0] - COOL[0]) * tint;
+        let g = COOL[1] + (HOT[1] - COOL[1]) * tint;
+        let b = COOL[2] + (HOT[2] - COOL[2]) * tint;
+        if (tint > 0) {
+          const lift = tint * BLOOM_BRIGHTNESS;
+          r += (255 - r) * lift;
+          g += (220 - g) * lift * 0.35;
+          b += (240 - b) * lift * 0.45;
+        }
+
+        ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+        ctx.fillRect(cx - size * 0.5, cy - size * 0.5, size, size);
+      }
+
+      return any;
+    }
+
+    function tick(now) {
+      if (!enabled) {
+        running = false;
+        return;
+      }
+
+      const dt = lastNow ? Math.min(0.05, (now - lastNow) / 1000) : 0.016;
+      lastNow = now;
+
+      const introAlive = pixelField.update(now);
+
+      paintRest();
+
+      for (let i = 0; i < weatherLayers.length; i++) {
+        weatherLayers[i].update(dt, now);
+      }
+      for (let i = 0; i < weatherLayers.length; i++) {
+        weatherLayers[i].render(ctx, cols, rows, CELL, DOT);
+      }
+
+      const ledsAlive = renderIntroLeds();
+      const weatherAlive = false; /* flip when layers report activity */
+      const alive = introAlive || ledsAlive || weatherAlive;
+
+      if (alive) {
+        requestAnimationFrame(tick);
+      } else {
+        running = false;
+        paintRest();
+      }
+    }
+
+    function start() {
+      if (!enabled || running) return;
+      running = true;
+      lastNow = 0;
+      requestAnimationFrame(tick);
+    }
+
+    function setEnabled(on) {
+      enabled = on;
+      if (!enabled) {
+        running = false;
+        lastNow = 0;
+        for (let i = 0; i < weatherLayers.length; i++) {
+          weatherLayers[i].reset();
+        }
+        return;
+      }
+
+      lastNow = 0;
+      if (viewW) {
+        applySurface();
+        paintRest();
+      } else {
+        resize();
+      }
+      /* Resume shared LED field / weather loop when Lightning becomes active */
+      start();
+    }
+
+    window.addEventListener('bgmodechange', (e) => {
+      const mode = e.detail && e.detail.mode;
+      setEnabled(mode === 'lightning');
+      if (mode == null) pixelField.cancel();
+    });
+
+    window.addEventListener('pixelintrostart', () => {
+      if (enabled) start();
+    });
+
+    window.addEventListener('pixeldirectorystart', () => {
+      if (enabled) start();
+    });
+
+    window.addEventListener('animconfigchange', () => {
+      if (enabled) start();
+    });
+
+    window.addEventListener('resize', resize, { passive: true });
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => resize());
+      ro.observe(stage);
+    }
+
+    let ptrX = -1;
+    let ptrY = -1;
+
+    /* Pointer reserved for future strike targeting / rain density under cursor */
+    document.addEventListener('mousemove', (e) => {
+      if (!enabled) return;
+      syncStageRect();
+      const x = e.clientX - stageLeft;
+      const y = e.clientY - stageTop;
+      if (x < 0 || y < 0 || x > viewW || y > viewH) {
+        ptrX = ptrY = -1;
+        return;
+      }
+      ptrX = x;
+      ptrY = y;
+    }, { passive: true });
+
+    document.documentElement.addEventListener('mouseleave', () => {
+      ptrX = ptrY = -1;
+    });
+
     resize();
   })();
 
