@@ -4,7 +4,6 @@ import { BootPhase } from '../constants.js';
 import { createPoweringOnStage } from './powering-on.js';
 import { createGridGenerationStage } from './grid-generation.js';
 import { createCalibrationStage } from './calibration.js';
-import { createSelfTestStage } from './self-test.js';
 import { createTypographyStage } from './typography.js';
 import { createStabilizingStage } from './stabilizing.js';
 import { createReadyStage } from './ready.js';
@@ -35,11 +34,6 @@ export function createBootStageDefs(options) {
       id: 'calibration',
       phase: BootPhase.CALIBRATION,
       create: () => createCalibrationStage(),
-    },
-    {
-      id: 'self_test',
-      phase: BootPhase.SELF_TEST,
-      create: () => createSelfTestStage(),
     },
     {
       id: 'typography_construction',

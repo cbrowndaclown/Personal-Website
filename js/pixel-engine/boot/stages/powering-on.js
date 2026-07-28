@@ -1,8 +1,9 @@
-/* POWERING_ON — dormant black field receives power: BLACK → DARK GRAY, L→R. */
+/* POWERING_ON — dormant black field receives power: BLACK → DARK GRAY.
+   Pixels initialize individually with organic L→R order. */
 
 import { BOOT_TIMING, BOOT_ENERGY } from '../constants.js';
 import { clamp01 } from '../math.js';
-import { applyEnergySweep, lockEnergy } from '../energy.js';
+import { applyOrganicEnergyReveal, lockEnergy } from '../energy.js';
 
 export function createPoweringOnStage() {
   let startMs = 0;
@@ -27,12 +28,16 @@ export function createPoweringOnStage() {
       const elapsed = ctx.now - startMs;
       const u = clamp01(elapsed / BOOT_TIMING.POWERING_ON_MS);
 
-      applyEnergySweep(
+      applyOrganicEnergyReveal(
         field,
         BOOT_ENERGY.BLACK,
         BOOT_ENERGY.DARK,
         u,
-        BOOT_TIMING.SWEEP_FEATHER
+        {
+          scatter: 0.3,
+          soft: 0.028,
+          seed: 0xa11e,
+        }
       );
 
       field.clearBrightness();

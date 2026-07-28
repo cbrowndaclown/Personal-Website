@@ -1,4 +1,4 @@
-/* TYPOGRAPHY_CONSTRUCTION — smile dissolves into hero glyph LEDs. */
+/* TYPOGRAPHY_CONSTRUCTION — hero glyph LEDs construct after the loading ring. */
 
 import { BOOT_TIMING, BOOT_ENERGY } from '../constants.js';
 import { lockEnergy } from '../energy.js';
@@ -12,7 +12,6 @@ export function createTypographyStage(options) {
   const intro = options.intro;
   let startMs = 0;
   let completeAt = 0;
-  let dissolving = true;
 
   return {
     id: 'typography_construction',
@@ -21,20 +20,15 @@ export function createTypographyStage(options) {
 
     enter(ctx) {
       startMs = ctx.now;
-      dissolving = true;
       lockEnergy(ctx.field, BOOT_ENERGY.BLACK);
       ctx.field.clearMotion();
+      ctx.field.clearBrightness();
 
-      const seeds =
-        ctx.indicator && typeof ctx.indicator.getSmileCells === 'function'
-          ? ctx.indicator.getSmileCells()
-          : [];
-
-      if (ctx.indicator && typeof ctx.indicator.beginDissolve === 'function') {
-        ctx.indicator.beginDissolve(ctx.now);
+      if (ctx.indicator && typeof ctx.indicator.dismiss === 'function') {
+        ctx.indicator.dismiss();
       }
 
-      intro.beginTypographyConstruction({ seedCells: seeds });
+      intro.beginTypographyConstruction({ seedCells: null });
       const ledMs = intro.getTypographyDurationMs();
       completeAt =
         startMs +
@@ -43,25 +37,10 @@ export function createTypographyStage(options) {
     },
 
     update(ctx) {
-      /* Keep the lattice dormant black while glyphs construct from the smile */
+      /* Keep the lattice dormant black while glyphs construct */
       lockEnergy(ctx.field, BOOT_ENERGY.BLACK);
       ctx.field.clearMotion();
       ctx.field.clearBrightness();
-
-      if (
-        dissolving &&
-        ctx.indicator &&
-        typeof ctx.indicator.paint === 'function'
-      ) {
-        ctx.indicator.paint(ctx.field, ctx.now);
-        if (
-          typeof ctx.indicator.isDissolveDone === 'function' &&
-          ctx.indicator.isDissolveDone(ctx.now)
-        ) {
-          dissolving = false;
-          ctx.field.clearBrightness();
-        }
-      }
 
       const settled = intro.isTypographySettled();
       const timedOut = ctx.now >= completeAt;

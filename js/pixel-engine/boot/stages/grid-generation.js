@@ -1,8 +1,9 @@
-/* GRID_GENERATION — power settles into calibration band: DARK → LIGHT GRAY, L→R. */
+/* GRID_GENERATION — power settles into calibration band: DARK → LIGHT GRAY.
+   Pixels initialize individually with organic L→R order. */
 
 import { BOOT_TIMING, BOOT_ENERGY } from '../constants.js';
 import { clamp01 } from '../math.js';
-import { applyEnergySweep, lockEnergy } from '../energy.js';
+import { applyOrganicEnergyReveal, lockEnergy } from '../energy.js';
 
 export function createGridGenerationStage() {
   let startMs = 0;
@@ -26,12 +27,16 @@ export function createGridGenerationStage() {
       const elapsed = ctx.now - startMs;
       const u = clamp01(elapsed / BOOT_TIMING.GRID_GENERATION_MS);
 
-      applyEnergySweep(
+      applyOrganicEnergyReveal(
         field,
         BOOT_ENERGY.DARK,
         BOOT_ENERGY.LIGHT,
         u,
-        BOOT_TIMING.SWEEP_FEATHER
+        {
+          scatter: 0.3,
+          soft: 0.028,
+          seed: 0xb22f,
+        }
       );
 
       field.clearBrightness();

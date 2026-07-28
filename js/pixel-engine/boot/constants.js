@@ -38,32 +38,34 @@ export const BOOT_TIMING = Object.freeze({
   GRID_GENERATION_MS: 2800,
   GRID_OVERLAP_MS: 0,
 
-  /* LIGHT GRAY → WHITE (organic), closing revolution synced with final pixels */
+  /* LIGHT GRAY → WHITE (organic), ring seals with final pixels then dissolves */
   CALIBRATION_SWEEP_MS: 3000,
   WHITE_HOLD_MS: 420,
-  CALIBRATION_MS: 3000 + 420,
+  /* Sweep + sealed-ring hold + dissolve + brief stillness */
+  CALIBRATION_MS: 3000 + 300 + 480 + 420,
   CALIBRATION_OVERLAP_MS: 0,
 
-  /* Soft wipe feather as a fraction of grid width (powering-on / grid stages) */
+  /* Soft wipe feather (legacy; energy stages use organic reveal) */
   SWEEP_FEATHER: 0.14,
 
   /* Indicator completes this many revolutions across the energy window;
-     the final revolution is armed so it closes with the white reveal. */
+     the final revolution is armed so it seals with the last pixel layer. */
   INDICATOR_REVOLUTIONS: 3,
 
   /* Legacy clear timing (stage removed — white lattice stays initialized) */
   DISPLAY_CLEAR_MS: 780,
   DISPLAY_CLEAR_OVERLAP_MS: 0,
 
-  /* Arc → full circle → LED smile morph + recognition hold */
-  CIRCLE_COMPLETE_MS: 560,
+  /* Sealed ring recognition beat, then natural fade-out */
   CIRCLE_HOLD_MS: 300,
+  RING_DISSOLVE_MS: 480,
+
+  /* Legacy self-test / smile timings (stage removed from pipeline) */
+  CIRCLE_COMPLETE_MS: 560,
   SMILE_MORPH_MS: 780,
   SMILE_HOLD_MS: 780,
   SELF_TEST_MS: 560 + 300 + 780 + 780,
   SELF_TEST_OVERLAP_MS: 0,
-
-  /* Smile dissolve as typography construction begins */
   SMILE_DISSOLVE_MS: 480,
 
   /* Typography duration is driven by LED bake; these are floor / settle pads */
@@ -100,7 +102,7 @@ export function isExclusiveBootPhase(phase) {
 
 /**
  * Phases that paint on a dormant black field with presence-as-luminance.
- * Includes typography construction so the smile→type handoff stays continuous.
+ * Includes typography construction so the boot→type handoff stays continuous.
  */
 export function isLatticeBootPhase(phase) {
   return (

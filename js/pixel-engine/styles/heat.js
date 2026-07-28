@@ -477,7 +477,7 @@ export function createHeatStyle(deps) {
 
       /*
         Lattice boot paint:
-        - Indicator phases: presence = white ladder, boot brightness = red arc/smile
+        - Indicator phases: presence = energy ladder, boot brightness = red arc/ring
         - Typography handoff: presence black, intro LEDs = white constructing glyphs
       */
       const bootSignal = indicatorAccent ? introHv : 0;
