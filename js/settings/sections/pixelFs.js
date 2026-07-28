@@ -4,12 +4,13 @@ import { createRow, createSegment, createRgbControl } from '../controls/index.js
 
 /**
  * Style UI → pixel-field engines.
- * Magnetic → heat (default). Wave → wave.
+ * Magnetic → heat (default). Wave / Lightning keep current engines.
  * Experimental is a disabled Style placeholder (no behavior yet).
  */
 export const PIXEL_FS_STYLE_OPTIONS = [
   { value: 'heat', label: 'Magnetic' },
   { value: 'wave', label: 'Wave' },
+  { value: 'lightning', label: 'Lightning' },
   { value: 'experimental', label: 'Experimental', disabled: true },
 ];
 
@@ -42,23 +43,39 @@ export function buildPixelFsSection(body, api) {
     label: 'Style',
     desc: 'Pixel field style',
   });
+
+  const activeStyles = PIXEL_FS_STYLE_OPTIONS.filter((o) => !o.disabled);
   const styleSeg = createSegment({
     id: 'settings-style',
     labelledBy: styleRow.labelId,
     value: api.getBgMode(),
-    options: PIXEL_FS_STYLE_OPTIONS,
+    options: activeStyles,
     onChange: (value) => {
       if (!api.getMotion()) return;
       api.setBgMode(value);
     },
   });
   styleRow.body.appendChild(styleSeg.root);
+
+  const experimental = PIXEL_FS_STYLE_OPTIONS.find((o) => o.disabled);
+  if (experimental) {
+    const placeholder = document.createElement('button');
+    placeholder.type = 'button';
+    placeholder.className = 'settings__seg-placeholder';
+    placeholder.dataset.value = experimental.value;
+    placeholder.textContent = experimental.label;
+    placeholder.disabled = true;
+    placeholder.setAttribute('aria-disabled', 'true');
+    placeholder.title = 'Coming soon';
+    styleRow.body.appendChild(placeholder);
+  }
+
   body.appendChild(styleRow.root);
 
   const colorRow = createRow({
     id: 'settings-color-row',
     label: 'Global Color',
-    desc: 'Shared across Pixel FS styles',
+    desc: 'Shared by Magnetic, Wave, and Lightning',
     metaRow: true,
   });
   const rgb = createRgbControl({
@@ -77,7 +94,7 @@ export function buildPixelFsSection(body, api) {
     motionSeg.setValue(motionOn ? 'on' : 'off');
 
     const mode = api.getBgMode();
-    const option = PIXEL_FS_STYLE_OPTIONS.find((o) => o.value === mode && !o.disabled);
+    const option = activeStyles.find((o) => o.value === mode);
     styleSeg.setValue(option ? mode : api.getLastImplementedBgMode());
     styleRow.setDisabled(!motionOn);
     styleSeg.setLocked(!motionOn);
