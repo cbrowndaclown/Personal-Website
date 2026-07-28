@@ -8,14 +8,23 @@ const CELL_PX = 5;
 const LABEL = 'Booting';
 /* Full ellipsis cycle (0→1→2→3 dots). ~500ms per state — calm OS boot pace. */
 const ELLIPSIS_PERIOD_MS = 2000;
-const BOB_PERIOD_MS = 1350;
-const BOB_AMP_PX = 3.2;
 const GLOW = 0.26;
+
+/*
+  Independent idle breaths — word and each dot float on their own clock.
+  Amplitudes stay small so the line still reads as one status phrase.
+*/
+const WORD_BOB = Object.freeze({ periodMs: 1480, ampPx: 2.6, phase: 0 });
+const DOT_BOB = Object.freeze([
+  { periodMs: 1180, ampPx: 2.1, phase: 0.18 },
+  { periodMs: 1320, ampPx: 2.5, phase: 0.47 },
+  { periodMs: 1260, ampPx: 1.9, phase: 0.71 },
+]);
 
 /**
  * Pixel-rendered boot status under the calibration ring.
- * Word stays fixed; only trailing dots cycle. Subtle vertical bob via
- * fractional-row light scatter (same idea as Pixel FS idle float).
+ * Word stays fixed; only trailing dots cycle. Word + each ellipsis LED
+ * breathe on independent vertical phases (Pixel FS idle float language).
  */
 export function createBootStatus() {
   let armed = false;
@@ -276,13 +285,16 @@ export function createBootStatus() {
   }
 
   /**
-   * Ease-in-out bob matching the former CSS keyframes (0 → −3.2px → 0).
+   * Soft cosine bob for one element. Phase is a 0..1 cycle offset.
    * @param {number} now
+   * @param {{ periodMs: number, ampPx: number, phase: number }} motion
    */
-  function bobShiftPx(now) {
-    if (prefersReduced || !armed) return 0;
-    const u = ((now - originMs) % BOB_PERIOD_MS) / BOB_PERIOD_MS;
-    return -BOB_AMP_PX * (0.5 - 0.5 * Math.cos(u * Math.PI * 2));
+  function bobShiftPx(now, motion) {
+    if (prefersReduced || !armed || !motion) return 0;
+    const period = Math.max(1, motion.periodMs);
+    const u = ((now - originMs) / period + (motion.phase || 0)) % 1;
+    /* Cosine ease — idle breath, never a hard bounce. */
+    return -motion.ampPx * (0.5 - 0.5 * Math.cos(u * Math.PI * 2));
   }
 
   /**
@@ -389,12 +401,18 @@ export function createBootStatus() {
     }
     if (a <= 0.001) return;
 
-    const shiftPx = bobShiftPx(now);
     const dots = ellipsisCount(now);
 
-    paintCells(labelCells, brightness, cols, rows, shiftPx, a);
+    paintCells(labelCells, brightness, cols, rows, bobShiftPx(now, WORD_BOB), a);
     for (let d = 0; d < dots; d++) {
-      paintCells(dotGlyphs[d] || [], brightness, cols, rows, shiftPx, a);
+      paintCells(
+        dotGlyphs[d] || [],
+        brightness,
+        cols,
+        rows,
+        bobShiftPx(now, DOT_BOB[d]),
+        a
+      );
     }
   }
 
