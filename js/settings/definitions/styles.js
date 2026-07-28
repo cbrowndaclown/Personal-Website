@@ -1,5 +1,5 @@
 /* Pixel FS style registry — UI labels + availability.
-   Runtime engines stay in main.js (PIXEL_FIELD_STYLES); this drives the inspector. */
+   Runtime engines live in js/pixel-engine (PIXEL_FIELD_STYLES); this drives the inspector. */
 
 /**
  * @typedef {object} PixelFsStyleDef
