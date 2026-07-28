@@ -1,47 +1,76 @@
-/* Settings catalog — register sections here to grow the panel. */
+/* Settings catalog — assembles the inspector from declarative definitions. */
 
-import { buildPixelFsSection } from './sections/pixelFs.js';
-import { buildAppearanceSection } from './sections/appearance.js';
-import { buildLayoutSection } from './sections/layout.js';
-import { buildAdvancedSection } from './sections/advanced.js';
+import {
+  STATIC_SECTIONS,
+  STYLE_SETTINGS_SECTION,
+  PIXEL_FS_STYLE_SETTINGS,
+  getStyleById,
+  getStyleLabel,
+} from './definitions/index.js';
+import { bindSettings, bindStyleSpecificSettings } from './render.js';
 
 /**
- * Ordered inspector categories. Add a section object to extend the panel.
- * Each `build(body, api)` may mount any control from `js/settings/controls`.
+ * Resolve which style drives the style-specific settings header/body.
+ * @param {object} api
+ * @returns {string}
+ */
+function resolveUiStyleId(api) {
+  const mode = api.getBgMode();
+  if (getStyleById(mode)) return mode;
+  return api.getLastImplementedBgMode() || 'heat';
+}
+
+/**
+ * Ordered inspector categories. Sections and controls come from definitions;
+ * add a SettingDef (or a new style entry) instead of hand-building UI.
  *
  * @param {object} api
  * @returns {Array<{
  *   id: string,
- *   title: string,
+ *   title: string | ((api: object) => string),
  *   defaultOpen?: boolean,
- *   build: (body: HTMLElement, api: object) => { sync: () => void }
+ *   build: (body: HTMLElement, helpers?: object) => { sync: () => void }
  * }>}
  */
 export function getSettingsCatalog(api) {
-  return [
-    {
-      id: 'pixel-fs',
-      title: 'Pixel FS',
-      defaultOpen: true,
-      build: (body) => buildPixelFsSection(body, api),
-    },
-    {
-      id: 'appearance',
-      title: 'Appearance',
-      defaultOpen: false,
-      build: (body) => buildAppearanceSection(body, api),
-    },
-    {
-      id: 'layout',
-      title: 'Layout',
-      defaultOpen: false,
-      build: (body) => buildLayoutSection(body, api),
-    },
-    {
-      id: 'advanced',
-      title: 'Advanced',
-      defaultOpen: false,
-      build: (body) => buildAdvancedSection(body, api),
-    },
-  ];
+  const pixelFs = STATIC_SECTIONS.find((s) => s.id === 'pixel-fs');
+  const trailing = STATIC_SECTIONS.filter((s) => s.id !== 'pixel-fs');
+
+  /** @type {Array<{ id: string, title: string | ((api: object) => string), defaultOpen?: boolean, build: Function }>} */
+  const catalog = [];
+
+  if (pixelFs) {
+    catalog.push({
+      id: pixelFs.id,
+      title: pixelFs.title,
+      defaultOpen: !!pixelFs.defaultOpen,
+      build: (body) => bindSettings(body, pixelFs.settings, api),
+    });
+  }
+
+  catalog.push({
+    id: STYLE_SETTINGS_SECTION.id,
+    title: (a) => `${getStyleLabel(resolveUiStyleId(a))} Settings`,
+    defaultOpen: !!STYLE_SETTINGS_SECTION.defaultOpen,
+    build: (body, helpers) =>
+      bindStyleSpecificSettings(body, {
+        api,
+        styleSettings: PIXEL_FS_STYLE_SETTINGS,
+        emptyMessage: STYLE_SETTINGS_SECTION.emptyMessage,
+        setTitle: helpers && helpers.setTitle,
+        resolveStyleId: resolveUiStyleId,
+        getStyleLabel,
+      }),
+  });
+
+  trailing.forEach((section) => {
+    catalog.push({
+      id: section.id,
+      title: section.title,
+      defaultOpen: !!section.defaultOpen,
+      build: (body) => bindSettings(body, section.settings, api),
+    });
+  });
+
+  return catalog;
 }

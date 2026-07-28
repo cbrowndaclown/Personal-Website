@@ -520,6 +520,26 @@ body {
   padding: 2px 0 6px;
 }
 
+.settings__empty {
+  margin: 0;
+  font-family: var(--f-settings);
+  font-size: 0.72rem;
+  font-weight: 300;
+  line-height: 1.35;
+  color: rgba(32, 26, 18, 0.38);
+  padding: 2px 0 6px;
+}
+
+.settings__style-group {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings__style-group[hidden] {
+  display: none;
+}
+
 .settings__row {
   display: flex;
   flex-direction: column;

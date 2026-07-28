@@ -6,12 +6,14 @@
  * @param {string} opts.title
  * @param {boolean} [opts.defaultOpen]
  * @param {(body: HTMLElement, helpers: object) => void} [opts.build]
- * @param {object} [opts.helpers] — control factories + api passed into build
+ * @param {object} [opts.helpers] — setTitle + any host helpers passed into build
  * @returns {{
+ *   id: string,
  *   root: HTMLElement,
  *   body: HTMLElement,
  *   isOpen: () => boolean,
- *   setOpen: (open: boolean, animate?: boolean) => void
+ *   setOpen: (open: boolean, animate?: boolean) => void,
+ *   setTitle: (text: string) => void
  * }}
  */
 export function createSection(opts) {
@@ -49,8 +51,12 @@ export function createSection(opts) {
 
   root.append(header, panel);
 
+  function setTitle(text) {
+    title.textContent = text;
+  }
+
   if (typeof opts.build === 'function') {
-    opts.build(body, opts.helpers || {});
+    opts.build(body, { setTitle, ...(opts.helpers || {}) });
   }
 
   let open = false;
@@ -129,9 +135,11 @@ export function createSection(opts) {
   }
 
   return {
+    id: opts.id,
     root,
     body,
     isOpen: () => open,
     setOpen,
+    setTitle,
   };
 }

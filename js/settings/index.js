@@ -54,17 +54,19 @@ export function initSettings(api) {
     }
   }
 
-  /* Mount catalog sections */
+  /* Mount catalog sections (definitions → render → section chrome) */
   const syncFns = [];
   const sectionHandles = [];
 
   getSettingsCatalog(api).forEach((entry) => {
+    const title =
+      typeof entry.title === 'function' ? entry.title(api) : entry.title;
     const section = createSection({
       id: entry.id,
-      title: entry.title,
+      title,
       defaultOpen: !!entry.defaultOpen,
-      build: (sectionBody) => {
-        const handle = entry.build(sectionBody, api);
+      build: (sectionBody, helpers) => {
+        const handle = entry.build(sectionBody, helpers);
         if (handle && typeof handle.sync === 'function') {
           syncFns.push(handle.sync);
         }
