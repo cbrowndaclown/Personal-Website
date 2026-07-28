@@ -59,7 +59,7 @@ export function createIntroController(deps) {
 
   const INTRO_LINES = [
     { text: 'Hey there,',                pace: 1.00 },
-    { text: 'my name is Canaan',         pace: 1.40 },
+    { text: 'my name is Canaan,',        pace: 1.40 },
     { text: 'Welcome to my website.',    pace: 1.12 },
     { text: 'Are you ready to explore?', pace: 1.30 },
   ];
@@ -444,6 +444,10 @@ export function createIntroController(deps) {
     octx.textBaseline = 'middle';
     octx.fillText(text, cx, cy);
 
+    /* Thin trailing marks (esp. commas) often antialias below the LED
+       threshold on the coarse grid — stamp a small solid glyph so they read. */
+    reinforceTrailingPunct(octx, text, cx, cy);
+
     const data = octx.getImageData(0, 0, cols, rows).data;
     const glyph = [];
     let minX = cols, maxX = -1, minY = rows, maxY = -1;
@@ -458,6 +462,43 @@ export function createIntroController(deps) {
       if (y > maxY) maxY = y;
     }
     return { glyph, minX, maxX, minY, maxY };
+  }
+
+  /**
+   * Paint a few solid pixels for trailing punctuation so commas/periods
+   * survive LED downsampling. No-ops when the line has no trailing mark.
+   */
+  function reinforceTrailingPunct(octx, text, cx, cy) {
+    if (!text || text.length < 2) return;
+    const mark = text.charAt(text.length - 1);
+    if (mark !== ',' && mark !== '.' && mark !== '!' && mark !== '?') return;
+
+    const prefix = text.slice(0, -1);
+    const fullW = octx.measureText(text).width;
+    const prefixW = octx.measureText(prefix).width;
+    if (!(fullW > 0) || !(prefixW >= 0)) return;
+
+    const startX = cx - fullW * 0.5;
+    const gap = Math.max(1.25, fullW - prefixW);
+    const x = Math.round(startX + prefixW + gap * 0.35);
+    /* textBaseline middle — drop slightly for baseline marks */
+    const y = Math.round(cy + 1);
+
+    octx.fillStyle = '#fff';
+    if (mark === ',') {
+      /* Compact pixel comma: body + descending tail */
+      octx.fillRect(x, y, 2, 1);
+      octx.fillRect(x, y + 1, 1, 1);
+      octx.fillRect(x - 1, y + 2, 1, 1);
+    } else if (mark === '.') {
+      octx.fillRect(x, y + 1, 2, 2);
+    } else if (mark === '!') {
+      octx.fillRect(x, y - 3, 2, 4);
+      octx.fillRect(x, y + 2, 2, 1);
+    } else if (mark === '?') {
+      /* Hook is usually large enough; reinforce the dot only */
+      octx.fillRect(x, y + 2, 2, 2);
+    }
   }
 
   function bakeIntro(opts) {
