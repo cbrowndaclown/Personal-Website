@@ -42,6 +42,15 @@ export function createAnimationManager(options) {
     interactionsEnabled: function () {
       return bootController.interactionsEnabled();
     },
+    exclusiveBootActive: function () {
+      return bootController.exclusiveBootActive();
+    },
+    latticeBootActive: function () {
+      return bootController.latticeBootActive();
+    },
+    indicatorAccentActive: function () {
+      return bootController.indicatorAccentActive();
+    },
     onResize: function (c, r) { bootController.onResize(c, r); },
     cancel: function () { bootController.cancel(); },
   };

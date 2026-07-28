@@ -45,12 +45,33 @@ export function createHeatStyle(deps) {
   /* Boot indicator accent — restrained red, independent of Settings HOT */
   const BOOT_RED = [214, 46, 46];
 
-  function isEnergyBootPhase() {
+  function latticeBootActive() {
+    if (typeof pixelField.latticeBootActive === 'function') {
+      return pixelField.latticeBootActive();
+    }
     const p = document.body.dataset.boot;
     return (
       p === 'powering_on' ||
       p === 'grid_generation' ||
-      p === 'calibration'
+      p === 'calibration' ||
+      p === 'display_clear' ||
+      p === 'self_test' ||
+      p === 'typography_construction' ||
+      p === 'typography'
+    );
+  }
+
+  function indicatorAccentActive() {
+    if (typeof pixelField.indicatorAccentActive === 'function') {
+      return pixelField.indicatorAccentActive();
+    }
+    const p = document.body.dataset.boot;
+    return (
+      p === 'powering_on' ||
+      p === 'grid_generation' ||
+      p === 'calibration' ||
+      p === 'display_clear' ||
+      p === 'self_test'
     );
   }
 
@@ -158,8 +179,8 @@ export function createHeatStyle(deps) {
   }
 
   function paintRest() {
-    const energyBoot = isEnergyBootPhase();
-    if (energyBoot) {
+    const latticeBoot = latticeBootActive();
+    if (latticeBoot) {
       ctx.fillStyle = '#000000';
     } else {
       ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
@@ -178,7 +199,7 @@ export function createHeatStyle(deps) {
       let r;
       let g;
       let b;
-      if (energyBoot) {
+      if (latticeBoot) {
         /* Black → white energy ladder during power-on */
         r = g = b = (255 * a) | 0;
       } else {
@@ -336,9 +357,10 @@ export function createHeatStyle(deps) {
     }
 
     let alive = hasTrail || active || introAlive;
-    const energyBoot = isEnergyBootPhase();
+    const latticeBoot = latticeBootActive();
+    const indicatorAccent = indicatorAccentActive();
 
-    if (energyBoot) {
+    if (latticeBoot) {
       ctx.fillStyle = '#000000';
     } else {
       ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
@@ -346,8 +368,8 @@ export function createHeatStyle(deps) {
     ctx.fillRect(0, 0, viewW, viewH);
 
     const nCells = cols * rows;
-    /* During energy boot the lattice owns the frame — no cursor heat */
-    const allowHeat = !energyBoot;
+    /* During exclusive / lattice boot the PE owns the frame — no cursor heat */
+    const allowHeat = !latticeBoot;
 
     for (let i = 0; i < nCells; i++) {
       const x = i % cols;
@@ -418,8 +440,8 @@ export function createHeatStyle(deps) {
       }
 
       const introHv = pixelField.brightness(i);
-      const introDX = energyBoot ? 0 : pixelField.offsetX(i);
-      const introDY = energyBoot ? 0 : pixelField.offsetY(i);
+      const introDX = latticeBoot && indicatorAccent ? 0 : pixelField.offsetX(i);
+      const introDY = latticeBoot && indicatorAccent ? 0 : pixelField.offsetY(i);
       const introDrift = introDX !== 0 || introDY !== 0;
       const presence =
         typeof pixelField.presence === 'function' ? pixelField.presence(i) : 1;
@@ -453,11 +475,15 @@ export function createHeatStyle(deps) {
         alive = true;
       }
 
-      /* Intro LEDs / boot indicator share the tint path */
-      const hv = Math.max(heat[i], introDrift ? 0 : introHv);
-      const accent = energyBoot ? BOOT_RED : HOT;
-      /* Soft radial heat: strong under cursor → medium → subtle rim → cool.
-         COLOR_FALLOFF < 1 keeps a gentle pink fringe; GLOW_OPACITY caps peak. */
+      /*
+        Lattice boot paint:
+        - Indicator phases: presence = white ladder, boot brightness = red arc/smile
+        - Typography handoff: presence black, intro LEDs = white constructing glyphs
+      */
+      const bootSignal = indicatorAccent ? introHv : 0;
+      const typeSignal = indicatorAccent ? 0 : introHv;
+      const hv = Math.max(heat[i], introDrift ? 0 : bootSignal);
+      const accent = indicatorAccent ? BOOT_RED : HOT;
       const eased = hv * hv * (3 - 2 * hv);
       const tint  = Math.min(1, Math.pow(eased, COLOR_FALLOFF) * GLOW_OPACITY);
 
@@ -465,8 +491,8 @@ export function createHeatStyle(deps) {
       const disp = Math.min(1, Math.hypot(ox[i], oy[i]) / (MAX_DISP + EPS));
       const depth = Math.min(1, heat[i] * 0.5 + disp * 0.45);
       const scale = 1 - smootherstep(depth) * 0.24;
-      const presenceScale = energyBoot
-        ? Math.min(1, 0.55 + presence * 0.45)
+      const presenceScale = latticeBoot
+        ? Math.min(1, 0.55 + Math.max(presence, typeSignal) * 0.45)
         : Math.min(1, 0.35 + presence * 0.65);
       const size  = DOT * scale * presenceScale * (1 + (heat[i] > 0 ? tint * GLOW_SIZE : 0));
 
@@ -487,21 +513,21 @@ export function createHeatStyle(deps) {
       /* Faint feathered bloom — warm light through frosted glass.
          Driven by tint so it dissolves with the heat field. */
       const drawTint = introDrift
-        ? Math.min(1, Math.pow(introHv * introHv * (3 - 2 * introHv), COLOR_FALLOFF) * GLOW_OPACITY)
+        ? Math.min(1, Math.pow(typeSignal * typeSignal * (3 - 2 * typeSignal), COLOR_FALLOFF) * GLOW_OPACITY)
         : tint;
 
-      if (drawTint > BLOOM_THRESHOLD) {
+      if (indicatorAccent && drawTint > BLOOM_THRESHOLD) {
         const bloom = smootherstep(
           (drawTint - BLOOM_THRESHOLD) / (1 - BLOOM_THRESHOLD)
         );
         const br = (accent[0] + (255 - accent[0]) * 0.58) | 0;
         const bg = (accent[1] + (255 - accent[1]) * 0.58) | 0;
         const bb = (accent[2] + (255 - accent[2]) * 0.58) | 0;
-        const bloomGain = energyBoot ? 0.85 : 1;
+        const bloomGain = 0.85;
         const aOuter = bloom * BLOOM_STRENGTH * 0.32 * bloomGain;
         const aInner = bloom * BLOOM_STRENGTH * 0.55 * bloomGain;
-        const sOuter = size + DOT * BLOOM_SPREAD * (energyBoot ? 0.75 : 1);
-        const sInner = size + DOT * BLOOM_SPREAD * (energyBoot ? 0.35 : 0.45);
+        const sOuter = size + DOT * BLOOM_SPREAD * 0.75;
+        const sInner = size + DOT * BLOOM_SPREAD * 0.35;
 
         ctx.fillStyle = `rgba(${br},${bg},${bb},${aOuter})`;
         ctx.fillRect(cx - sOuter * 0.5, cy - sOuter * 0.5, sOuter, sOuter);
@@ -509,28 +535,46 @@ export function createHeatStyle(deps) {
         ctx.fillRect(cx - sInner * 0.5, cy - sInner * 0.5, sInner, sInner);
       }
 
-      /* Energy boot: luminance ladder. Operational: FIELD → COOL → accent. */
+      /* Energy / self-test: luminance ladder + red indicator.
+         Typography handoff on black: white glyph LEDs.
+         Operational: FIELD → COOL → accent. */
       let r;
       let g;
       let b;
-      if (energyBoot) {
-        const L = 255 * Math.min(1, presence);
-        r = L;
-        g = L;
-        b = L;
+      if (latticeBoot) {
+        if (typeSignal > 0.001 && !indicatorAccent) {
+          const L = 255 * Math.min(1, typeSignal);
+          r = L;
+          g = L;
+          b = L;
+        } else {
+          const L = 255 * Math.min(1, presence);
+          r = L;
+          g = L;
+          b = L;
+          if (drawTint > 0) {
+            r = r + (accent[0] - r) * drawTint;
+            g = g + (accent[1] - g) * drawTint;
+            b = b + (accent[2] - b) * drawTint;
+            const lift = drawTint * BLOOM_BRIGHTNESS;
+            r += (255 - r) * lift;
+            g += (248 - g) * lift;
+            b += (250 - b) * lift;
+          }
+        }
       } else {
         r = FIELD[0] + (COOL[0] - FIELD[0]) * Math.min(1, presence);
         g = FIELD[1] + (COOL[1] - FIELD[1]) * Math.min(1, presence);
         b = FIELD[2] + (COOL[2] - FIELD[2]) * Math.min(1, presence);
-      }
-      r = r + (accent[0] - r) * drawTint;
-      g = g + (accent[1] - g) * drawTint;
-      b = b + (accent[2] - b) * drawTint;
-      if (drawTint > 0) {
-        const lift = drawTint * BLOOM_BRIGHTNESS;
-        r += (255 - r) * lift;
-        g += (248 - g) * lift;
-        b += (250 - b) * lift;
+        r = r + (accent[0] - r) * drawTint;
+        g = g + (accent[1] - g) * drawTint;
+        b = b + (accent[2] - b) * drawTint;
+        if (drawTint > 0) {
+          const lift = drawTint * BLOOM_BRIGHTNESS;
+          r += (255 - r) * lift;
+          g += (248 - g) * lift;
+          b += (250 - b) * lift;
+        }
       }
 
       ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;

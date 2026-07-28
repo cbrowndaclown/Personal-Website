@@ -1,5 +1,6 @@
-/* CALIBRATION — final wake: LIGHT GRAY → WHITE L→R,
-   indicator completes its last revolution and fades, then brief stillness. */
+/* CALIBRATION — final wake: LIGHT GRAY → WHITE L→R.
+   Indicator keeps rotating through white arrival, then completes
+   one final full revolution before the display-clear stage. */
 
 import { BOOT_TIMING, BOOT_ENERGY } from '../constants.js';
 import { clamp01 } from '../math.js';
@@ -7,7 +8,8 @@ import { applyEnergySweep, lockEnergy } from '../energy.js';
 
 export function createCalibrationStage() {
   let startMs = 0;
-  let phase = 'sweep'; /* sweep | fade | stillness */
+  let phase = 'sweep'; /* sweep | closing | hold */
+  let closeArmed = false;
 
   return {
     id: 'calibration',
@@ -17,6 +19,7 @@ export function createCalibrationStage() {
     enter(ctx) {
       startMs = ctx.now;
       phase = 'sweep';
+      closeArmed = false;
       lockEnergy(ctx.field, BOOT_ENERGY.LIGHT);
       ctx.field.clearBrightness();
       ctx.field.clearMotion();
@@ -28,8 +31,7 @@ export function createCalibrationStage() {
 
       const elapsed = ctx.now - startMs;
       const sweepMs = BOOT_TIMING.CALIBRATION_SWEEP_MS;
-      const fadeMs = BOOT_TIMING.INDICATOR_FADE_MS;
-      const stillMs = BOOT_TIMING.BOOT_STILLNESS_MS;
+      const holdMs = BOOT_TIMING.WHITE_HOLD_MS;
 
       field.clearBrightness();
       field.clearMotion();
@@ -48,32 +50,31 @@ export function createCalibrationStage() {
 
         if (elapsed >= sweepMs) {
           lockEnergy(field, BOOT_ENERGY.WHITE);
-          if (ctx.indicator) ctx.indicator.beginFade(ctx.now);
-          phase = 'fade';
+          if (ctx.indicator && !closeArmed) {
+            ctx.indicator.beginClose(ctx.now);
+            closeArmed = true;
+          }
+          phase = 'closing';
         }
         return { done: false };
       }
 
-      /* Grid fully white while the arc closes and dissolves */
+      /* Fully white while the arc finishes one clean closing revolution */
       lockEnergy(field, BOOT_ENERGY.WHITE);
+      if (ctx.indicator) ctx.indicator.paint(field, ctx.now);
 
-      if (phase === 'fade') {
-        if (ctx.indicator) ctx.indicator.paint(field, ctx.now);
-        const fadeElapsed = elapsed - sweepMs;
-        if (
-          fadeElapsed >= fadeMs ||
-          (ctx.indicator && ctx.indicator.isDone(ctx.now))
-        ) {
-          field.clearBrightness();
-          phase = 'stillness';
+      if (phase === 'closing') {
+        const closed = !ctx.indicator || ctx.indicator.isClosed(ctx.now);
+        if (closed) {
+          phase = 'hold';
+          startMs = ctx.now; /* reuse for white hold beat */
         }
         return { done: false };
       }
 
-      /* Quiet beat before typography construction */
-      field.clearBrightness();
-      const stillElapsed = elapsed - sweepMs - fadeMs;
-      if (stillElapsed >= stillMs) {
+      /* Brief hold of the completed white display before clearing */
+      const holdElapsed = ctx.now - startMs;
+      if (holdElapsed >= holdMs) {
         return { done: true };
       }
       return { done: false };
@@ -83,7 +84,7 @@ export function createCalibrationStage() {
       lockEnergy(ctx.field, BOOT_ENERGY.WHITE);
       ctx.field.clearBrightness();
       ctx.field.clearMotion();
-      ctx.field.fillPresence(1);
+      if (ctx.indicator) ctx.indicator.paint(ctx.field, ctx.now);
     },
   };
 }

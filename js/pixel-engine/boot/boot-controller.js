@@ -1,7 +1,12 @@
 /* Boot Controller — state-driven Pixel Engine lifecycle.
    Owns stage advancement, overlaps, interaction gating, and field compositing. */
 
-import { BootPhase } from './constants.js';
+import {
+  BootPhase,
+  isExclusiveBootPhase,
+  isLatticeBootPhase,
+  isIndicatorAccentPhase,
+} from './constants.js';
 import { createBootField } from './boot-field.js';
 import { createBootIndicator } from './indicator.js';
 import { createBootStageDefs } from './stages/index.js';
@@ -149,8 +154,12 @@ export function createBootController(options) {
       const nextDef = stageDefs[nextIndex];
       /* Don't overlap into READY — finish stabilizing cleanly first */
       if (nextDef.phase === BootPhase.READY) return;
-      if (nextDef.phase === BootPhase.TYPOGRAPHY_CONSTRUCTION) {
-        /* Typography starts only after calibration fully exits */
+      /* Post-calibration story beats must run sequentially */
+      if (
+        nextDef.phase === BootPhase.DISPLAY_CLEAR ||
+        nextDef.phase === BootPhase.SELF_TEST ||
+        nextDef.phase === BootPhase.TYPOGRAPHY_CONSTRUCTION
+      ) {
         return;
       }
       startNextStage(now);
@@ -181,25 +190,20 @@ export function createBootController(options) {
 
     pruneActive();
 
-    /* After calibration (and earlier) fully done, start typography if pending */
-    if (
-      !active.length &&
-      nextIndex < stageDefs.length &&
-      stageDefs[nextIndex].phase === BootPhase.TYPOGRAPHY_CONSTRUCTION
-    ) {
-      startNextStage(now);
-    } else if (
-      !active.length &&
-      nextIndex < stageDefs.length &&
-      stageDefs[nextIndex].phase === BootPhase.STABILIZING
-    ) {
-      startNextStage(now);
-    } else if (
-      !active.length &&
-      nextIndex < stageDefs.length &&
-      stageDefs[nextIndex].phase === BootPhase.READY
-    ) {
-      startNextStage(now);
+    /* Sequential story beats after energy boot — no overlap */
+    if (!active.length && nextIndex < stageDefs.length) {
+      const nextPhase = stageDefs[nextIndex].phase;
+      if (
+        nextPhase === BootPhase.DISPLAY_CLEAR ||
+        nextPhase === BootPhase.SELF_TEST ||
+        nextPhase === BootPhase.TYPOGRAPHY_CONSTRUCTION ||
+        nextPhase === BootPhase.STABILIZING ||
+        nextPhase === BootPhase.READY
+      ) {
+        startNextStage(now);
+      } else {
+        advancePipeline(now);
+      }
     } else {
       advancePipeline(now);
     }
@@ -305,6 +309,11 @@ export function createBootController(options) {
     indicator.reset();
     field.clear();
 
+    /* Exclusive ownership of the PE canvas — no leftover directory / type LEDs */
+    if (intro && typeof intro.suppressContent === 'function') {
+      intro.suppressContent();
+    }
+
     if (prefersReduced || !animConfig.motion) {
       phase = BootPhase.SKIPPED;
       jumpToReady({ instantDirectory: true });
@@ -372,17 +381,23 @@ export function createBootController(options) {
 
   function brightness(i) {
     const boot = field.getBrightness(i);
+    /* Exclusive energy / self-test: only the boot indicator may light cells */
+    if (isExclusiveBootPhase(phase)) {
+      return boot;
+    }
     const led = intro.brightness(i);
     return boot > led ? boot : led;
   }
 
   function offsetX(i) {
+    if (isExclusiveBootPhase(phase)) return field.getOffsetX(i);
     const boot = field.getOffsetX(i);
     if (boot) return boot;
     return intro.offsetX(i);
   }
 
   function offsetY(i) {
+    if (isExclusiveBootPhase(phase)) return field.getOffsetY(i);
     const boot = field.getOffsetY(i);
     if (boot) return boot;
     return intro.offsetY(i);
@@ -393,7 +408,10 @@ export function createBootController(options) {
     if (!running && started && phase !== BootPhase.SKIPPED) {
       startLoop();
     }
-    const contentAlive = intro.update(now);
+    /* Suppress intro content clocks during exclusive boot ownership */
+    const contentAlive = isExclusiveBootPhase(phase)
+      ? false
+      : intro.update(now);
     return (
       contentAlive ||
       (phase !== BootPhase.READY &&
@@ -430,10 +448,27 @@ export function createBootController(options) {
       phase === BootPhase.POWERING_ON ||
       phase === BootPhase.GRID_GENERATION ||
       phase === BootPhase.CALIBRATION ||
+      phase === BootPhase.DISPLAY_CLEAR ||
+      phase === BootPhase.SELF_TEST ||
       phase === BootPhase.TYPOGRAPHY_CONSTRUCTION ||
       phase === BootPhase.STABILIZING ||
       intro.isControllable()
     );
+  }
+
+  function exclusiveBootActive() {
+    return isExclusiveBootPhase(phase);
+  }
+
+  function latticeBootActive() {
+    /* Intro may overwrite data-boot to "typography" during construction */
+    const attr = document.body.dataset.boot;
+    return isLatticeBootPhase(phase) || isLatticeBootPhase(attr);
+  }
+
+  function indicatorAccentActive() {
+    const attr = document.body.dataset.boot;
+    return isIndicatorAccentPhase(phase) || isIndicatorAccentPhase(attr);
   }
 
   /* FF / skip inputs during boot */
@@ -482,6 +517,9 @@ export function createBootController(options) {
     interactionsEnabled,
     getPhase,
     isControllable,
+    exclusiveBootActive,
+    latticeBootActive,
+    indicatorAccentActive,
     field,
     destroy() {
       cancel();

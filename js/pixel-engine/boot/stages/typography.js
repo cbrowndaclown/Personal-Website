@@ -1,6 +1,7 @@
-/* TYPOGRAPHY_CONSTRUCTION — hero glyph LEDs migrate into place. */
+/* TYPOGRAPHY_CONSTRUCTION — smile dissolves into hero glyph LEDs. */
 
-import { BOOT_TIMING } from '../constants.js';
+import { BOOT_TIMING, BOOT_ENERGY } from '../constants.js';
+import { lockEnergy } from '../energy.js';
 
 /**
  * Delegates glyph bake / migration to the intro content service.
@@ -11,6 +12,7 @@ export function createTypographyStage(options) {
   const intro = options.intro;
   let startMs = 0;
   let completeAt = 0;
+  let dissolving = true;
 
   return {
     id: 'typography_construction',
@@ -19,10 +21,20 @@ export function createTypographyStage(options) {
 
     enter(ctx) {
       startMs = ctx.now;
-      ctx.field.fillPresence(1);
-      ctx.field.clearBrightness();
+      dissolving = true;
+      lockEnergy(ctx.field, BOOT_ENERGY.BLACK);
       ctx.field.clearMotion();
-      intro.beginTypographyConstruction();
+
+      const seeds =
+        ctx.indicator && typeof ctx.indicator.getSmileCells === 'function'
+          ? ctx.indicator.getSmileCells()
+          : [];
+
+      if (ctx.indicator && typeof ctx.indicator.beginDissolve === 'function') {
+        ctx.indicator.beginDissolve(ctx.now);
+      }
+
+      intro.beginTypographyConstruction({ seedCells: seeds });
       const ledMs = intro.getTypographyDurationMs();
       completeAt =
         startMs +
@@ -31,7 +43,26 @@ export function createTypographyStage(options) {
     },
 
     update(ctx) {
-      /* Intro LED update runs from the boot controller each frame */
+      /* Keep the lattice dormant black while glyphs construct from the smile */
+      lockEnergy(ctx.field, BOOT_ENERGY.BLACK);
+      ctx.field.clearMotion();
+      ctx.field.clearBrightness();
+
+      if (
+        dissolving &&
+        ctx.indicator &&
+        typeof ctx.indicator.paint === 'function'
+      ) {
+        ctx.indicator.paint(ctx.field, ctx.now);
+        if (
+          typeof ctx.indicator.isDissolveDone === 'function' &&
+          ctx.indicator.isDissolveDone(ctx.now)
+        ) {
+          dissolving = false;
+          ctx.field.clearBrightness();
+        }
+      }
+
       const settled = intro.isTypographySettled();
       const timedOut = ctx.now >= completeAt;
       return { done: settled || timedOut };
@@ -39,6 +70,13 @@ export function createTypographyStage(options) {
 
     exit(ctx) {
       intro.holdTypography();
+      if (ctx.indicator && typeof ctx.indicator.reset === 'function') {
+        ctx.indicator.reset();
+      }
+      ctx.field.clearBrightness();
+      ctx.field.clearMotion();
+      /* Field awakens to operational lattice as typography settles */
+      ctx.field.fillPresence(1);
       /* Interactions unlock only after hero construction has settled */
       if (ctx && typeof ctx.setInteractive === 'function') {
         ctx.setInteractive(true);

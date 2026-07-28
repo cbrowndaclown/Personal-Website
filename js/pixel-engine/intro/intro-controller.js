@@ -77,6 +77,7 @@ export function createIntroController(deps) {
   let timeScale = 1;
   let holdingFF = false;
   let killed = false;
+  let contentLocked = false; /* exclusive boot owns the PE canvas */
   let phaseStartTime = 0; /* content clock ms origin */
   let contentElapsed = 0;
   let lastWallNow = 0;
@@ -457,7 +458,9 @@ export function createIntroController(deps) {
     return { glyph, minX, maxX, minY, maxY };
   }
 
-  function bakeIntro() {
+  function bakeIntro(opts) {
+    opts = opts || {};
+    const seedCells = opts.seedCells || null;
     const n = cols * rows;
     iTarget = new Float32Array(n);
     iOn = new Float32Array(n);
@@ -630,6 +633,45 @@ export function createIntroController(deps) {
 
       cursor = lineEnd;
       if (L < lineCount - 1) cursor += INTRO_LINE_PAUSE;
+    }
+
+    /* Smile → typography: earliest glyphs spawn from self-test smile pixels */
+    if (seedCells && seedCells.length && iTarget) {
+      const seeded = [];
+      for (let i = 0; i < n; i++) {
+        if (!iTarget[i]) continue;
+        seeded.push(i);
+      }
+      seeded.sort(function (a, b) {
+        return iOnAt[a] - iOnAt[b];
+      });
+
+      const count = Math.min(seedCells.length, seeded.length);
+      for (let s = 0; s < count; s++) {
+        const i = seeded[s];
+        const seed = seedCells[s % seedCells.length];
+        const homeX = i % cols;
+        const homeY = (i / cols) | 0;
+        /* Drift from smile cell toward glyph home — same pixels continue the story */
+        iDriftX[i] = (seed.x - homeX) * LED_CELL;
+        iDriftY[i] = (seed.y - homeY) * LED_CELL;
+        iOnAt[i] = Math.min(iOnAt[i], 12 + s * 10);
+        iMigrateMs[i] = Math.max(
+          iMigrateMs[i],
+          340 + hash01(i, 0x51e) * 220
+        );
+        /* Brighten the handoff so the smile→type bridge reads clearly */
+        iLevel[i] = Math.max(iLevel[i], 0.96);
+      }
+
+      /* Recompute duration after seed timing tweaks */
+      let seedMaxArrive = 0;
+      for (let i = 0; i < n; i++) {
+        if (!iTarget[i]) continue;
+        const arriveAt = iOnAt[i] + iMigrateMs[i] + INTRO_CORRECT_MS;
+        if (arriveAt > seedMaxArrive) seedMaxArrive = arriveAt;
+      }
+      if (seedMaxArrive > maxArrive) maxArrive = seedMaxArrive;
     }
 
     /* Store dissolve meta for later retarget — construction holds glyphs in place */
@@ -1001,13 +1043,32 @@ export function createIntroController(deps) {
 
   /* ── content phase API (driven by Boot Controller) ─────────────────────── */
 
-  function beginTypographyConstruction() {
+  /**
+   * Clear all content LEDs and lock the intro out of the PE canvas
+   * until typography construction is explicitly started.
+   */
+  function suppressContent() {
+    clearDissolveTimer();
+    clearIntroLeds();
+    clearDirectoryLeds();
+    contentLocked = true;
+    phase = 'idle';
+    typographySettled = false;
+    holdingFF = false;
+    timeScale = 1;
+    resetContentClock();
+    /* Do not touch data-boot — boot controller owns it during exclusive phases */
+  }
+
+  function beginTypographyConstruction(opts) {
+    opts = opts || {};
     if (killed) return;
+    contentLocked = false;
     ensureGrid();
     clearDissolveTimer();
     clearIntroLeds();
     clearDirectoryLeds();
-    bakeIntro();
+    bakeIntro({ seedCells: opts.seedCells || null });
     resetContentClock();
     typographySettled = false;
     phase = 'typography';
@@ -1059,6 +1120,7 @@ export function createIntroController(deps) {
     opts = opts || {};
     clearDissolveTimer();
     killed = false;
+    contentLocked = false;
 
     if (opts.fromMotionReenable) {
       bakeDirectory();
@@ -1087,6 +1149,7 @@ export function createIntroController(deps) {
 
   function skipToDirectoryHold() {
     clearDissolveTimer();
+    contentLocked = false;
     ensureGrid();
     clearIntroLeds();
     if (cols >= 12 && rows >= 8 && animConfig.motion && !prefersReduced) {
@@ -1128,6 +1191,7 @@ export function createIntroController(deps) {
 
   function cancel() {
     killed = true;
+    contentLocked = false;
     clearDissolveTimer();
     clearIntroLeds();
     clearDirectoryLeds();
@@ -1292,6 +1356,8 @@ export function createIntroController(deps) {
   }
 
   function update(now) {
+    if (contentLocked) return false;
+
     const wall = now || performance.now();
     tickContentClock(wall);
     const t = phaseElapsedMs();
@@ -1320,24 +1386,28 @@ export function createIntroController(deps) {
   }
 
   function brightness(i) {
+    if (contentLocked) return 0;
     const a = iOn ? iOn[i] : 0;
     const b = dOn ? dOn[i] : 0;
     return a > b ? a : b;
   }
 
   function offsetX(i) {
+    if (contentLocked) return 0;
     const d = dOx ? dOx[i] : 0;
     if (d) return d;
     return iOx ? iOx[i] : 0;
   }
 
   function offsetY(i) {
+    if (contentLocked) return 0;
     const d = dOy ? dOy[i] : 0;
     if (d) return d;
     return iOy ? iOy[i] : 0;
   }
 
   function isActive() {
+    if (contentLocked) return false;
     return isActivePhase() || phase === 'idle';
   }
 
@@ -1347,6 +1417,13 @@ export function createIntroController(deps) {
     if (c === cols && r === rows) return;
     cols = c;
     rows = r;
+
+    /* During exclusive boot, never bake directory / type into the PE canvas */
+    if (contentLocked) {
+      clearIntroLeds();
+      clearDirectoryLeds();
+      return;
+    }
 
     if (phase === 'typography' || phase === 'dissolving') {
       bakeIntro();
@@ -1408,6 +1485,7 @@ export function createIntroController(deps) {
     isControllable: isActivePhase,
 
     /* Boot content API */
+    suppressContent: suppressContent,
     beginTypographyConstruction: beginTypographyConstruction,
     getTypographyDurationMs: getTypographyDurationMs,
     isTypographySettled: isTypographySettled,
