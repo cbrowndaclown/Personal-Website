@@ -76,13 +76,14 @@ export function createAnimationManager(options) {
     });
   }
 
-  /* Space skips the full boot sequence */
+  /* Space skips intro only — exclusive boot (loading ring) is never skippable */
   window.addEventListener('keydown', function (e) {
     if (e.code !== 'Space' && e.key !== ' ') return;
     if (e.repeat) return;
     const tag = e.target && e.target.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
     if (e.target && e.target.isContentEditable) return;
+    if (bootController.exclusiveBootActive()) return;
     if (bootController.isReady() && !introController.isControllable()) return;
     if (bootController.getPhase() === 'skipped') return;
     e.preventDefault();

@@ -6,7 +6,8 @@ import { BOOT_TIMING } from './constants.js';
 
 const CELL_PX = 5;
 const LABEL = 'Booting';
-const ELLIPSIS_PERIOD_MS = 400;
+/* Full ellipsis cycle (0→1→2→3 dots). ~500ms per state — calm OS boot pace. */
+const ELLIPSIS_PERIOD_MS = 2000;
 const BOB_PERIOD_MS = 1350;
 const BOB_AMP_PX = 3.2;
 const GLOW = 0.26;
@@ -199,9 +200,12 @@ export function createBootStatus() {
     const cx = (cols - 1) * 0.5;
     const cy = (rows - 1) * 0.5;
 
-    /* Readable pixel type — larger than the old HTML overlay so LED sampling works. */
-    let fontPx = Math.max(5, Math.round(Math.min(cols, rows) * 0.048));
-    fontPx = Math.min(fontPx, Math.max(5, Math.round(rows * 0.06)));
+    /*
+      Larger lattice type — more cells per glyph (not a scaled bitmap) so the
+      word stays crisp and immediately readable under the ring.
+    */
+    let fontPx = Math.max(8, Math.round(Math.min(cols, rows) * 0.088));
+    fontPx = Math.min(fontPx, Math.max(8, Math.round(rows * 0.095)));
 
     /* Probe widths in a temporary canvas */
     const probe = document.createElement('canvas').getContext('2d');
@@ -213,10 +217,10 @@ export function createBootStatus() {
     let ellipsisW = dotW * 3 + gap * 2;
     let totalW = labelW + gap + ellipsisW;
 
-    /* Fit within ~72% of the lattice width */
-    const maxW = cols * 0.72;
+    /* Fit within the lattice; prefer shrinking type over clipping */
+    const maxW = cols * 0.82;
     let guard = 0;
-    while (totalW > maxW && fontPx > 4 && guard < 12) {
+    while (totalW > maxW && fontPx > 7 && guard < 14) {
       fontPx -= 1;
       probe.font = `600 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
       labelW = probe.measureText(LABEL).width;

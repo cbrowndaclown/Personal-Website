@@ -306,12 +306,15 @@ export function createBootController(options) {
   }
 
   function skip() {
+    /* Exclusive boot (ring + Booting status) cannot be skipped */
+    if (isExclusiveBootPhase(phase)) return;
+
     if (phase === BootPhase.READY || phase === BootPhase.SKIPPED) {
       intro.skip();
       return;
     }
     killed = false;
-    /* Tear down in-flight stages cleanly */
+    /* Tear down in-flight stages cleanly (typography / stabilizing → directory) */
     active.forEach((e) => {
       try { e.instance.exit(makeCtx(performance.now())); } catch (_) { /* ignore */ }
     });
