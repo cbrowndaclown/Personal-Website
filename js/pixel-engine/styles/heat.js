@@ -42,6 +42,17 @@ export function createHeatStyle(deps) {
   /* Flat field · white pixels → coral heat under pressure */
   const FIELD = [210, 210, 210];
   const COOL  = [255, 255, 255];
+  /* Boot indicator accent — restrained red, independent of Settings HOT */
+  const BOOT_RED = [214, 46, 46];
+
+  function isEnergyBootPhase() {
+    const p = document.body.dataset.boot;
+    return (
+      p === 'powering_on' ||
+      p === 'grid_generation' ||
+      p === 'calibration'
+    );
+  }
 
   /* ── Spring (silicone / fabric) ─────────────────────────────────────────
      Overdamped mass-spring: force pulls dots, then they ease home.
@@ -147,10 +158,14 @@ export function createHeatStyle(deps) {
   }
 
   function paintRest() {
-    ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
+    const energyBoot = isEnergyBootPhase();
+    if (energyBoot) {
+      ctx.fillStyle = '#000000';
+    } else {
+      ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
+    }
     ctx.fillRect(0, 0, viewW, viewH);
 
-    const half = (CELL - DOT) * 0.5;
     const n = cols * rows;
     for (let i = 0; i < n; i++) {
       const presence =
@@ -160,9 +175,17 @@ export function createHeatStyle(deps) {
       const y = (i / cols) | 0;
       const size = DOT * Math.min(1, 0.35 + presence * 0.65);
       const a = Math.min(1, presence);
-      const r = (FIELD[0] + (COOL[0] - FIELD[0]) * a) | 0;
-      const g = (FIELD[1] + (COOL[1] - FIELD[1]) * a) | 0;
-      const b = (FIELD[2] + (COOL[2] - FIELD[2]) * a) | 0;
+      let r;
+      let g;
+      let b;
+      if (energyBoot) {
+        /* Black → white energy ladder during power-on */
+        r = g = b = (255 * a) | 0;
+      } else {
+        r = (FIELD[0] + (COOL[0] - FIELD[0]) * a) | 0;
+        g = (FIELD[1] + (COOL[1] - FIELD[1]) * a) | 0;
+        b = (FIELD[2] + (COOL[2] - FIELD[2]) * a) | 0;
+      }
       ctx.fillStyle = `rgb(${r},${g},${b})`;
       ctx.fillRect(
         x * CELL + CELL * 0.5 - size * 0.5,
@@ -313,11 +336,18 @@ export function createHeatStyle(deps) {
     }
 
     let alive = hasTrail || active || introAlive;
+    const energyBoot = isEnergyBootPhase();
 
-    ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
+    if (energyBoot) {
+      ctx.fillStyle = '#000000';
+    } else {
+      ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
+    }
     ctx.fillRect(0, 0, viewW, viewH);
 
     const nCells = cols * rows;
+    /* During energy boot the lattice owns the frame — no cursor heat */
+    const allowHeat = !energyBoot;
 
     for (let i = 0; i < nCells; i++) {
       const x = i % cols;
@@ -327,7 +357,7 @@ export function createHeatStyle(deps) {
       let targetY = 0;
       let pressure = 0;
 
-      if (hasTrail && x >= x0 && x <= x1 && y >= y0 && y <= y1) {
+      if (allowHeat && hasTrail && x >= x0 && x <= x1 && y >= y0 && y <= y1) {
         let fx = 0;
         let fy = 0;
         /* Soft-OR blend across history — one liquid lobe, not stacked rings */
@@ -366,27 +396,35 @@ export function createHeatStyle(deps) {
 
       /* Color follows pressure — ease both ways, no stepped tint */
       const h = heat[i];
-      if (pressure > h) {
-        heat[i] = h + (pressure - h) * HEAT_IN;
-      } else {
-        heat[i] = h + (0 - h) * HEAT_OUT;
-        if (heat[i] < EPS) heat[i] = 0;
+      if (allowHeat) {
+        if (pressure > h) {
+          heat[i] = h + (pressure - h) * HEAT_IN;
+        } else {
+          heat[i] = h + (0 - h) * HEAT_OUT;
+          if (heat[i] < EPS) heat[i] = 0;
+        }
+      } else if (heat[i] !== 0) {
+        heat[i] = 0;
       }
 
       /* Spring-damper: pressure displaces, then soft fabric return to rest */
-      springAxis(ox[i], vx[i], targetX);
-      ox[i] = _s.pos; vx[i] = _s.vel;
-      springAxis(oy[i], vy[i], targetY);
-      oy[i] = _s.pos; vy[i] = _s.vel;
+      if (allowHeat) {
+        springAxis(ox[i], vx[i], targetX);
+        ox[i] = _s.pos; vx[i] = _s.vel;
+        springAxis(oy[i], vy[i], targetY);
+        oy[i] = _s.pos; vy[i] = _s.vel;
+      } else {
+        ox[i] = oy[i] = vx[i] = vy[i] = 0;
+      }
 
       const introHv = pixelField.brightness(i);
-      const introDX = pixelField.offsetX(i);
-      const introDY = pixelField.offsetY(i);
+      const introDX = energyBoot ? 0 : pixelField.offsetX(i);
+      const introDY = energyBoot ? 0 : pixelField.offsetY(i);
       const introDrift = introDX !== 0 || introDY !== 0;
       const presence =
         typeof pixelField.presence === 'function' ? pixelField.presence(i) : 1;
 
-      /* Undrawn lattice cells stay invisible until grid generation reaches them */
+      /* Undrawn lattice cells stay invisible until energy reaches them */
       if (presence <= 0.001 && introHv <= 0 && !introDrift && heat[i] < EPS) {
         continue;
       }
@@ -415,8 +453,9 @@ export function createHeatStyle(deps) {
         alive = true;
       }
 
-      /* Intro LEDs share the heat tint path → live Settings RGB accent */
+      /* Intro LEDs / boot indicator share the tint path */
       const hv = Math.max(heat[i], introDrift ? 0 : introHv);
+      const accent = energyBoot ? BOOT_RED : HOT;
       /* Soft radial heat: strong under cursor → medium → subtle rim → cool.
          COLOR_FALLOFF < 1 keeps a gentle pink fringe; GLOW_OPACITY caps peak. */
       const eased = hv * hv * (3 - 2 * hv);
@@ -426,7 +465,9 @@ export function createHeatStyle(deps) {
       const disp = Math.min(1, Math.hypot(ox[i], oy[i]) / (MAX_DISP + EPS));
       const depth = Math.min(1, heat[i] * 0.5 + disp * 0.45);
       const scale = 1 - smootherstep(depth) * 0.24;
-      const presenceScale = Math.min(1, 0.35 + presence * 0.65);
+      const presenceScale = energyBoot
+        ? Math.min(1, 0.55 + presence * 0.45)
+        : Math.min(1, 0.35 + presence * 0.65);
       const size  = DOT * scale * presenceScale * (1 + (heat[i] > 0 ? tint * GLOW_SIZE : 0));
 
       const homeX = x * CELL + CELL * 0.5 + ox[i] * CELL;
@@ -453,13 +494,14 @@ export function createHeatStyle(deps) {
         const bloom = smootherstep(
           (drawTint - BLOOM_THRESHOLD) / (1 - BLOOM_THRESHOLD)
         );
-        const br = (HOT[0] + (255 - HOT[0]) * 0.58) | 0;
-        const bg = (HOT[1] + (255 - HOT[1]) * 0.58) | 0;
-        const bb = (HOT[2] + (255 - HOT[2]) * 0.58) | 0;
-        const aOuter = bloom * BLOOM_STRENGTH * 0.32;
-        const aInner = bloom * BLOOM_STRENGTH * 0.55;
-        const sOuter = size + DOT * BLOOM_SPREAD;
-        const sInner = size + DOT * BLOOM_SPREAD * 0.45;
+        const br = (accent[0] + (255 - accent[0]) * 0.58) | 0;
+        const bg = (accent[1] + (255 - accent[1]) * 0.58) | 0;
+        const bb = (accent[2] + (255 - accent[2]) * 0.58) | 0;
+        const bloomGain = energyBoot ? 0.85 : 1;
+        const aOuter = bloom * BLOOM_STRENGTH * 0.32 * bloomGain;
+        const aInner = bloom * BLOOM_STRENGTH * 0.55 * bloomGain;
+        const sOuter = size + DOT * BLOOM_SPREAD * (energyBoot ? 0.75 : 1);
+        const sInner = size + DOT * BLOOM_SPREAD * (energyBoot ? 0.35 : 0.45);
 
         ctx.fillStyle = `rgba(${br},${bg},${bb},${aOuter})`;
         ctx.fillRect(cx - sOuter * 0.5, cy - sOuter * 0.5, sOuter, sOuter);
@@ -467,13 +509,23 @@ export function createHeatStyle(deps) {
         ctx.fillRect(cx - sInner * 0.5, cy - sInner * 0.5, sInner, sInner);
       }
 
-      /* Base accent tint, then a whisper of warm brightness with influence */
-      let r = FIELD[0] + (COOL[0] - FIELD[0]) * Math.min(1, presence);
-      let g = FIELD[1] + (COOL[1] - FIELD[1]) * Math.min(1, presence);
-      let b = FIELD[2] + (COOL[2] - FIELD[2]) * Math.min(1, presence);
-      r = r + (HOT[0] - r) * drawTint;
-      g = g + (HOT[1] - g) * drawTint;
-      b = b + (HOT[2] - b) * drawTint;
+      /* Energy boot: luminance ladder. Operational: FIELD → COOL → accent. */
+      let r;
+      let g;
+      let b;
+      if (energyBoot) {
+        const L = 255 * Math.min(1, presence);
+        r = L;
+        g = L;
+        b = L;
+      } else {
+        r = FIELD[0] + (COOL[0] - FIELD[0]) * Math.min(1, presence);
+        g = FIELD[1] + (COOL[1] - FIELD[1]) * Math.min(1, presence);
+        b = FIELD[2] + (COOL[2] - FIELD[2]) * Math.min(1, presence);
+      }
+      r = r + (accent[0] - r) * drawTint;
+      g = g + (accent[1] - g) * drawTint;
+      b = b + (accent[2] - b) * drawTint;
       if (drawTint > 0) {
         const lift = drawTint * BLOOM_BRIGHTNESS;
         r += (255 - r) * lift;

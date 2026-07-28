@@ -37,8 +37,12 @@ export function createTypographyStage(options) {
       return { done: settled || timedOut };
     },
 
-    exit() {
+    exit(ctx) {
       intro.holdTypography();
+      /* Interactions unlock only after hero construction has settled */
+      if (ctx && typeof ctx.setInteractive === 'function') {
+        ctx.setInteractive(true);
+      }
     },
   };
 }

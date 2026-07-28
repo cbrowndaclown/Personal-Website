@@ -844,6 +844,13 @@ body[data-boot] .stage__field {
   user-select: none;
 }
 
+/* Energy boot — dormant black field inside the Pixel Engine only */
+body[data-boot="powering_on"] .stage__field,
+body[data-boot="grid_generation"] .stage__field,
+body[data-boot="calibration"] .stage__field {
+  background-color: #000000;
+}
+
 /* ============================================================
    HEATMAP — fine pixel grid inside the clipped stage only.
    Elastic pressure field: pink under soft cursor force, cool gray at rest.

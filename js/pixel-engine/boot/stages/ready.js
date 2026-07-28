@@ -22,6 +22,7 @@ export function createReadyStage(options) {
       ctx.field.fillPresence(1);
       ctx.field.clearBrightness();
       ctx.field.clearMotion();
+      /* Interactions already unlocked after typography; keep armed here for skip paths */
       ctx.setInteractive(true);
       ctx.setPhase('ready');
       ctx.emitReady();

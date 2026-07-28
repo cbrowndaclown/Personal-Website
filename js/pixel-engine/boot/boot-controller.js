@@ -3,6 +3,7 @@
 
 import { BootPhase } from './constants.js';
 import { createBootField } from './boot-field.js';
+import { createBootIndicator } from './indicator.js';
 import { createBootStageDefs } from './stages/index.js';
 import { PixelEvents } from '../constants.js';
 
@@ -23,6 +24,7 @@ export function createBootController(options) {
   const intro = options.intro;
 
   const field = createBootField();
+  const indicator = createBootIndicator();
   const stageDefs = createBootStageDefs({ intro });
 
   let phase = BootPhase.OFF;
@@ -92,6 +94,7 @@ export function createBootController(options) {
     return {
       now,
       field,
+      indicator,
       intro,
       phase: primaryPhase,
       setPhase: emitPhase,
@@ -237,6 +240,7 @@ export function createBootController(options) {
     stopLoop();
     active = [];
     nextIndex = stageDefs.length;
+    indicator.reset();
     field.allocate(field.cols || 1, field.rows || 1);
     ensureFieldSize();
     field.fillPresence(1);
@@ -269,6 +273,7 @@ export function createBootController(options) {
     });
     active = [];
     nextIndex = 0;
+    indicator.reset();
     intro.cancel();
     field.clear();
     interactive = false;
@@ -297,6 +302,7 @@ export function createBootController(options) {
     interactive = false;
     active = [];
     nextIndex = 0;
+    indicator.reset();
     field.clear();
 
     if (prefersReduced || !animConfig.motion) {
@@ -407,7 +413,8 @@ export function createBootController(options) {
   }
 
   function interactionsEnabled() {
-    return interactive && phase === BootPhase.READY;
+    /* Armed only after typography settles (or skip-to-ready). */
+    return interactive;
   }
 
   function isReady() {
