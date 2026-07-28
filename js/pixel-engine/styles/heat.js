@@ -180,6 +180,7 @@ export function createHeatStyle(deps) {
 
   function paintRest() {
     const latticeBoot = latticeBootActive();
+    /* Ungenerated cells stay black; generated cells own the real FIELD bg. */
     if (latticeBoot) {
       ctx.fillStyle = '#000000';
     } else {
@@ -194,19 +195,17 @@ export function createHeatStyle(deps) {
       if (presence <= 0.001) continue;
       const x = i % cols;
       const y = (i / cols) | 0;
+      if (latticeBoot) {
+        /* Permanently initialize this cell's resting Pixel FS background */
+        ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
+        ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+      }
       const size = DOT * Math.min(1, 0.35 + presence * 0.65);
       const a = Math.min(1, presence);
-      let r;
-      let g;
-      let b;
-      if (latticeBoot) {
-        /* Black → white energy ladder during power-on */
-        r = g = b = (255 * a) | 0;
-      } else {
-        r = (FIELD[0] + (COOL[0] - FIELD[0]) * a) | 0;
-        g = (FIELD[1] + (COOL[1] - FIELD[1]) * a) | 0;
-        b = (FIELD[2] + (COOL[2] - FIELD[2]) * a) | 0;
-      }
+      /* Same FIELD → COOL resting formula used during normal operation */
+      const r = (FIELD[0] + (COOL[0] - FIELD[0]) * a) | 0;
+      const g = (FIELD[1] + (COOL[1] - FIELD[1]) * a) | 0;
+      const b = (FIELD[2] + (COOL[2] - FIELD[2]) * a) | 0;
       ctx.fillStyle = `rgb(${r},${g},${b})`;
       ctx.fillRect(
         x * CELL + CELL * 0.5 - size * 0.5,
@@ -362,6 +361,7 @@ export function createHeatStyle(deps) {
     /* Keep painting while boot owns the lattice — never stall on a black clear */
     if (latticeBoot) alive = true;
 
+    /* Boot progressively claims FIELD; ops clear the full resting backdrop. */
     if (latticeBoot) {
       ctx.fillStyle = '#000000';
     } else {
@@ -478,13 +478,16 @@ export function createHeatStyle(deps) {
       }
 
       /*
-        Lattice boot paint (shared BootField presence):
-        - Indicator phases: presence = energy ladder, boot brightness = red arc/ring
-        - Typography+: same presence buffer stays fully generated; intro LEDs composite on top
+        Shared BootField presence drives the live Pixel FS:
+        - Boot: each generated cell initializes FIELD bg + FIELD→COOL dots
+        - Indicator: boot brightness tints with BOOT_RED
+        - Intro+: Settings HOT tints LED brightness on the same resting lattice
       */
       const bootSignal = indicatorAccent ? introHv : 0;
       const typeSignal = indicatorAccent ? 0 : introHv;
-      const hv = Math.max(heat[i], introDrift ? 0 : bootSignal);
+      /* Intro LEDs share the same energy→tint path as cursor heat (Settings HOT) */
+      let hv = Math.max(heat[i], introDrift ? 0 : bootSignal);
+      if (!introDrift && typeSignal > hv) hv = typeSignal;
       const accent = indicatorAccent ? BOOT_RED : HOT;
       const eased = hv * hv * (3 - 2 * hv);
       const tint  = Math.min(1, Math.pow(eased, COLOR_FALLOFF) * GLOW_OPACITY);
@@ -503,7 +506,13 @@ export function createHeatStyle(deps) {
       const cx = homeX + introDX;
       const cy = homeY + introDY;
 
-      /* While a glyph LED drifts away, restore the idle white dot at home */
+      /* Claim this cell's resting FIELD background as soon as it is generated */
+      if (latticeBoot && presence > 0.001) {
+        ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
+        ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
+      }
+
+      /* While a glyph LED drifts away, restore the idle resting dot at home */
       if (introDrift && heat[i] < EPS && presence > 0.001) {
         const pr = (FIELD[0] + (COOL[0] - FIELD[0]) * presence) | 0;
         const pg = (FIELD[1] + (COOL[1] - FIELD[1]) * presence) | 0;
@@ -518,14 +527,14 @@ export function createHeatStyle(deps) {
         ? Math.min(1, Math.pow(typeSignal * typeSignal * (3 - 2 * typeSignal), COLOR_FALLOFF) * GLOW_OPACITY)
         : tint;
 
-      if (indicatorAccent && drawTint > BLOOM_THRESHOLD) {
+      if (drawTint > BLOOM_THRESHOLD && (indicatorAccent || typeSignal > 0.001 || heat[i] > EPS)) {
         const bloom = smootherstep(
           (drawTint - BLOOM_THRESHOLD) / (1 - BLOOM_THRESHOLD)
         );
         const br = (accent[0] + (255 - accent[0]) * 0.58) | 0;
         const bg = (accent[1] + (255 - accent[1]) * 0.58) | 0;
         const bb = (accent[2] + (255 - accent[2]) * 0.58) | 0;
-        const bloomGain = 0.85;
+        const bloomGain = indicatorAccent ? 0.85 : 1;
         const aOuter = bloom * BLOOM_STRENGTH * 0.32 * bloomGain;
         const aInner = bloom * BLOOM_STRENGTH * 0.55 * bloomGain;
         const sOuter = size + DOT * BLOOM_SPREAD * 0.75;
@@ -537,45 +546,18 @@ export function createHeatStyle(deps) {
         ctx.fillRect(cx - sInner * 0.5, cy - sInner * 0.5, sInner, sInner);
       }
 
-      /* Energy boot + intro handoff: luminance from shared presence + LEDs.
-         Operational: FIELD → COOL → accent from the same presence buffer. */
-      let r;
-      let g;
-      let b;
-      if (latticeBoot) {
-        if (typeSignal > 0.001 && !indicatorAccent) {
-          const L = 255 * Math.min(1, typeSignal);
-          r = L;
-          g = L;
-          b = L;
-        } else {
-          const L = 255 * Math.min(1, presence);
-          r = L;
-          g = L;
-          b = L;
-          if (drawTint > 0) {
-            r = r + (accent[0] - r) * drawTint;
-            g = g + (accent[1] - g) * drawTint;
-            b = b + (accent[2] - b) * drawTint;
-            const lift = drawTint * BLOOM_BRIGHTNESS;
-            r += (255 - r) * lift;
-            g += (248 - g) * lift;
-            b += (250 - b) * lift;
-          }
-        }
-      } else {
-        r = FIELD[0] + (COOL[0] - FIELD[0]) * Math.min(1, presence);
-        g = FIELD[1] + (COOL[1] - FIELD[1]) * Math.min(1, presence);
-        b = FIELD[2] + (COOL[2] - FIELD[2]) * Math.min(1, presence);
-        r = r + (accent[0] - r) * drawTint;
-        g = g + (accent[1] - g) * drawTint;
-        b = b + (accent[2] - b) * drawTint;
-        if (drawTint > 0) {
-          const lift = drawTint * BLOOM_BRIGHTNESS;
-          r += (255 - r) * lift;
-          g += (248 - g) * lift;
-          b += (250 - b) * lift;
-        }
+      /* Boot + intro + ops: one resting formula — FIELD → COOL → Settings accent */
+      let r = FIELD[0] + (COOL[0] - FIELD[0]) * Math.min(1, presence);
+      let g = FIELD[1] + (COOL[1] - FIELD[1]) * Math.min(1, presence);
+      let b = FIELD[2] + (COOL[2] - FIELD[2]) * Math.min(1, presence);
+      r = r + (accent[0] - r) * drawTint;
+      g = g + (accent[1] - g) * drawTint;
+      b = b + (accent[2] - b) * drawTint;
+      if (drawTint > 0) {
+        const lift = drawTint * BLOOM_BRIGHTNESS;
+        r += (255 - r) * lift;
+        g += (248 - g) * lift;
+        b += (250 - b) * lift;
       }
 
       ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;

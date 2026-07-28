@@ -16,7 +16,8 @@ export const BootPhase = Object.freeze({
 
 /**
  * Pixel energy ladder — every cell walks this sequence in order.
- * Values map to luminance during energy boot (0 = black, 1 = white).
+ * Presence drives the live Pixel FS resting formula (FIELD → COOL);
+ * ungenerated cells remain black until presence claims them.
  */
 export const BOOT_ENERGY = Object.freeze({
   BLACK: 0,
@@ -101,9 +102,9 @@ export function isExclusiveBootPhase(phase) {
 }
 
 /**
- * Phases that paint with presence-as-luminance on the PE lattice.
- * Extends through typography + stabilizing so the completed white Pixel FS
- * is never abandoned for a black clear between boot and intro.
+ * Phases that progressively initialize the live Pixel FS lattice.
+ * Extends through typography + stabilizing so the completed FIELD + COOL
+ * resting state is never abandoned for a black clear between boot and intro.
  */
 export function isLatticeBootPhase(phase) {
   return (

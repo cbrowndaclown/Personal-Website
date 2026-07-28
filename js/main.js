@@ -33,6 +33,14 @@ import { createPixelEngine } from './pixel-engine/index.js';
     let revealed = false;
     let accum = 0;
     let homeScrollRaf = 0;
+    /* Locked until Pixel FS boot finishes — no visual change, only input mute */
+    let navInteractive = false;
+
+    function unlockNav() {
+      navInteractive = true;
+    }
+
+    window.addEventListener('pixelbootready', unlockNav);
 
     function setRevealed(next) {
       if (revealed === next) return;
@@ -48,7 +56,7 @@ import { createPixelEngine } from './pixel-engine/index.js';
     }
 
     function applyIntent(deltaY) {
-      if (!deltaY) return;
+      if (!navInteractive || !deltaY) return;
 
       if (accum !== 0 && Math.sign(deltaY) !== Math.sign(accum)) {
         if (Math.abs(deltaY) >= DIR_RESET_SLACK) accum = 0;
@@ -118,6 +126,7 @@ import { createPixelEngine } from './pixel-engine/index.js';
     if (homeBtn) {
       homeBtn.addEventListener('click', (e) => {
         e.preventDefault();
+        if (!navInteractive) return;
         scrollToHome();
         /* Return to the parked landing composition */
         setRevealed(false);
@@ -125,10 +134,11 @@ import { createPixelEngine } from './pixel-engine/index.js';
     }
 
     /* Document scroll is locked; wheel (desktop) + touch swipe (mobile/tablet)
-       drive reveal. Allowed during directory assemble so nav can open mid-animation. */
+       drive reveal. Muted entirely until pixelbootready. */
     window.addEventListener(
       'wheel',
       (e) => {
+        if (!navInteractive) return;
         if (e.target && e.target.closest && e.target.closest('.settings')) return;
         applyIntent(e.deltaY);
       },
@@ -151,7 +161,7 @@ import { createPixelEngine } from './pixel-engine/index.js';
     window.addEventListener(
       'touchstart',
       (e) => {
-        if (e.touches.length !== 1 || touchIgnored(e.target)) {
+        if (!navInteractive || e.touches.length !== 1 || touchIgnored(e.target)) {
           touchActive = false;
           return;
         }
@@ -170,7 +180,7 @@ import { createPixelEngine } from './pixel-engine/index.js';
     window.addEventListener(
       'touchmove',
       (e) => {
-        if (!touchActive || e.touches.length !== 1) return;
+        if (!navInteractive || !touchActive || e.touches.length !== 1) return;
         const t = e.touches[0];
         const dx = t.clientX - touchStartX;
         const dy = t.clientY - touchStartY;
@@ -226,6 +236,9 @@ import { createPixelEngine } from './pixel-engine/index.js';
 
     /* Debug / compatibility handles */
     window.pixelEngine = engine;
+  } else {
+    /* No PE boot — don't leave topnav locked forever */
+    window.dispatchEvent(new CustomEvent('pixelbootready'));
   }
 
   /* ─────────────────────────────────────────────────────────────────────────
