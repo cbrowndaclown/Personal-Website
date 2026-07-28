@@ -24,7 +24,6 @@ export function createPoweringOnStage() {
       field.clear();
       lockEnergy(field, BOOT_ENERGY.BLACK);
       if (ctx.indicator) ctx.indicator.start(ctx.now);
-      if (ctx.status) ctx.status.start(ctx.now);
     },
 
     update(ctx) {

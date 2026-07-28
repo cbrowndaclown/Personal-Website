@@ -31,9 +31,6 @@ export function createTypographyStage(options) {
       if (ctx.indicator && typeof ctx.indicator.dismiss === 'function') {
         ctx.indicator.dismiss();
       }
-      if (ctx.status && typeof ctx.status.dismiss === 'function') {
-        ctx.status.dismiss();
-      }
 
       intro.beginTypographyConstruction({ seedCells: null });
       const ledMs = intro.getTypographyDurationMs();
@@ -57,9 +54,6 @@ export function createTypographyStage(options) {
       intro.holdTypography();
       if (ctx.indicator && typeof ctx.indicator.reset === 'function') {
         ctx.indicator.reset();
-      }
-      if (ctx.status && typeof ctx.status.reset === 'function') {
-        ctx.status.reset();
       }
       ctx.field.clearBrightness();
       ctx.field.clearMotion();

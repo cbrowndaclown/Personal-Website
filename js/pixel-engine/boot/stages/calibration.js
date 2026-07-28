@@ -20,9 +20,6 @@ function dismissChrome(ctx) {
   if (ctx.indicator && typeof ctx.indicator.dismiss === 'function') {
     ctx.indicator.dismiss();
   }
-  if (ctx.status && typeof ctx.status.dismiss === 'function') {
-    ctx.status.dismiss();
-  }
 }
 
 export function createCalibrationStage() {
@@ -111,9 +108,6 @@ export function createCalibrationStage() {
         if (holdDone) {
           if (ctx.indicator && typeof ctx.indicator.beginDissolve === 'function') {
             ctx.indicator.beginDissolve(ctx.now);
-          }
-          if (ctx.status && typeof ctx.status.beginDissolve === 'function') {
-            ctx.status.beginDissolve(ctx.now);
           }
           phase = 'dissolve';
         }
