@@ -11,6 +11,20 @@ const REVEAL_OPTS = Object.freeze({
   seed: 0xc41b,
 });
 
+function paintChrome(ctx, field) {
+  if (ctx.paintChrome) ctx.paintChrome(field, ctx.now);
+  else if (ctx.indicator) ctx.indicator.paint(field, ctx.now);
+}
+
+function dismissChrome(ctx) {
+  if (ctx.indicator && typeof ctx.indicator.dismiss === 'function') {
+    ctx.indicator.dismiss();
+  }
+  if (ctx.status && typeof ctx.status.dismiss === 'function') {
+    ctx.status.dismiss();
+  }
+}
+
 export function createCalibrationStage() {
   let startMs = 0;
   let phase = 'sweep'; /* sweep | closing | ring_hold | dissolve | hold */
@@ -58,7 +72,7 @@ export function createCalibrationStage() {
           closeArmed = true;
         }
 
-        if (ctx.indicator) ctx.indicator.paint(field, ctx.now);
+        paintChrome(ctx, field);
 
         /* Every white pixel must flip individually — no completed-frame swap */
         if (settled && elapsed >= sweepMs) {
@@ -84,12 +98,12 @@ export function createCalibrationStage() {
           }
           phase = 'ring_hold';
         }
-        if (ctx.indicator) ctx.indicator.paint(field, ctx.now);
+        paintChrome(ctx, field);
         return { done: false };
       }
 
       if (phase === 'ring_hold') {
-        if (ctx.indicator) ctx.indicator.paint(field, ctx.now);
+        paintChrome(ctx, field);
         const holdDone =
           !ctx.indicator ||
           (typeof ctx.indicator.isCircleHoldDone === 'function' &&
@@ -98,22 +112,23 @@ export function createCalibrationStage() {
           if (ctx.indicator && typeof ctx.indicator.beginDissolve === 'function') {
             ctx.indicator.beginDissolve(ctx.now);
           }
+          if (ctx.status && typeof ctx.status.beginDissolve === 'function') {
+            ctx.status.beginDissolve(ctx.now);
+          }
           phase = 'dissolve';
         }
         return { done: false };
       }
 
       if (phase === 'dissolve') {
-        if (ctx.indicator) ctx.indicator.paint(field, ctx.now);
+        paintChrome(ctx, field);
         const gone =
           !ctx.indicator ||
           (typeof ctx.indicator.isDissolveDone === 'function' &&
             ctx.indicator.isDissolveDone(ctx.now));
         if (gone) {
           field.clearBrightness();
-          if (ctx.indicator && typeof ctx.indicator.dismiss === 'function') {
-            ctx.indicator.dismiss();
-          }
+          dismissChrome(ctx);
           phase = 'hold';
           startMs = ctx.now;
         }
@@ -132,9 +147,7 @@ export function createCalibrationStage() {
       /* Do not rewrite presence — the generated white lattice is the Pixel FS */
       ctx.field.clearBrightness();
       ctx.field.clearMotion();
-      if (ctx.indicator && typeof ctx.indicator.dismiss === 'function') {
-        ctx.indicator.dismiss();
-      }
+      dismissChrome(ctx);
     },
   };
 }

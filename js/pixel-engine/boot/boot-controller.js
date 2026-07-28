@@ -9,6 +9,7 @@ import {
 } from './constants.js';
 import { createBootField } from './boot-field.js';
 import { createBootIndicator } from './indicator.js';
+import { createBootStatus } from './status.js';
 import { createBootStageDefs } from './stages/index.js';
 import { PixelEvents } from '../constants.js';
 
@@ -30,6 +31,7 @@ export function createBootController(options) {
 
   const field = createBootField();
   const indicator = createBootIndicator();
+  const status = createBootStatus();
   const stageDefs = createBootStageDefs({ intro });
 
   let phase = BootPhase.OFF;
@@ -100,12 +102,20 @@ export function createBootController(options) {
       now,
       field,
       indicator,
+      status,
       intro,
       phase: primaryPhase,
       setPhase: emitPhase,
       setInteractive,
       emitReady,
       interactive,
+      /* Indicator ring + pixel "Booting…" status share one brightness pass. */
+      paintChrome(targetField, t) {
+        const f = targetField || field;
+        const at = t != null ? t : now;
+        if (indicator) indicator.paint(f, at);
+        if (status) status.paint(f, at);
+      },
     };
   }
 
@@ -251,6 +261,7 @@ export function createBootController(options) {
     active = [];
     nextIndex = stageDefs.length;
     indicator.reset();
+    status.reset();
     field.allocate(field.cols || 1, field.rows || 1);
     ensureFieldSize();
     field.fillPresence(1);
@@ -284,6 +295,7 @@ export function createBootController(options) {
     active = [];
     nextIndex = 0;
     indicator.reset();
+    status.reset();
     intro.cancel();
     field.clear();
     interactive = false;
@@ -313,6 +325,7 @@ export function createBootController(options) {
     active = [];
     nextIndex = 0;
     indicator.reset();
+    status.reset();
     field.clear();
 
     /* Exclusive ownership of the PE canvas — no leftover directory / type LEDs */

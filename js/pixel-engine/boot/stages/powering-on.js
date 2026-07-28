@@ -24,6 +24,7 @@ export function createPoweringOnStage() {
       field.clear();
       lockEnergy(field, BOOT_ENERGY.BLACK);
       if (ctx.indicator) ctx.indicator.start(ctx.now);
+      if (ctx.status) ctx.status.start(ctx.now);
     },
 
     update(ctx) {
@@ -43,7 +44,8 @@ export function createPoweringOnStage() {
       );
 
       field.clearBrightness();
-      if (ctx.indicator) ctx.indicator.paint(field, ctx.now);
+      if (ctx.paintChrome) ctx.paintChrome(field, ctx.now);
+      else if (ctx.indicator) ctx.indicator.paint(field, ctx.now);
 
       /* Finish only when every pixel has flipped individually */
       if (settled && elapsed >= BOOT_TIMING.POWERING_ON_MS) {

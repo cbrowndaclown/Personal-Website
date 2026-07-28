@@ -42,7 +42,8 @@ export function createGridGenerationStage() {
       );
 
       field.clearBrightness();
-      if (ctx.indicator) ctx.indicator.paint(field, ctx.now);
+      if (ctx.paintChrome) ctx.paintChrome(field, ctx.now);
+      else if (ctx.indicator) ctx.indicator.paint(field, ctx.now);
 
       if (settled && elapsed >= BOOT_TIMING.GRID_GENERATION_MS) {
         return { done: true };
