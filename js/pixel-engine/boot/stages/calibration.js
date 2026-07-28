@@ -1,8 +1,6 @@
 /* CALIBRATION — final wake: LIGHT GRAY → WHITE as individual pixels L→R.
    While the last whites arrive, the red arc seals into a complete ring,
-   holds briefly, then dissolves. The lattice stays fully initialized.
-   The temporary boot zone withholds white foreground under the chrome until
-   dissolve completes, then lifts so the Pixel FS resumes unrestricted. */
+   holds briefly, then dissolves. The lattice stays fully initialized. */
 
 import { BOOT_TIMING, BOOT_ENERGY, bootEnergyDurationMs } from '../constants.js';
 import { applyOrganicEnergyReveal, lockEnergy } from '../energy.js';
@@ -27,12 +25,6 @@ function dismissChrome(ctx) {
   }
 }
 
-function releaseBootZone(ctx) {
-  if (!ctx.bootZone || !ctx.bootZone.isActive()) return;
-  /* Lift reserved cells to the finished white lattice — no lasting dimmer island. */
-  ctx.bootZone.deactivate(ctx.field, BOOT_ENERGY.WHITE);
-}
-
 export function createCalibrationStage() {
   let startMs = 0;
   let phase = 'sweep'; /* sweep | closing | ring_hold | dissolve | hold */
@@ -50,9 +42,6 @@ export function createCalibrationStage() {
       lockEnergy(ctx.field, BOOT_ENERGY.LIGHT);
       ctx.field.clearBrightness();
       ctx.field.clearMotion();
-      if (ctx.bootZone && ctx.bootZone.isActive()) {
-        ctx.bootZone.syncSize(ctx.field.cols, ctx.field.rows);
-      }
     },
 
     update(ctx) {
@@ -75,7 +64,7 @@ export function createCalibrationStage() {
           BOOT_ENERGY.LIGHT,
           BOOT_ENERGY.WHITE,
           u,
-          Object.assign({}, REVEAL_OPTS, { bootZone: ctx.bootZone })
+          REVEAL_OPTS
         );
 
         if (ctx.indicator && !closeArmed && elapsed >= Math.max(0, sweepMs - closeLeadMs)) {
@@ -140,7 +129,6 @@ export function createCalibrationStage() {
         if (gone) {
           field.clearBrightness();
           dismissChrome(ctx);
-          releaseBootZone(ctx);
           phase = 'hold';
           startMs = ctx.now;
         }
@@ -157,7 +145,6 @@ export function createCalibrationStage() {
 
     exit(ctx) {
       /* Do not rewrite presence — the generated white lattice is the Pixel FS */
-      releaseBootZone(ctx);
       ctx.field.clearBrightness();
       ctx.field.clearMotion();
       dismissChrome(ctx);

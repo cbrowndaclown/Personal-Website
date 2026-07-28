@@ -24,9 +24,6 @@ export function createGridGenerationStage() {
       lockEnergy(ctx.field, BOOT_ENERGY.DARK);
       ctx.field.clearBrightness();
       ctx.field.clearMotion();
-      if (ctx.bootZone && ctx.bootZone.isActive()) {
-        ctx.bootZone.syncSize(ctx.field.cols, ctx.field.rows);
-      }
     },
 
     update(ctx) {
@@ -41,7 +38,7 @@ export function createGridGenerationStage() {
         BOOT_ENERGY.DARK,
         BOOT_ENERGY.LIGHT,
         u,
-        Object.assign({}, REVEAL_OPTS, { bootZone: ctx.bootZone })
+        REVEAL_OPTS
       );
 
       field.clearBrightness();
