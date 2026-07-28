@@ -478,7 +478,7 @@ export function createHeatStyle(deps) {
       /*
         Lattice boot paint:
         - Indicator phases: presence = energy ladder, boot brightness = red arc/ring
-        - Typography handoff: presence black, intro LEDs = white constructing glyphs
+        - Typography handoff: presence stays at completed white, intro LEDs construct on top
       */
       const bootSignal = indicatorAccent ? introHv : 0;
       const typeSignal = indicatorAccent ? 0 : introHv;
@@ -535,8 +535,8 @@ export function createHeatStyle(deps) {
         ctx.fillRect(cx - sInner * 0.5, cy - sInner * 0.5, sInner, sInner);
       }
 
-      /* Energy / self-test: luminance ladder + red indicator.
-         Typography handoff on black: white glyph LEDs.
+      /* Energy boot: luminance ladder + red indicator.
+         Typography: white glyph LEDs over the preserved white lattice.
          Operational: FIELD → COOL → accent. */
       let r;
       let g;

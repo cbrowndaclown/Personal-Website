@@ -101,8 +101,9 @@ export function isExclusiveBootPhase(phase) {
 }
 
 /**
- * Phases that paint on a dormant black field with presence-as-luminance.
- * Includes typography construction so the boot→type handoff stays continuous.
+ * Phases that paint with presence-as-luminance on the PE lattice.
+ * Includes typography so the completed white Pixel FS carries into intro
+ * without a clear/fade to black.
  */
 export function isLatticeBootPhase(phase) {
   return (

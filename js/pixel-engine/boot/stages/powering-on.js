@@ -5,6 +5,12 @@ import { BOOT_TIMING, BOOT_ENERGY } from '../constants.js';
 import { clamp01 } from '../math.js';
 import { applyOrganicEnergyReveal, lockEnergy } from '../energy.js';
 
+const REVEAL_OPTS = Object.freeze({
+  scatter: 0.3,
+  soft: 0.028,
+  seed: 0xa11e,
+});
+
 export function createPoweringOnStage() {
   let startMs = 0;
 
@@ -28,30 +34,33 @@ export function createPoweringOnStage() {
       const elapsed = ctx.now - startMs;
       const u = clamp01(elapsed / BOOT_TIMING.POWERING_ON_MS);
 
-      applyOrganicEnergyReveal(
+      const settled = applyOrganicEnergyReveal(
         field,
         BOOT_ENERGY.BLACK,
         BOOT_ENERGY.DARK,
         u,
-        {
-          scatter: 0.3,
-          soft: 0.028,
-          seed: 0xa11e,
-        }
+        REVEAL_OPTS
       );
 
       field.clearBrightness();
       if (ctx.indicator) ctx.indicator.paint(field, ctx.now);
 
-      if (elapsed >= BOOT_TIMING.POWERING_ON_MS) {
-        lockEnergy(field, BOOT_ENERGY.DARK);
+      /* Advance only after every pixel has flipped — never force-fill */
+      if (elapsed >= BOOT_TIMING.POWERING_ON_MS && settled) {
         return { done: true };
       }
       return { done: false };
     },
 
     exit(ctx) {
-      lockEnergy(ctx.field, BOOT_ENERGY.DARK);
+      /* Final procedural frame at u=1 — no bulk lockEnergy snap */
+      applyOrganicEnergyReveal(
+        ctx.field,
+        BOOT_ENERGY.BLACK,
+        BOOT_ENERGY.DARK,
+        1,
+        REVEAL_OPTS
+      );
       ctx.field.clearBrightness();
     },
   };

@@ -5,6 +5,12 @@ import { BOOT_TIMING, BOOT_ENERGY } from '../constants.js';
 import { clamp01 } from '../math.js';
 import { applyOrganicEnergyReveal, lockEnergy } from '../energy.js';
 
+const REVEAL_OPTS = Object.freeze({
+  scatter: 0.3,
+  soft: 0.028,
+  seed: 0xb22f,
+});
+
 export function createGridGenerationStage() {
   let startMs = 0;
 
@@ -15,6 +21,7 @@ export function createGridGenerationStage() {
 
     enter(ctx) {
       startMs = ctx.now;
+      /* Baseline for this layer — prior stage already settled every cell */
       lockEnergy(ctx.field, BOOT_ENERGY.DARK);
       ctx.field.clearBrightness();
       ctx.field.clearMotion();
@@ -27,30 +34,31 @@ export function createGridGenerationStage() {
       const elapsed = ctx.now - startMs;
       const u = clamp01(elapsed / BOOT_TIMING.GRID_GENERATION_MS);
 
-      applyOrganicEnergyReveal(
+      const settled = applyOrganicEnergyReveal(
         field,
         BOOT_ENERGY.DARK,
         BOOT_ENERGY.LIGHT,
         u,
-        {
-          scatter: 0.3,
-          soft: 0.028,
-          seed: 0xb22f,
-        }
+        REVEAL_OPTS
       );
 
       field.clearBrightness();
       if (ctx.indicator) ctx.indicator.paint(field, ctx.now);
 
-      if (elapsed >= BOOT_TIMING.GRID_GENERATION_MS) {
-        lockEnergy(field, BOOT_ENERGY.LIGHT);
+      if (elapsed >= BOOT_TIMING.GRID_GENERATION_MS && settled) {
         return { done: true };
       }
       return { done: false };
     },
 
     exit(ctx) {
-      lockEnergy(ctx.field, BOOT_ENERGY.LIGHT);
+      applyOrganicEnergyReveal(
+        ctx.field,
+        BOOT_ENERGY.DARK,
+        BOOT_ENERGY.LIGHT,
+        1,
+        REVEAL_OPTS
+      );
       ctx.field.clearBrightness();
     },
   };

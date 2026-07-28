@@ -1,7 +1,14 @@
-/* TYPOGRAPHY_CONSTRUCTION — hero glyph LEDs construct after the loading ring. */
+/* TYPOGRAPHY_CONSTRUCTION — hero glyph LEDs construct on the completed
+   white Pixel FS. The boot lattice is preserved — never cleared to black. */
 
 import { BOOT_TIMING, BOOT_ENERGY } from '../constants.js';
-import { lockEnergy } from '../energy.js';
+import { applyOrganicEnergyReveal } from '../energy.js';
+
+const WHITE_SETTLE = Object.freeze({
+  scatter: 0.3,
+  soft: 0.028,
+  seed: 0xc41b,
+});
 
 /**
  * Delegates glyph bake / migration to the intro content service.
@@ -13,6 +20,18 @@ export function createTypographyStage(options) {
   let startMs = 0;
   let completeAt = 0;
 
+  function preserveWhiteLattice(field) {
+    if (!field || !field.presence) return;
+    /* Idempotent procedural settle — keeps the completed boot display */
+    applyOrganicEnergyReveal(
+      field,
+      BOOT_ENERGY.LIGHT,
+      BOOT_ENERGY.WHITE,
+      1,
+      WHITE_SETTLE
+    );
+  }
+
   return {
     id: 'typography_construction',
     durationMs: null, /* driven by intro bake */
@@ -20,7 +39,8 @@ export function createTypographyStage(options) {
 
     enter(ctx) {
       startMs = ctx.now;
-      lockEnergy(ctx.field, BOOT_ENERGY.BLACK);
+      /* Keep the fully generated white lattice — do not fade/clear to black */
+      preserveWhiteLattice(ctx.field);
       ctx.field.clearMotion();
       ctx.field.clearBrightness();
 
@@ -37,8 +57,8 @@ export function createTypographyStage(options) {
     },
 
     update(ctx) {
-      /* Keep the lattice dormant black while glyphs construct */
-      lockEnergy(ctx.field, BOOT_ENERGY.BLACK);
+      /* White Pixel FS remains the base; glyphs construct via intro LEDs */
+      preserveWhiteLattice(ctx.field);
       ctx.field.clearMotion();
       ctx.field.clearBrightness();
 
@@ -52,10 +72,9 @@ export function createTypographyStage(options) {
       if (ctx.indicator && typeof ctx.indicator.reset === 'function') {
         ctx.indicator.reset();
       }
+      preserveWhiteLattice(ctx.field);
       ctx.field.clearBrightness();
       ctx.field.clearMotion();
-      /* Field awakens to operational lattice as typography settles */
-      ctx.field.fillPresence(1);
       /* Interactions unlock only after hero construction has settled */
       if (ctx && typeof ctx.setInteractive === 'function') {
         ctx.setInteractive(true);

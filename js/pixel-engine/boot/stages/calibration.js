@@ -6,6 +6,12 @@ import { BOOT_TIMING, BOOT_ENERGY, bootEnergyDurationMs } from '../constants.js'
 import { clamp01 } from '../math.js';
 import { applyOrganicEnergyReveal, lockEnergy } from '../energy.js';
 
+const REVEAL_OPTS = Object.freeze({
+  scatter: 0.3,
+  soft: 0.028,
+  seed: 0xc41b,
+});
+
 export function createCalibrationStage() {
   let startMs = 0;
   let phase = 'sweep'; /* sweep | closing | ring_hold | dissolve | hold */
@@ -41,16 +47,12 @@ export function createCalibrationStage() {
 
       if (phase === 'sweep') {
         const u = clamp01(elapsed / sweepMs);
-        applyOrganicEnergyReveal(
+        const settled = applyOrganicEnergyReveal(
           field,
           BOOT_ENERGY.LIGHT,
           BOOT_ENERGY.WHITE,
           u,
-          {
-            scatter: 0.3,
-            soft: 0.028,
-            seed: 0xc41b,
-          }
+          REVEAL_OPTS
         );
 
         if (ctx.indicator && !closeArmed && elapsed >= Math.max(0, sweepMs - closeLeadMs)) {
@@ -60,8 +62,8 @@ export function createCalibrationStage() {
 
         if (ctx.indicator) ctx.indicator.paint(field, ctx.now);
 
-        if (elapsed >= sweepMs) {
-          lockEnergy(field, BOOT_ENERGY.WHITE);
+        /* Wait for every white pixel — never force-fill the remainder */
+        if (elapsed >= sweepMs && settled) {
           if (ctx.indicator && !closeArmed) {
             ctx.indicator.beginClose(ctx.now);
             closeArmed = true;
@@ -71,8 +73,11 @@ export function createCalibrationStage() {
         return { done: false };
       }
 
-      /* Fully white while the ring seals, holds, and dissolves */
-      lockEnergy(field, BOOT_ENERGY.WHITE);
+      /*
+        Lattice stays at the procedurally completed white state.
+        Do not lockEnergy / fill — that would snap any residual and read as
+        a bulk finish. Presence is left exactly as the final reveal wrote it.
+      */
 
       if (phase === 'closing') {
         const closed = !ctx.indicator || ctx.indicator.isClosed(ctx.now);
@@ -128,10 +133,16 @@ export function createCalibrationStage() {
     },
 
     exit(ctx) {
-      lockEnergy(ctx.field, BOOT_ENERGY.WHITE);
+      /* Preserve the fully generated white lattice for the intro handoff */
+      applyOrganicEnergyReveal(
+        ctx.field,
+        BOOT_ENERGY.LIGHT,
+        BOOT_ENERGY.WHITE,
+        1,
+        REVEAL_OPTS
+      );
       ctx.field.clearBrightness();
       ctx.field.clearMotion();
-      ctx.field.fillPresence(1);
       if (ctx.indicator && typeof ctx.indicator.dismiss === 'function') {
         ctx.indicator.dismiss();
       }
