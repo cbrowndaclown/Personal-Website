@@ -23,6 +23,9 @@ export function createPoweringOnStage() {
       const field = ctx.field;
       field.clear();
       lockEnergy(field, BOOT_ENERGY.BLACK);
+      if (ctx.bootZone) {
+        ctx.bootZone.activate(field.cols, field.rows);
+      }
       if (ctx.indicator) ctx.indicator.start(ctx.now);
       if (ctx.status) ctx.status.start(ctx.now);
     },
@@ -40,7 +43,7 @@ export function createPoweringOnStage() {
         BOOT_ENERGY.BLACK,
         BOOT_ENERGY.DARK,
         u,
-        REVEAL_OPTS
+        Object.assign({}, REVEAL_OPTS, { bootZone: ctx.bootZone })
       );
 
       field.clearBrightness();

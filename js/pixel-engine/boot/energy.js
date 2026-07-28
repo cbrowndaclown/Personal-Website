@@ -70,6 +70,17 @@ function cellOrder(i, cols, rows, scatter, seed) {
 }
 
 /**
+ * Calm L→R order (no organic scatter) — used inside the temporary boot zone
+ * so reserved chrome space does not sprout early random bright cells.
+ * @param {number} i
+ * @param {number} cols
+ */
+function calmOrder(i, cols) {
+  const xDenom = Math.max(1, cols - 1);
+  return (i % cols) / xDenom;
+}
+
+/**
  * Procedural left→right reveal with sticky per-cell generation.
  *
  * Each cell advances toward `toEnergy` only when the front reaches its own
@@ -77,12 +88,15 @@ function cellOrder(i, cols, rows, scatter, seed) {
  * not clamped to 1 — if the stage clock runs long, the same algorithm keeps
  * flipping the remaining cells individually (no completed-frame swap).
  *
+ * Optional `bootZone`: while active, cells inside the reserve still receive
+ * gray energy but never white foreground, and use calm (non-scattered) order.
+ *
  * @param {ReturnType<import('./boot-field.js').createBootField>} field
  * @param {number} fromEnergy
  * @param {number} toEnergy
  * @param {number} u — stage progress (may exceed 1 until settled)
- * @param {{ scatter?: number, soft?: number, seed?: number }} [opts]
- * @returns {boolean} true when every cell has reached toEnergy
+ * @param {{ scatter?: number, soft?: number, seed?: number, bootZone?: object }} [opts]
+ * @returns {boolean} true when every cell has reached its effective target
  */
 export function applyOrganicEnergyReveal(field, fromEnergy, toEnergy, u, opts) {
   const presence = field.presence;
@@ -95,6 +109,11 @@ export function applyOrganicEnergyReveal(field, fromEnergy, toEnergy, u, opts) {
   const scatter = opts && opts.scatter != null ? opts.scatter : 0.28;
   const soft = Math.max(0.012, opts && opts.soft != null ? opts.soft : 0.03);
   const seed = (opts && opts.seed) || 0x51a7;
+  const bootZone = opts && opts.bootZone;
+  const zoneLive = !!(bootZone && bootZone.isActive && bootZone.isActive());
+  if (zoneLive && typeof bootZone.syncSize === 'function') {
+    bootZone.syncSize(cols, rows);
+  }
   /* Do not clamp to 1 — trailing cells keep generating past the nominal end */
   const progress = u < 0 ? 0 : u;
 
@@ -109,16 +128,28 @@ export function applyOrganicEnergyReveal(field, fromEnergy, toEnergy, u, opts) {
   let pending = 0;
 
   for (let i = 0; i < presence.length; i++) {
+    /* Effective target — boot zone may withhold WHITE while gray still builds */
+    const target =
+      zoneLive && typeof bootZone.cappedToEnergy === 'function'
+        ? bootZone.cappedToEnergy(i, toEnergy)
+        : toEnergy;
+
     const cur = presence[i];
-    if (Math.abs(cur - toEnergy) <= eps) {
-      presence[i] = toEnergy;
+    if (Math.abs(cur - target) <= eps) {
+      presence[i] = target;
       continue;
     }
 
-    const order = cellOrder(i, cols, rows, scatter, seed);
+    const calm =
+      zoneLive &&
+      typeof bootZone.prefersCalmOrder === 'function' &&
+      bootZone.prefersCalmOrder(i);
+    const order = calm
+      ? calmOrder(i, cols)
+      : cellOrder(i, cols, rows, scatter, seed);
     const raw = clamp01((front - order) / soft);
     const pop = raw <= 0 ? 0 : raw >= 1 ? 1 : smootherstep(raw);
-    const next = fromEnergy + (toEnergy - fromEnergy) * pop;
+    const next = fromEnergy + (target - fromEnergy) * pop;
 
     /* Sticky — only advance toward the target, never batch-rewrite */
     if (rising) {
@@ -127,7 +158,7 @@ export function applyOrganicEnergyReveal(field, fromEnergy, toEnergy, u, opts) {
       presence[i] = next;
     }
 
-    if (Math.abs(presence[i] - toEnergy) > eps) pending += 1;
+    if (Math.abs(presence[i] - target) > eps) pending += 1;
   }
 
   return pending === 0;

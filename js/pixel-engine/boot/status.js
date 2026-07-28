@@ -91,7 +91,9 @@ export function createBootStatus() {
   }
 
   /**
-   * Sample solid white glyphs from an offscreen canvas sized to the lattice.
+   * Sample thin white glyphs from an offscreen canvas sized to the lattice.
+   * Light weight + core-only threshold keeps stroke width to ~1 LED so the
+   * word reads as a clean pixel display font rather than bold block type.
    * @param {number} cols
    * @param {number} rows
    * @param {string} text
@@ -110,28 +112,60 @@ export function createBootStatus() {
     octx.fillStyle = '#000';
     octx.fillRect(0, 0, cols, rows);
     octx.fillStyle = '#fff';
-    octx.font = `600 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
+    /* Light face — fewer lit cells per stroke than the previous 600 weight. */
+    octx.font = `300 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
     octx.textAlign = align;
     octx.textBaseline = 'middle';
     octx.fillText(text, cx, cy);
 
-    /* Periods often fall below the LED threshold — stamp a solid pixel block. */
+    /* Periods often fall below the LED threshold — stamp a single LED. */
     if (text === '.') {
       const mx = Math.round(cx);
       const my = Math.round(cy + fontPx * 0.28);
-      octx.fillRect(mx, my, Math.max(1, Math.round(fontPx * 0.18)), Math.max(1, Math.round(fontPx * 0.18)));
+      octx.fillRect(mx, my, 1, 1);
     }
 
     const data = octx.getImageData(0, 0, cols, rows).data;
+    /** @type {Uint8Array} */
+    const solid = new Uint8Array(cols * rows);
+    for (let i = 0, n = cols * rows; i < n; i++) {
+      /* Keep only opaque stroke cores — drop AA fringes that fatten glyphs. */
+      if (data[i * 4] >= 200) solid[i] = 1;
+    }
+
+    /*
+      Peel one interior layer so thick fill regions collapse toward ~1 LED
+      strokes while endpoints and thin joins stay lit.
+    */
+    /** @type {Uint8Array} */
+    const thinned = new Uint8Array(solid.length);
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const i = y * cols + x;
+        if (!solid[i]) continue;
+        if (text === '.') {
+          thinned[i] = 1;
+          continue;
+        }
+        const l = x > 0 && solid[i - 1];
+        const r = x < cols - 1 && solid[i + 1];
+        const u = y > 0 && solid[i - cols];
+        const d = y < rows - 1 && solid[i + cols];
+        /* Interior of a 2+ LED-thick stroke — drop to thin the face. */
+        if (l && r && u && d) continue;
+        thinned[i] = 1;
+      }
+    }
+
     /** @type {{ x: number, y: number, level: number }[]} */
     const cells = [];
     for (let i = 0, n = cols * rows; i < n; i++) {
+      if (!thinned[i]) continue;
       const lum = data[i * 4];
-      if (lum <= 140) continue;
       cells.push({
         x: i % cols,
         y: (i / cols) | 0,
-        level: 0.42 + (lum / 255) * 0.58,
+        level: 0.5 + (lum / 255) * 0.5,
       });
     }
     return cells;
@@ -207,13 +241,13 @@ export function createBootStatus() {
     let fontPx = Math.max(8, Math.round(Math.min(cols, rows) * 0.088));
     fontPx = Math.min(fontPx, Math.max(8, Math.round(rows * 0.095)));
 
-    /* Probe widths in a temporary canvas */
+    /* Probe widths in a temporary canvas — match the light sampled face. */
     const probe = document.createElement('canvas').getContext('2d');
     if (!probe) return;
-    probe.font = `600 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
+    probe.font = `300 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
     let labelW = probe.measureText(LABEL).width;
-    let dotW = Math.max(probe.measureText('.').width, fontPx * 0.35);
-    let gap = Math.max(1, Math.round(fontPx * 0.12));
+    let dotW = Math.max(probe.measureText('.').width, fontPx * 0.28);
+    let gap = Math.max(1, Math.round(fontPx * 0.14));
     let ellipsisW = dotW * 3 + gap * 2;
     let totalW = labelW + gap + ellipsisW;
 
@@ -222,10 +256,10 @@ export function createBootStatus() {
     let guard = 0;
     while (totalW > maxW && fontPx > 7 && guard < 14) {
       fontPx -= 1;
-      probe.font = `600 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
+      probe.font = `300 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
       labelW = probe.measureText(LABEL).width;
-      dotW = Math.max(probe.measureText('.').width, fontPx * 0.35);
-      gap = Math.max(1, Math.round(fontPx * 0.12));
+      dotW = Math.max(probe.measureText('.').width, fontPx * 0.28);
+      gap = Math.max(1, Math.round(fontPx * 0.14));
       ellipsisW = dotW * 3 + gap * 2;
       totalW = labelW + gap + ellipsisW;
       guard += 1;

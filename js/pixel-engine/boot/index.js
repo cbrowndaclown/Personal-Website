@@ -12,5 +12,6 @@ export {
 export { createBootField } from './boot-field.js';
 export { createBootIndicator } from './indicator.js';
 export { createBootStatus } from './status.js';
+export { createBootZone, bootChromeLayout } from './boot-zone.js';
 export { createBootController } from './boot-controller.js';
 export { createBootStageDefs } from './stages/index.js';

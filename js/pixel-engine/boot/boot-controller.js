@@ -10,6 +10,7 @@ import {
 import { createBootField } from './boot-field.js';
 import { createBootIndicator } from './indicator.js';
 import { createBootStatus } from './status.js';
+import { createBootZone } from './boot-zone.js';
 import { createBootStageDefs } from './stages/index.js';
 import { PixelEvents } from '../constants.js';
 
@@ -32,6 +33,7 @@ export function createBootController(options) {
   const field = createBootField();
   const indicator = createBootIndicator();
   const status = createBootStatus();
+  const bootZone = createBootZone();
   const stageDefs = createBootStageDefs({ intro });
 
   let phase = BootPhase.OFF;
@@ -103,6 +105,7 @@ export function createBootController(options) {
       field,
       indicator,
       status,
+      bootZone,
       intro,
       phase: primaryPhase,
       setPhase: emitPhase,
@@ -262,6 +265,7 @@ export function createBootController(options) {
     nextIndex = stageDefs.length;
     indicator.reset();
     status.reset();
+    bootZone.deactivate();
     field.allocate(field.cols || 1, field.rows || 1);
     ensureFieldSize();
     field.fillPresence(1);
@@ -296,6 +300,7 @@ export function createBootController(options) {
     nextIndex = 0;
     indicator.reset();
     status.reset();
+    bootZone.deactivate();
     intro.cancel();
     field.clear();
     interactive = false;
@@ -329,6 +334,7 @@ export function createBootController(options) {
     nextIndex = 0;
     indicator.reset();
     status.reset();
+    bootZone.deactivate();
     field.clear();
 
     /* Exclusive ownership of the PE canvas — no leftover directory / type LEDs */
@@ -396,6 +402,9 @@ export function createBootController(options) {
   function onResize(cols, rows) {
     /* allocate() copies overlapping presence — never wipe the lattice to black */
     field.allocate(cols, rows);
+    if (bootZone && bootZone.isActive()) {
+      bootZone.syncSize(cols, rows);
+    }
     if (phase === BootPhase.READY || phase === BootPhase.SKIPPED) {
       field.fillPresence(1);
     }
