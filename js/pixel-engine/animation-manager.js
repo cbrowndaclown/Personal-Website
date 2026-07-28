@@ -1,7 +1,7 @@
-/* Animation Manager — timeline orchestration for intro / future transitions.
-   V1 owns the landing sequence via createIntroController. */
+/* Animation Manager — boot lifecycle + intro content orchestration. */
 
 import { createIntroController } from './intro/intro-controller.js';
+import { createBootController } from './boot/index.js';
 import { PixelEvents } from './constants.js';
 
 /**
@@ -21,48 +21,81 @@ export function createAnimationManager(options) {
     resolveActiveBgMode: options.resolveActiveBgMode,
   });
 
+  const bootController = createBootController({
+    animConfig: options.animConfig,
+    prefersReduced: options.prefersReduced,
+    resolveActiveBgMode: options.resolveActiveBgMode,
+    events,
+    grid: options.grid,
+    intro: introController,
+  });
+
   /* Compatibility surface — Heat / Wave / Lightning talk to pixelField + schedule */
   const pixelField = {
-    brightness: function (i) { return introController.brightness(i); },
-    offsetX: function (i) { return introController.offsetX(i); },
-    offsetY: function (i) { return introController.offsetY(i); },
-    update: function (now) { return introController.update(now); },
-    isActive: function () { return introController.isActive(); },
-    onResize: function (c, r) { introController.onResize(c, r); },
-    cancel: function () { introController.cancel(); },
+    brightness: function (i) { return bootController.brightness(i); },
+    offsetX: function (i) { return bootController.offsetX(i); },
+    offsetY: function (i) { return bootController.offsetY(i); },
+    presence: function (i) { return bootController.presence(i); },
+    update: function (now) { return bootController.update(now); },
+    isActive: function () { return bootController.isActive(); },
+    isReady: function () { return bootController.isReady(); },
+    interactionsEnabled: function () {
+      return bootController.interactionsEnabled();
+    },
+    onResize: function (c, r) { bootController.onResize(c, r); },
+    cancel: function () { bootController.cancel(); },
   };
 
   const pixelIntro = {
-    schedule: function () { introController.schedule(); },
-    cancel: function () { introController.cancel(); },
+    schedule: function () { bootController.schedule(); },
+    cancel: function () { bootController.cancel(); },
     isRunning: function () {
-      const p = introController.getPhase();
-      return p === 'intro' || p === 'boot';
+      const p = bootController.getPhase();
+      return p !== 'ready' && p !== 'skipped' && p !== 'off';
     },
   };
 
-  /* Forward grid resize into the intro LED buffers (single authority later). */
+  /* Forward grid resize into boot + intro LED buffers */
   if (options.grid && events) {
     events.on(PixelEvents.GridResized, (info) => {
       if (info && info.changed) {
-        introController.onResize(info.cols, info.rows);
+        bootController.onResize(info.cols, info.rows);
       }
+    });
+    events.on(PixelEvents.GridInitialized, (info) => {
+      if (info) bootController.onResize(info.cols, info.rows);
     });
   }
 
+  /* Space skips the full boot sequence */
+  window.addEventListener('keydown', function (e) {
+    if (e.code !== 'Space' && e.key !== ' ') return;
+    if (e.repeat) return;
+    const tag = e.target && e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+    if (e.target && e.target.isContentEditable) return;
+    if (bootController.isReady() && !introController.isControllable()) return;
+    if (bootController.getPhase() === 'skipped') return;
+    e.preventDefault();
+    bootController.skip();
+  });
+
   /* Expose for debugging parity with V1 */
-  window.bootSequence = introController;
+  window.bootSequence = bootController;
+  window.bootController = bootController;
   window.introController = introController;
 
   return {
     introController,
+    bootController,
     pixelField,
     pixelIntro,
     schedule: () => pixelIntro.schedule(),
     cancel: () => pixelIntro.cancel(),
     isActive: () => pixelField.isActive(),
+    isReady: () => bootController.isReady(),
     destroy() {
-      introController.cancel();
+      bootController.destroy();
     },
   };
 }

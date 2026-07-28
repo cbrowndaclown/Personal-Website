@@ -26,6 +26,7 @@ export function createEventSystem(options = {}) {
       'pixelintrostart',
       'pixeldirectorystart',
       'pixeldirectoryhold',
+      'pixelbootready',
       'lightningstrike',
     ]
   );

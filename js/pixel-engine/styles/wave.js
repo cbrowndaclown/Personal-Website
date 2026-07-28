@@ -97,12 +97,25 @@ export function createWaveStyle(deps) {
     ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
     ctx.fillRect(0, 0, viewW, viewH);
 
-    const half = (CELL - DOT) * 0.5;
-    ctx.fillStyle = `rgb(${COOL[0]},${COOL[1]},${COOL[2]})`;
-    for (let y = 0; y < rows; y++) {
-      for (let x = 0; x < cols; x++) {
-        ctx.fillRect(x * CELL + half, y * CELL + half, DOT, DOT);
-      }
+    const n = cols * rows;
+    for (let i = 0; i < n; i++) {
+      const presence =
+        typeof pixelField.presence === 'function' ? pixelField.presence(i) : 1;
+      if (presence <= 0.001) continue;
+      const x = i % cols;
+      const y = (i / cols) | 0;
+      const size = DOT * Math.min(1, 0.35 + presence * 0.65);
+      const a = Math.min(1, presence);
+      const r = (FIELD[0] + (COOL[0] - FIELD[0]) * a) | 0;
+      const g = (FIELD[1] + (COOL[1] - FIELD[1]) * a) | 0;
+      const b = (FIELD[2] + (COOL[2] - FIELD[2]) * a) | 0;
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(
+        x * CELL + CELL * 0.5 - size * 0.5,
+        y * CELL + CELL * 0.5 - size * 0.5,
+        size,
+        size
+      );
     }
   }
 
@@ -285,20 +298,29 @@ export function createWaveStyle(deps) {
       const introDX = pixelField.offsetX(i);
       const introDY = pixelField.offsetY(i);
       const introDrift = introDX !== 0 || introDY !== 0;
+      const presence =
+        typeof pixelField.presence === 'function' ? pixelField.presence(i) : 1;
+      if (presence <= 0.001 && introHv <= 0 && !introDrift && Math.abs(disp) < EPS) {
+        continue;
+      }
       if (!introDrift && introHv > energy) energy = introHv;
-      if (introHv > 0) alive = true;
+      if (introHv > 0 || presence < 0.999) alive = true;
       const eased = energy * energy * (3 - 2 * energy);
       const tint  = Math.min(1, Math.pow(eased, COLOR_FALLOFF));
 
-      const size = DOT * (1 + mag * SIZE_RESP);
+      const presenceScale = Math.min(1, 0.35 + presence * 0.65);
+      const size = DOT * presenceScale * (1 + mag * SIZE_RESP);
       const homeX = x * CELL + CELL * 0.5;
       const homeY = y * CELL + CELL * 0.5 + disp * DISP_PX;
       const cx = homeX + introDX;
       const cy = homeY + introDY;
 
-      if (introDrift && Math.abs(disp) < EPS && Math.abs(vel) < EPS) {
-        ctx.fillStyle = `rgb(${COOL[0]},${COOL[1]},${COOL[2]})`;
-        ctx.fillRect(homeX - DOT * 0.5, homeY - DOT * 0.5, DOT, DOT);
+      if (introDrift && Math.abs(disp) < EPS && Math.abs(vel) < EPS && presence > 0.001) {
+        const pr = (FIELD[0] + (COOL[0] - FIELD[0]) * presence) | 0;
+        const pg = (FIELD[1] + (COOL[1] - FIELD[1]) * presence) | 0;
+        const pb = (FIELD[2] + (COOL[2] - FIELD[2]) * presence) | 0;
+        ctx.fillStyle = `rgb(${pr},${pg},${pb})`;
+        ctx.fillRect(homeX - DOT * 0.5 * presenceScale, homeY - DOT * 0.5 * presenceScale, DOT * presenceScale, DOT * presenceScale);
       }
 
       const drawTint = introDrift
@@ -320,9 +342,12 @@ export function createWaveStyle(deps) {
         ctx.fillRect(cx - sInner * 0.5, cy - sInner * 0.5, sInner, sInner);
       }
 
-      let r = COOL[0] + (HOT[0] - COOL[0]) * drawTint;
-      let g = COOL[1] + (HOT[1] - COOL[1]) * drawTint;
-      let b = COOL[2] + (HOT[2] - COOL[2]) * drawTint;
+      let r = FIELD[0] + (COOL[0] - FIELD[0]) * Math.min(1, presence);
+      let g = FIELD[1] + (COOL[1] - FIELD[1]) * Math.min(1, presence);
+      let b = FIELD[2] + (COOL[2] - FIELD[2]) * Math.min(1, presence);
+      r = r + (HOT[0] - r) * drawTint;
+      g = g + (HOT[1] - g) * drawTint;
+      b = b + (HOT[2] - b) * drawTint;
       if (drawTint > 0) {
         const lift = drawTint * BLOOM_BRIGHTNESS;
         r += (255 - r) * lift;
@@ -385,6 +410,10 @@ export function createWaveStyle(deps) {
     if (enabled) start();
   });
 
+  window.addEventListener('pixelbootready', () => {
+    if (enabled) start();
+  });
+
   window.addEventListener('animconfigchange', () => {
     if (enabled) start();
   });
@@ -397,6 +426,12 @@ export function createWaveStyle(deps) {
 
   document.addEventListener('mousemove', (e) => {
     if (!enabled) return;
+    if (
+      typeof pixelField.interactionsEnabled === 'function' &&
+      !pixelField.interactionsEnabled()
+    ) {
+      return;
+    }
     syncStageRect();
     const x = e.clientX - stageLeft;
     const y = e.clientY - stageTop;

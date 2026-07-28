@@ -37,5 +37,8 @@ export const PixelEvents = Object.freeze({
   PixelIntroStart: 'pixelintrostart',
   PixelDirectoryStart: 'pixeldirectorystart',
   PixelDirectoryHold: 'pixeldirectoryhold',
+  BootPhaseChanged: 'BootPhaseChanged',
+  BootReady: 'BootReady',
+  PixelBootReady: 'pixelbootready',
   LightningStrike: 'lightningstrike',
 });

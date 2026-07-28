@@ -1,22 +1,21 @@
-/* Intro / landing sequence — Animation Manager core (V1).
-   boot → intro → directory → idle. Logic preserved from the monolithic main.js.
+/* Intro content service — typography + directory LED sequences.
+   Boot lifecycle is owned by the Boot Controller; this module supplies
+   glyph construction, migration, directory assemble, and idle float.
 */
 
 /**
  * @param {object} deps
  * @param {object} deps.animConfig
  * @param {boolean} deps.prefersReduced
- * @param {() => string|null} deps.resolveActiveBgMode
+ * @param {() => string|null} [deps.resolveActiveBgMode]
  */
 export function createIntroController(deps) {
   const animConfig = deps.animConfig;
   const prefersReduced = deps.prefersReduced;
-  const resolveActiveBgMode = deps.resolveActiveBgMode;
 
   const FF_RATE = 4;
 
-  const INTRO_IDLE_MS      = 800;
-  const INTRO_HOLD_MS      = 3500;
+  const INTRO_HOLD_MS      = 900;
   const INTRO_LINE_PAUSE   = 720;
   const INTRO_MS_PER_COL   = 22;
   const INTRO_REVEAL_MIN   = 1400;
@@ -28,10 +27,12 @@ export function createIntroController(deps) {
   const INTRO_DRIFT_MAX    = 30;
   const INTRO_DRIFT_MS_MIN = 180;
   const INTRO_DRIFT_MS_MAX = 340;
+  const INTRO_MIGRATE_MS_MIN = 280;
+  const INTRO_MIGRATE_MS_MAX = 520;
+  const INTRO_CORRECT_MS   = 160;
   const INTRO_DISSOLVE_SCALE = 0.40;
   const INTRO_DISSOLVE_PAUSE = 280;
 
-  const DIR_DELAY_SEC      = 0.85;
   const DIR_MS_PER_COL     = 30;
   const DIR_REVEAL_MIN     = 1600;
   const DIR_REVEAL_MAX     = 3800;
@@ -72,24 +73,29 @@ export function createIntroController(deps) {
     '"Josefin Sans", "Apple Symbols", "Segoe UI Symbol", "Noto Sans Symbols", system-ui, sans-serif';
 
   /* ── controller state ─────────────────────────────────────────────────── */
-  let phase = 'boot'; /* boot | intro | directory | idle | skipped */
-  let timeline = null; /* THE only landing GSAP timeline */
+  let phase = 'idle'; /* typography | directory | idle | skipped | dissolving */
   let timeScale = 1;
   let holdingFF = false;
-  let killed = false; /* true after skip/cancel — blocks late timeline callbacks */
-  let started = false;
-  let phaseStartTime = 0; /* timeline.time() when current LED phase began */
+  let killed = false;
+  let phaseStartTime = 0; /* content clock ms origin */
+  let contentElapsed = 0;
+  let lastWallNow = 0;
   let touchGuardUntil = 0;
+  let typographySettled = false;
+  let typographyHoldMs = 0;
+  let dissolveTimer = null;
 
   let cols = 0;
   let rows = 0;
   let introTotalMs = 0;
+  let typographyDurationMs = 0;
   let assembleMs = 0;
 
   /* Intro LED buffers */
   let iTarget = null, iOn = null, iLevel = null, iOnAt = null;
   let iDetachAt = null, iGoneAt = null, iLine = null;
   let iDriftX = null, iDriftY = null, iOx = null, iOy = null;
+  let iMigrateMs = null;
   let iWordId = null;
   let iIdleWords = [];
 
@@ -341,13 +347,6 @@ export function createIntroController(deps) {
     }
   }
 
-  function isOnLanding() {
-    const home = document.getElementById('home');
-    if (!home) return true;
-    const rect = home.getBoundingClientRect();
-    return rect.bottom > 40 && rect.top < window.innerHeight - 40;
-  }
-
   function ensureGrid() {
     if (cols >= 12 && rows >= 8) return;
     const stage = document.getElementById('stage');
@@ -363,27 +362,41 @@ export function createIntroController(deps) {
   }
 
   function isActivePhase() {
-    return phase === 'boot' || phase === 'intro' || phase === 'directory';
-  }
-
-  /* ── master timeline ──────────────────────────────────────────────────── */
-
-  function killMasterTimeline() {
-    if (timeline) {
-      timeline.kill();
-      timeline = null;
-    }
+    return phase === 'typography' || phase === 'directory' || phase === 'dissolving';
   }
 
   function setTimeScale(rate) {
-    const next = rate > 0 ? rate : 1;
-    timeScale = next;
-    if (timeline) timeline.timeScale(next);
+    timeScale = rate > 0 ? rate : 1;
+  }
+
+  function resetContentClock() {
+    contentElapsed = 0;
+    lastWallNow = 0;
+    phaseStartTime = 0;
+  }
+
+  function tickContentClock(now) {
+    if (!lastWallNow) {
+      lastWallNow = now;
+      return contentElapsed;
+    }
+    const dt = Math.max(0, now - lastWallNow) * timeScale;
+    lastWallNow = now;
+    if (phase === 'typography' || phase === 'directory' || phase === 'dissolving') {
+      contentElapsed += dt;
+    }
+    return contentElapsed;
   }
 
   function phaseElapsedMs() {
-    if (!timeline) return 0;
-    return Math.max(0, (timeline.time() - phaseStartTime) * 1000);
+    return contentElapsed;
+  }
+
+  function clearDissolveTimer() {
+    if (dissolveTimer != null) {
+      clearTimeout(dissolveTimer);
+      dissolveTimer = null;
+    }
   }
 
   /* ── intro LED bake / clear ───────────────────────────────────────────── */
@@ -401,6 +414,7 @@ export function createIntroController(deps) {
     if (iDriftY) iDriftY.fill(0);
     if (iOx) iOx.fill(0);
     if (iOy) iOy.fill(0);
+    if (iMigrateMs) iMigrateMs.fill(0);
     if (iWordId) iWordId.fill(-1);
     iIdleWords = [];
   }
@@ -456,10 +470,13 @@ export function createIntroController(deps) {
     iDriftY = new Float32Array(n);
     iOx = new Float32Array(n);
     iOy = new Float32Array(n);
+    iMigrateMs = new Float32Array(n);
     iWordId = new Int16Array(n);
     iWordId.fill(-1);
     iIdleWords = [];
     introTotalMs = 0;
+    typographyDurationMs = 0;
+    typographySettled = false;
 
     if (cols < 16 || rows < 16) return;
 
@@ -489,6 +506,7 @@ export function createIntroController(deps) {
 
     let cursor = 0;
     const lineMeta = [];
+    let maxArrive = 0;
 
     for (let L = 0; L < lineCount; L++) {
       const cy = startY + L * lineGap;
@@ -544,6 +562,9 @@ export function createIntroController(deps) {
         iOnAt[i] = onAt;
         iLevel[i] = 0.90 + n1 * 0.10;
         iWordId[i] = wid;
+        /* Hold until directory handoff retargets dissolve */
+        iDetachAt[i] = HOLD_SENTINEL;
+        iGoneAt[i] = HOLD_SENTINEL;
 
         const nAng = hash01(clusterId, 0xd01);
         const nDist = hash01(i, 0xd02 + L);
@@ -554,8 +575,16 @@ export function createIntroController(deps) {
         }
         const ang = baseAng + nSpin + (nAng - 0.5) * 0.55;
         const dist = INTRO_DRIFT_MIN + nDist * (INTRO_DRIFT_MAX - INTRO_DRIFT_MIN);
+        /* Spawn offset — migrate toward home during construction */
         iDriftX[i] = Math.cos(ang) * dist;
         iDriftY[i] = Math.sin(ang) * dist;
+        iMigrateMs[i] =
+          INTRO_MIGRATE_MS_MIN +
+          hash01(i, 0xd12) * (INTRO_MIGRATE_MS_MAX - INTRO_MIGRATE_MS_MIN);
+
+        const arriveAt = onAt + iMigrateMs[i] + INTRO_CORRECT_MS;
+        if (arriveAt > maxArrive) maxArrive = arriveAt;
+        if (arriveAt > wordReady[bi]) wordReady[bi] = arriveAt;
       }
 
       for (let b = 0; b < bandCount; b++) {
@@ -586,6 +615,9 @@ export function createIntroController(deps) {
           iDetachAt[i] = goneAt;
           iGoneAt[i] = goneAt;
           iLevel[i] = 0.52 + n1 * 0.28;
+          iMigrateMs[i] = 90 + n2 * 80;
+          iDriftX[i] = (n1 - 0.5) * 6;
+          iDriftY[i] = (n2 - 0.5) * 6;
         }
       }
 
@@ -600,11 +632,22 @@ export function createIntroController(deps) {
       if (L < lineCount - 1) cursor += INTRO_LINE_PAUSE;
     }
 
-    const holdEnd = cursor + INTRO_HOLD_MS;
-    let dissolveCursor = holdEnd;
-    let maxGone = holdEnd;
+    /* Store dissolve meta for later retarget — construction holds glyphs in place */
+    bakeIntro._lineMeta = lineMeta;
+    typographyHoldMs = cursor + INTRO_HOLD_MS;
+    typographyDurationMs = Math.max(typographyHoldMs, maxArrive + 80);
+    introTotalMs = typographyDurationMs;
+  }
 
-    for (let L = 0; L < lineCount; L++) {
+  /* Retarget glyph dissolve relative to content clock `t0` (ms). */
+  function armIntroDissolve(t0) {
+    const lineMeta = bakeIntro._lineMeta;
+    if (!lineMeta || !iTarget) return 0;
+
+    let dissolveCursor = t0;
+    let maxGone = t0;
+
+    for (let L = 0; L < lineMeta.length; L++) {
       const meta = lineMeta[L];
       if (!meta || !meta.glyph.length) continue;
       const dissolveMs = meta.revealMs * INTRO_DISSOLVE_SCALE;
@@ -632,10 +675,11 @@ export function createIntroController(deps) {
       }
 
       dissolveCursor = lineStart + dissolveMs;
-      if (L < lineCount - 1) dissolveCursor += INTRO_DISSOLVE_PAUSE;
+      if (L < lineMeta.length - 1) dissolveCursor += INTRO_DISSOLVE_PAUSE;
     }
 
     introTotalMs = maxGone + 120;
+    return introTotalMs - t0;
   }
 
   /* ── directory LED bake / clear ───────────────────────────────────────── */
@@ -955,30 +999,54 @@ export function createIntroController(deps) {
     renderDirectoryFromBitmap(null);
   }
 
-  /* ── phase entry (called ONLY from the master timeline) ─────────────── */
+  /* ── content phase API (driven by Boot Controller) ─────────────────────── */
 
-  function enterIntroPhase() {
+  function beginTypographyConstruction() {
     if (killed) return;
-    phase = 'intro';
-    phaseStartTime = timeline ? timeline.time() : 0;
-    setBoot('intro');
+    ensureGrid();
+    clearDissolveTimer();
+    clearIntroLeds();
+    clearDirectoryLeds();
+    bakeIntro();
+    resetContentClock();
+    typographySettled = false;
+    phase = 'typography';
+    setBoot('typography');
     window.dispatchEvent(new CustomEvent('pixelintrostart'));
+  }
+
+  function getTypographyDurationMs() {
+    return typographyDurationMs || 0;
+  }
+
+  function isTypographySettled() {
+    if (typographySettled) return true;
+    if (phase !== 'typography') return false;
+    if (contentElapsed >= typographyDurationMs) {
+      typographySettled = true;
+      return true;
+    }
+    return false;
+  }
+
+  function holdTypography() {
+    if (phase !== 'typography' && phase !== 'idle') return;
+    typographySettled = true;
+    /* Keep glyphs pinned at home — idle float stays paused until directory */
+    pauseIdleWords(iIdleWords, contentElapsed);
   }
 
   function enterDirectoryPhase() {
     if (killed) return;
-    /* Sole visual entry — mask was baked once when the master timeline was built */
-    console.info('[IntroController] enterDirectoryPhase (sole entry)');
     clearIntroLeds();
-    if (!dOn) bakeDirectory(); /* safety if build skipped prebake */
+    if (!dOn) bakeDirectory();
+    resetContentClock();
     phase = 'directory';
-    phaseStartTime = timeline ? timeline.time() : 0;
     setBoot('directory');
     window.dispatchEvent(new CustomEvent('pixeldirectorystart'));
   }
 
   function enterIdle() {
-    if (killed && phase === 'idle') return;
     phase = 'idle';
     holdingFF = false;
     timeScale = 1;
@@ -987,7 +1055,38 @@ export function createIntroController(deps) {
     window.dispatchEvent(new CustomEvent('pixeldirectoryhold'));
   }
 
-  function renderFinalHold() {
+  function beginDirectorySequence(opts) {
+    opts = opts || {};
+    clearDissolveTimer();
+    killed = false;
+
+    if (opts.fromMotionReenable) {
+      bakeDirectory();
+      enterDirectoryPhase();
+      return;
+    }
+
+    /* Soft dissolve of hero type, then directory assemble */
+    if (iTarget && phase === 'typography') {
+      phase = 'dissolving';
+      setBoot('typography');
+      const dissolveMs = armIntroDissolve(contentElapsed);
+      const wait = Math.max(200, dissolveMs / Math.max(0.001, timeScale));
+      dissolveTimer = setTimeout(function () {
+        dissolveTimer = null;
+        if (killed) return;
+        bakeDirectory();
+        enterDirectoryPhase();
+      }, wait);
+      return;
+    }
+
+    bakeDirectory();
+    enterDirectoryPhase();
+  }
+
+  function skipToDirectoryHold() {
+    clearDissolveTimer();
     ensureGrid();
     clearIntroLeds();
     if (cols >= 12 && rows >= 8 && animConfig.motion && !prefersReduced) {
@@ -999,92 +1098,10 @@ export function createIntroController(deps) {
     phase = 'idle';
     holdingFF = false;
     timeScale = 1;
+    typographySettled = true;
     setBoot(null);
     window.dispatchEvent(new CustomEvent('pixeldirectorystart'));
     window.dispatchEvent(new CustomEvent('pixeldirectoryhold'));
-  }
-
-  /* ── build + play the single master timeline ──────────────────────────── */
-
-  function buildAndPlayMasterTimeline(opts) {
-    opts = opts || {};
-    const skipIntroPhase = !!opts.skipIntroPhase;
-
-    killMasterTimeline();
-    killed = false;
-    clearIntroLeds();
-    clearDirectoryLeds();
-
-    ensureGrid();
-    if (prefersReduced || !animConfig.motion || cols < 12 || rows < 8) {
-      phase = 'skipped';
-      setBoot(null);
-      return false;
-    }
-
-    if (!skipIntroPhase) {
-      bakeIntro();
-    } else {
-      introTotalMs = 0;
-    }
-
-    /* Bake directory once here — enterDirectoryPhase only reveals it */
-    bakeDirectory();
-    const dirAssembleSec = Math.max(0.05, assembleMs / 1000);
-
-    const idleSec = skipIntroPhase ? 0 : INTRO_IDLE_MS / 1000;
-    const introSec = skipIntroPhase ? 0 : Math.max(0.05, introTotalMs / 1000);
-    const dirDelaySec = DIR_DELAY_SEC;
-
-    if (!window.gsap) {
-      console.error('[IntroController] GSAP required for landing sequence');
-      phase = 'skipped';
-      return false;
-    }
-
-    phase = 'boot';
-    started = true;
-    setBoot(skipIntroPhase ? 'directory' : 'intro');
-
-    timeline = window.gsap.timeline({
-      defaults: { ease: 'none' },
-      onComplete: function () {
-        if (killed) return;
-        timeline = null;
-      },
-    });
-    timeline.timeScale(timeScale);
-
-    /* Wake Heat/Wave rAF for the boot delay (before intro LEDs appear) */
-    window.dispatchEvent(new CustomEvent('pixelintrostart'));
-
-    if (!skipIntroPhase) {
-      timeline.addLabel('boot');
-      if (idleSec > 0) timeline.to({}, { duration: idleSec });
-
-      timeline.addLabel('intro');
-      timeline.call(enterIntroPhase);
-      timeline.to({}, { duration: introSec });
-      timeline.call(function () {
-        if (killed) return;
-        clearIntroLeds();
-      });
-    }
-
-    timeline.addLabel('dirDelay');
-    if (dirDelaySec > 0) timeline.to({}, { duration: dirDelaySec });
-
-    timeline.addLabel('directory');
-    timeline.call(enterDirectoryPhase);
-    timeline.to({}, { duration: dirAssembleSec });
-
-    timeline.addLabel('idle');
-    timeline.call(function () {
-      if (killed) return;
-      enterIdle();
-    });
-
-    return true;
   }
 
   /* ── public control API ───────────────────────────────────────────────── */
@@ -1105,55 +1122,52 @@ export function createIntroController(deps) {
   function skip() {
     if (phase === 'idle' || phase === 'skipped') return;
     killed = true;
-    killMasterTimeline();
-    renderFinalHold();
+    clearDissolveTimer();
+    skipToDirectoryHold();
   }
 
   function cancel() {
     killed = true;
-    killMasterTimeline();
+    clearDissolveTimer();
     clearIntroLeds();
     clearDirectoryLeds();
     phase = 'skipped';
     holdingFF = false;
     timeScale = 1;
-    started = false;
+    typographySettled = false;
+    resetContentClock();
     setBoot(null);
   }
 
+  /* Boot controller owns scheduling — kept for API compatibility */
   function schedule() {
-    if (prefersReduced || !animConfig.motion || resolveActiveBgMode() !== 'heat') {
-      phase = 'skipped';
-      return;
-    }
-    if (started) return;
+    /* no-op: BootController.schedule() starts the lifecycle */
+  }
 
-    const kick = function () {
-      if (started || killed) return;
-      buildAndPlayMasterTimeline();
+  /* ── per-frame LED update ─────────────────────────────────────────────── */
+
+  function migrateProgress(i, t) {
+    const onAt = iOnAt[i];
+    if (t < onAt) return 0;
+    const mig = iMigrateMs && iMigrateMs[i] > 0 ? iMigrateMs[i] : INTRO_MIGRATE_MS_MIN;
+    const u = Math.max(0, Math.min(1, (t - onAt) / mig));
+    return easeOutCubic(u);
+  }
+
+  function correctionOffset(i, t, arrived) {
+    if (!arrived) return { x: 0, y: 0 };
+    const onAt = iOnAt[i];
+    const mig = iMigrateMs && iMigrateMs[i] > 0 ? iMigrateMs[i] : INTRO_MIGRATE_MS_MIN;
+    const corrStart = onAt + mig;
+    if (t < corrStart || t > corrStart + INTRO_CORRECT_MS) return { x: 0, y: 0 };
+    const u = (t - corrStart) / INTRO_CORRECT_MS;
+    const wobble = Math.sin(u * Math.PI) * (1 - u);
+    const n = hash01(i, 0xc01) - 0.5;
+    return {
+      x: n * 1.1 * wobble,
+      y: (hash01(i, 0xc02) - 0.5) * 0.9 * wobble,
     };
-
-    if (document.fonts && document.fonts.ready) {
-      document.fonts.ready.then(kick).catch(kick);
-    } else {
-      kick();
-    }
   }
-
-  function replayDirectoryAfterMotionOn() {
-    requestAnimationFrame(function () {
-      if (!animConfig.motion) return;
-      if (!isOnLanding()) return;
-      killed = false;
-      started = false;
-      holdingFF = false;
-      timeScale = 1;
-      buildAndPlayMasterTimeline({ skipIntroPhase: true });
-      window.dispatchEvent(new CustomEvent('pixeldirectorystart'));
-    });
-  }
-
-  /* ── per-frame LED update (time from master timeline) ─────────────────── */
 
   function updateIntroLeds(t) {
     if (!iOn) return false;
@@ -1161,10 +1175,10 @@ export function createIntroController(deps) {
     let dissolving = false;
     const n = cols * rows;
 
-    /* Detect dissolve first — geometric drift owns those frames */
     for (let i = 0; i < n; i++) {
       if (!iTarget || !iTarget[i]) continue;
       if (!(iGoneAt && iGoneAt[i] > iOnAt[i])) continue;
+      if (iGoneAt[i] >= HOLD_SENTINEL * 0.5) continue;
       if (t < iOnAt[i] || t >= iGoneAt[i]) continue;
       const detachAt = iDetachAt[i];
       if (t >= detachAt && iGoneAt[i] > detachAt) {
@@ -1173,7 +1187,7 @@ export function createIntroController(deps) {
       }
     }
 
-    if (dissolving) {
+    if (dissolving || phase === 'dissolving') {
       pauseIdleWords(iIdleWords, t);
       for (let i = 0; i < n; i++) {
         if (!(iGoneAt && iGoneAt[i] > iOnAt[i])) {
@@ -1187,7 +1201,7 @@ export function createIntroController(deps) {
         iOn[i] = iLevel[i];
         anyLit = true;
         const detachAt = iDetachAt[i];
-        if (iTarget[i] && t >= detachAt && iGoneAt[i] > detachAt) {
+        if (iTarget[i] && t >= detachAt && iGoneAt[i] > detachAt && detachAt < HOLD_SENTINEL * 0.5) {
           const u = (t - detachAt) / (iGoneAt[i] - detachAt);
           const e = easeOutCubic(Math.max(0, Math.min(1, u)));
           iOx[i] = iDriftX[i] * e;
@@ -1200,28 +1214,46 @@ export function createIntroController(deps) {
       return anyLit;
     }
 
-    /* Holding: rebuild brightness via fixed-grid light flow from idle Y */
-    const yCache = iIdleWords.length
-      ? tickAllIdleWords(iIdleWords, t, false)
-      : null;
+    /* Construction / hold: migrate into place, then fixed-grid light flow */
+    const constructing = phase === 'typography' && !typographySettled;
+    const yCache =
+      !constructing && iIdleWords.length
+        ? tickAllIdleWords(iIdleWords, t, false)
+        : null;
     iOn.fill(0);
 
     for (let i = 0; i < n; i++) {
       iOx[i] = 0;
       iOy[i] = 0;
       if (!(iGoneAt && iGoneAt[i] > iOnAt[i])) continue;
-      if (t < iOnAt[i] || t >= iGoneAt[i]) continue;
+      if (t < iOnAt[i]) continue;
+      if (iGoneAt[i] < HOLD_SENTINEL * 0.5 && t >= iGoneAt[i]) continue;
+
       anyLit = true;
       const level = iLevel[i];
+
       if (iTarget && iTarget[i]) {
-        const wid = iWordId ? iWordId[i] : -1;
-        const shiftPx = yCache && wid >= 0 ? yCache[wid] : 0;
-        const x = i % cols;
-        const y = (i / cols) | 0;
-        scatterIdleLight(iOn, x, y, level, shiftPx);
+        const mig = migrateProgress(i, t);
+        const arrived = mig >= 0.999;
+        if (constructing || !arrived) {
+          const remain = 1 - mig;
+          const corr = correctionOffset(i, t, arrived || mig > 0.92);
+          iOx[i] = iDriftX[i] * remain + corr.x;
+          iOy[i] = iDriftY[i] * remain + corr.y;
+          iOn[i] = level * (0.35 + mig * 0.65);
+        } else {
+          const wid = iWordId ? iWordId[i] : -1;
+          const shiftPx = yCache && wid >= 0 ? yCache[wid] : 0;
+          const x = i % cols;
+          const y = (i / cols) | 0;
+          scatterIdleLight(iOn, x, y, level, shiftPx);
+        }
       } else {
-        /* Sparks stay pinned to their home cell */
-        iOn[i] = level;
+        /* Sparks migrate briefly then stay pinned */
+        const mig = migrateProgress(i, t);
+        iOn[i] = level * (0.4 + mig * 0.6);
+        iOx[i] = (iDriftX[i] || 0) * (1 - mig);
+        iOy[i] = (iDriftY[i] || 0) * (1 - mig);
       }
     }
     return anyLit;
@@ -1235,7 +1267,6 @@ export function createIntroController(deps) {
     const yCache = dIdleWords.length
       ? tickAllIdleWords(dIdleWords, t, false)
       : null;
-    /* Render buffer only — source bitmap stays untouched */
     dOn.fill(0);
 
     for (let i = 0; i < n; i++) {
@@ -1246,7 +1277,6 @@ export function createIntroController(deps) {
       anyLit = true;
 
       if (dTarget && dTarget[i]) {
-        /* Always sample the frozen bitmap at the home cell */
         const level = dBitmap ? dBitmap[i] : dLevel[i];
         const wid = dWordId ? dWordId[i] : -1;
         const shiftPx =
@@ -1255,19 +1285,18 @@ export function createIntroController(deps) {
         const y = (i / cols) | 0;
         scatterIdleLight(dOn, x, y, level, shiftPx);
       } else {
-        /* Transient sparks — not part of the frozen bitmap */
         dOn[i] = dLevel[i];
       }
     }
     return anyLit;
   }
 
-  function update(/* now */) {
+  function update(now) {
+    const wall = now || performance.now();
+    tickContentClock(wall);
+    const t = phaseElapsedMs();
+
     if (phase === 'idle') {
-      /*
-        Idle hold: render ONLY from the immutable bitmap.
-        Do NOT reuse assemble timing (Infinity >= HOLD_SENTINEL wiped the field).
-      */
       if (!dBitmap) return false;
       const yCache = dIdleWords.length
         ? tickAllIdleWords(dIdleWords, assembleMs + 1, false)
@@ -1275,14 +1304,19 @@ export function createIntroController(deps) {
       renderDirectoryFromBitmap(yCache);
       return true;
     }
-    if (phase === 'intro') {
-      return updateIntroLeds(phaseElapsedMs()) || !!timeline;
+    if (phase === 'typography' || phase === 'dissolving') {
+      if (phase === 'typography') isTypographySettled();
+      return updateIntroLeds(t);
     }
     if (phase === 'directory') {
-      return updateDirectoryLeds(phaseElapsedMs()) || !!timeline;
+      const lit = updateDirectoryLeds(t);
+      if (t >= assembleMs && assembleMs > 0) {
+        enterIdle();
+        return true;
+      }
+      return lit;
     }
-    /* boot / dirDelay — keep rAF alive while master timeline runs */
-    return !!timeline;
+    return false;
   }
 
   function brightness(i) {
@@ -1304,7 +1338,7 @@ export function createIntroController(deps) {
   }
 
   function isActive() {
-    return isActivePhase() || phase === 'idle' || !!timeline;
+    return isActivePhase() || phase === 'idle';
   }
 
   function onResize(nextCols, nextRows) {
@@ -1314,9 +1348,8 @@ export function createIntroController(deps) {
     cols = c;
     rows = r;
 
-    if (phase === 'intro') {
+    if (phase === 'typography' || phase === 'dissolving') {
       bakeIntro();
-      /* Elapsed still comes from master timeline — no clock reset / restart */
     } else if (phase === 'directory') {
       bakeDirectory();
     } else if (phase === 'idle') {
@@ -1351,22 +1384,7 @@ export function createIntroController(deps) {
     }
 
     window.addEventListener('mouseup', endFastForward);
-
-    window.addEventListener('keydown', function (e) {
-      if (e.code !== 'Space' && e.key !== ' ') return;
-      if (e.repeat) return;
-      const tag = e.target && e.target.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (e.target && e.target.isContentEditable) return;
-      if (phase === 'idle' || phase === 'skipped') return;
-      e.preventDefault();
-      skip();
-    });
-
-    window.addEventListener('motionreenabled', replayDirectoryAfterMotionOn);
-    window.addEventListener('animconfigchange', function (e) {
-      if (e.detail && e.detail.motion === false) cancel();
-    });
+    /* Space skip is owned by the Boot Controller */
   }
 
   bindInputs();
@@ -1388,6 +1406,14 @@ export function createIntroController(deps) {
     timeScale: setTimeScale,
     getPhase: function () { return phase; },
     isControllable: isActivePhase,
+
+    /* Boot content API */
+    beginTypographyConstruction: beginTypographyConstruction,
+    getTypographyDurationMs: getTypographyDurationMs,
+    isTypographySettled: isTypographySettled,
+    holdTypography: holdTypography,
+    beginDirectorySequence: beginDirectorySequence,
+    skipToDirectoryHold: skipToDirectoryHold,
   };
 
 }

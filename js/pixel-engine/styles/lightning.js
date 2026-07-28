@@ -72,6 +72,13 @@ export function createLightningStyle(deps) {
         controller.setCursorInField(false);
         return;
       }
+      if (
+        typeof pixelField.interactionsEnabled === 'function' &&
+        !pixelField.interactionsEnabled()
+      ) {
+        controller.setCursorInField(false);
+        return;
+      }
       controller.setCursorInField(pointInField(e.clientX, e.clientY));
     }, { passive: true });
 
@@ -1736,12 +1743,25 @@ export function createLightningStyle(deps) {
       ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
       ctx.fillRect(0, 0, viewW, viewH);
 
-      const half = (CELL - DOT) * 0.5;
-      ctx.fillStyle = `rgb(${COOL[0]},${COOL[1]},${COOL[2]})`;
-      for (let y = 0; y < rows; y++) {
-        for (let x = 0; x < cols; x++) {
-          ctx.fillRect(x * CELL + half, y * CELL + half, DOT, DOT);
-        }
+      const n = cols * rows;
+      for (let i = 0; i < n; i++) {
+        const presence =
+          typeof pixelField.presence === 'function' ? pixelField.presence(i) : 1;
+        if (presence <= 0.001) continue;
+        const x = i % cols;
+        const y = (i / cols) | 0;
+        const size = DOT * Math.min(1, 0.35 + presence * 0.65);
+        const a = Math.min(1, presence);
+        const r = (FIELD[0] + (COOL[0] - FIELD[0]) * a) | 0;
+        const g = (FIELD[1] + (COOL[1] - FIELD[1]) * a) | 0;
+        const b = (FIELD[2] + (COOL[2] - FIELD[2]) * a) | 0;
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        ctx.fillRect(
+          x * CELL + CELL * 0.5 - size * 0.5,
+          y * CELL + CELL * 0.5 - size * 0.5,
+          size,
+          size
+        );
       }
     }
 
@@ -1924,6 +1944,10 @@ export function createLightningStyle(deps) {
       if (enabled) start();
     });
 
+    window.addEventListener('pixelbootready', () => {
+      if (enabled) start();
+    });
+
     window.addEventListener('animconfigchange', () => {
       lightningTheme.sync();
       if (enabled) start();
@@ -1932,6 +1956,12 @@ export function createLightningStyle(deps) {
     /* SYSTEM 8 → SYSTEM 9: timing events become unique bolt geometry */
     window.addEventListener('lightningstrike', (e) => {
       if (!enabled) return;
+      if (
+        typeof pixelField.interactionsEnabled === 'function' &&
+        !pixelField.interactionsEnabled()
+      ) {
+        return;
+      }
       const now = e.detail && e.detail.time != null ? e.detail.time : performance.now();
       if (strikes.spawn(now)) start();
     });
@@ -1944,6 +1974,14 @@ export function createLightningStyle(deps) {
 
     document.addEventListener('mousemove', (e) => {
       if (!enabled) return;
+      if (
+        typeof pixelField.interactionsEnabled === 'function' &&
+        !pixelField.interactionsEnabled()
+      ) {
+        ptrX = ptrY = -1;
+        hideCursorDot();
+        return;
+      }
       syncStageRect();
       const x = e.clientX - stageLeft;
       const y = e.clientY - stageTop;
@@ -1961,6 +1999,12 @@ export function createLightningStyle(deps) {
     /* Click the field to seed a local storm cell (cloud + rain) */
     stage.addEventListener('click', (e) => {
       if (!enabled) return;
+      if (
+        typeof pixelField.interactionsEnabled === 'function' &&
+        !pixelField.interactionsEnabled()
+      ) {
+        return;
+      }
       if (e.button != null && e.button !== 0) return;
       syncStageRect();
       const x = e.clientX - stageLeft;

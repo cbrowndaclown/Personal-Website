@@ -116,4 +116,5 @@ export function createPixelEngine(options = {}) {
 }
 
 export { PixelEvents, CELL } from './constants.js';
+export { BootPhase, BOOT_TIMING } from './boot/constants.js';
 export { createEventSystem } from './events.js';
