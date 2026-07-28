@@ -108,7 +108,8 @@ export function createBootIndicator() {
       mode === 'completing' ||
       mode === 'circle_hold' ||
       mode === 'smile' ||
-      mode === 'hold'
+      mode === 'hold' ||
+      mode === 'off'
     ) {
       return;
     }
@@ -126,6 +127,7 @@ export function createBootIndicator() {
 
   function isClosed(now) {
     if (!armed) return true;
+    if (mode === 'off') return true;
     if (
       mode === 'completing' ||
       mode === 'circle_hold' ||
@@ -137,6 +139,16 @@ export function createBootIndicator() {
     }
     if (mode !== 'closing') return false;
     return (now - originMs) * omega >= closeTargetAngle - 1e-4;
+  }
+
+  /**
+   * Hide the loading arc immediately after a clean close.
+   * Leaves `armed` so later self-test can still revive the ring.
+   */
+  function dismiss() {
+    if (!armed) return;
+    mode = 'off';
+    opacity = 0;
   }
 
   function snapClosed(now) {
@@ -634,6 +646,7 @@ export function createBootIndicator() {
     beginClose,
     isClosing,
     isClosed,
+    dismiss,
     beginComplete,
     isCircleComplete,
     beginCircleHold,

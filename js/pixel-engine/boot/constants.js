@@ -38,19 +38,20 @@ export const BOOT_TIMING = Object.freeze({
   GRID_GENERATION_MS: 2800,
   GRID_OVERLAP_MS: 0,
 
-  /* LIGHT GRAY → WHITE, then one final closing revolution on the white field */
+  /* LIGHT GRAY → WHITE (organic), closing revolution synced with final pixels */
   CALIBRATION_SWEEP_MS: 3000,
   WHITE_HOLD_MS: 420,
   CALIBRATION_MS: 3000 + 420,
   CALIBRATION_OVERLAP_MS: 0,
 
-  /* Soft wipe feather as a fraction of grid width */
+  /* Soft wipe feather as a fraction of grid width (powering-on / grid stages) */
   SWEEP_FEATHER: 0.14,
 
-  /* Indicator completes this many revolutions as the final white arrives */
+  /* Indicator completes this many revolutions across the energy window;
+     the final revolution is armed so it closes with the white reveal. */
   INDICATOR_REVOLUTIONS: 3,
 
-  /* After white holds: unified clear back to black */
+  /* Legacy clear timing (stage removed — white lattice stays initialized) */
   DISPLAY_CLEAR_MS: 780,
   DISPLAY_CLEAR_OVERLAP_MS: 0,
 
