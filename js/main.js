@@ -2,6 +2,8 @@
    main.js — Stage + top nav + settings + name ribbon + pixel field
    ========================================================================== */
 
+import { initSettings } from './settings/index.js';
+
 (function () {
   'use strict';
 
@@ -10,11 +12,13 @@
   ───────────────────────────────────────────────────────────────────────── */
   const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  /* Pixel-field styles — each mode owns its own update/render system below. */
+  /* Pixel-field styles — each mode owns its own update/render system below.
+     `experimental` is registered for the Style control placeholder only. */
   const PIXEL_FIELD_STYLES = {
-    heat:      { implemented: true },
-    wave:      { implemented: true },
-    lightning: { implemented: true },
+    heat:         { implemented: true },
+    wave:         { implemented: true },
+    lightning:    { implemented: true },
+    experimental: { implemented: false },
   };
 
   const animConfig = {
@@ -298,162 +302,17 @@
   })();
 
   /* ─────────────────────────────────────────────────────────────────────────
-     1b. Settings panel — Motion + Effect (Heat / Wave / Lightning)
+     1b. Settings panel — modular inspector (Pixel FS + future categories)
   ───────────────────────────────────────────────────────────────────────── */
-  (function initSettings() {
-    const root  = document.querySelector('.settings');
-    const btn   = document.getElementById('settings-btn');
-    const panel = document.getElementById('settings-panel');
-    const close = document.getElementById('settings-close');
-    const motionSeg = document.getElementById('settings-motion');
-    const effectSeg = document.getElementById('settings-effect');
-    const effectRow = document.getElementById('settings-effect-row');
-    const colorR = document.getElementById('settings-color-r');
-    const colorG = document.getElementById('settings-color-g');
-    const colorB = document.getElementById('settings-color-b');
-    const colorRVal = document.getElementById('settings-color-r-val');
-    const colorGVal = document.getElementById('settings-color-g-val');
-    const colorBVal = document.getElementById('settings-color-b-val');
-    const colorSwatch = document.getElementById('settings-color-swatch');
-    if (!root || !btn || !panel || !close) return;
-
-    let open = false;
-    const body = panel.querySelector('.settings__body');
-    const icon = btn.querySelector('.settings__icon');
-
-    /* Gear spin tracks wheel/trackpad 1:1 — no inertia after scroll stops */
-    let gearAngle = 0;
-    const GEAR_SCALE = 0.22; /* deg per px of deltaY */
-    const GEAR_MIN_ANGLE = -75;
-    const GEAR_MAX_ANGLE = 75;
-
-    function nudgeGear(deltaY) {
-      if (!deltaY) return;
-      gearAngle = Math.min(
-        GEAR_MAX_ANGLE,
-        Math.max(GEAR_MIN_ANGLE, gearAngle + deltaY * GEAR_SCALE)
-      );
-      if (icon) icon.style.transform = `rotate(${gearAngle}deg)`;
-    }
-
-    function setOpen(next) {
-      open = next;
-      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-      btn.setAttribute('aria-label', open ? 'Close settings' : 'Open settings');
-      panel.classList.toggle('is-open', open);
-      panel.setAttribute('aria-hidden', open ? 'false' : 'true');
-
-      if (open) {
-        close.focus({ preventScroll: true });
-      } else {
-        btn.focus({ preventScroll: true });
-      }
-    }
-
-    function syncSeg(seg, active) {
-      if (!seg) return;
-      seg.dataset.active = active;
-      seg.querySelectorAll('.settings__seg-opt').forEach((opt) => {
-        const on = opt.dataset.value === active;
-        opt.classList.toggle('is-active', on);
-        opt.setAttribute('aria-pressed', on ? 'true' : 'false');
-      });
-    }
-
-    function syncFromConfig() {
-      syncSeg(motionSeg, animConfig.motion ? 'on' : 'off');
-      syncSeg(effectSeg, animConfig.bgMode);
-      if (effectRow) {
-        const locked = !animConfig.motion;
-        effectRow.classList.toggle('is-disabled', locked);
-        effectRow.setAttribute('aria-disabled', locked ? 'true' : 'false');
-        if (effectSeg) {
-          effectSeg.querySelectorAll('.settings__seg-opt').forEach((opt) => {
-            opt.disabled = locked;
-          });
-        }
-      }
-      syncColorUi();
-    }
-
-    function syncColorUi() {
-      const { r, g, b } = animConfig.effectColor;
-      if (colorR) colorR.value = String(r);
-      if (colorG) colorG.value = String(g);
-      if (colorB) colorB.value = String(b);
-      if (colorRVal) colorRVal.textContent = String(r);
-      if (colorGVal) colorGVal.textContent = String(g);
-      if (colorBVal) colorBVal.textContent = String(b);
-      if (colorSwatch) colorSwatch.style.background = `rgb(${r},${g},${b})`;
-    }
-
-    function readColorSliders(publish) {
-      if (!colorR || !colorG || !colorB) return;
-      setEffectColor(colorR.value, colorG.value, colorB.value, publish);
-      syncColorUi();
-    }
-
-    if (motionSeg) {
-      motionSeg.addEventListener('click', (e) => {
-        const opt = e.target.closest('.settings__seg-opt');
-        if (!opt) return;
-        setMotion(opt.dataset.value === 'on');
-      });
-    }
-
-    if (effectSeg) {
-      effectSeg.addEventListener('click', (e) => {
-        if (!animConfig.motion) return;
-        const opt = e.target.closest('.settings__seg-opt');
-        if (!opt) return;
-        setBgMode(opt.dataset.value);
-      });
-    }
-
-    [colorR, colorG, colorB].forEach((input) => {
-      if (!input) return;
-      input.addEventListener('input', () => readColorSliders(true));
-    });
-
-    window.addEventListener('animconfigchange', syncFromConfig);
-    syncFromConfig();
-
-    /* Contain all wheel/trackpad to panel content; page scrolls when pointer leaves */
-    panel.addEventListener(
-      'wheel',
-      (e) => {
-        if (!open) return;
-        e.preventDefault();
-        nudgeGear(e.deltaY);
-        if (body) body.scrollTop += e.deltaY;
-      },
-      { passive: false }
-    );
-
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      setOpen(!open);
-    });
-
-    close.addEventListener('click', (e) => {
-      e.stopPropagation();
-      setOpen(false);
-    });
-
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && open) setOpen(false);
-    });
-
-    document.addEventListener('pointerdown', (e) => {
-      if (!open) return;
-      if (root.contains(e.target)) return;
-      setOpen(false);
-    });
-
-    window.addEventListener('topnavhide', () => {
-      if (open) setOpen(false);
-    });
-  })();
+  initSettings({
+    getMotion: () => animConfig.motion,
+    setMotion,
+    getBgMode: () => animConfig.bgMode,
+    setBgMode,
+    getLastImplementedBgMode: () => animConfig.lastImplementedBgMode || 'heat',
+    getEffectColor: () => ({ ...animConfig.effectColor }),
+    setEffectColor,
+  });
 
   /* ─────────────────────────────────────────────────────────────────────────
      1c. Nameplate ribbon — Benz Grotesk textPath, BL → BR along the frame

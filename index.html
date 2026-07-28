@@ -62,96 +62,8 @@
               <h2 class="settings__title" id="settings-title">Settings</h2>
               <button type="button" class="settings__close" id="settings-close" aria-label="Close settings">✕</button>
             </div>
-            <div class="settings__body">
-              <div class="settings__row">
-                <div class="settings__meta">
-                  <span class="settings__label" id="settings-motion-label">Motion</span>
-                  <span class="settings__desc">Animations and pixel field</span>
-                </div>
-                <div
-                  class="settings__seg"
-                  id="settings-motion"
-                  role="group"
-                  aria-labelledby="settings-motion-label"
-                  data-active="on"
-                >
-                  <span class="settings__seg-thumb" aria-hidden="true"></span>
-                  <button type="button" class="settings__seg-opt is-active" data-value="on" aria-pressed="true">On</button>
-                  <button type="button" class="settings__seg-opt" data-value="off" aria-pressed="false">Off</button>
-                </div>
-              </div>
-
-              <div class="settings__row" id="settings-effect-row">
-                <div class="settings__meta">
-                  <span class="settings__label" id="settings-effect-label">Effect</span>
-                  <span class="settings__desc">Pixel field style</span>
-                </div>
-                <div
-                  class="settings__seg settings__seg--triple"
-                  id="settings-effect"
-                  role="group"
-                  aria-labelledby="settings-effect-label"
-                  data-active="heat"
-                >
-                  <span class="settings__seg-thumb" aria-hidden="true"></span>
-                  <button type="button" class="settings__seg-opt is-active" data-value="heat" aria-pressed="true">Heat</button>
-                  <button type="button" class="settings__seg-opt" data-value="wave" aria-pressed="false">Wave</button>
-                  <button type="button" class="settings__seg-opt" data-value="lightning" aria-pressed="false">Lightning</button>
-                </div>
-              </div>
-
-              <div class="settings__row" id="settings-color-row">
-                <div class="settings__meta settings__meta--row">
-                  <div>
-                    <span class="settings__label" id="settings-color-label">Effect Color</span>
-                    <span class="settings__desc">Shared by Heat, Wave, and Lightning</span>
-                  </div>
-                  <span
-                    class="settings__swatch"
-                    id="settings-color-swatch"
-                    aria-hidden="true"
-                    title="Current effect color"
-                  ></span>
-                </div>
-                <div class="settings__colors" role="group" aria-labelledby="settings-color-label">
-                  <label class="settings__slider">
-                    <span class="settings__slider-label">R</span>
-                    <input
-                      type="range"
-                      id="settings-color-r"
-                      min="0"
-                      max="255"
-                      value="255"
-                      aria-label="Red"
-                    />
-                    <span class="settings__slider-val" id="settings-color-r-val">255</span>
-                  </label>
-                  <label class="settings__slider">
-                    <span class="settings__slider-label">G</span>
-                    <input
-                      type="range"
-                      id="settings-color-g"
-                      min="0"
-                      max="255"
-                      value="52"
-                      aria-label="Green"
-                    />
-                    <span class="settings__slider-val" id="settings-color-g-val">52</span>
-                  </label>
-                  <label class="settings__slider">
-                    <span class="settings__slider-label">B</span>
-                    <input
-                      type="range"
-                      id="settings-color-b"
-                      min="0"
-                      max="255"
-                      value="158"
-                      aria-label="Blue"
-                    />
-                    <span class="settings__slider-val" id="settings-color-b-val">158</span>
-                  </label>
-                </div>
-              </div>
+            <div class="settings__body" id="settings-body">
+              <!-- Sections are mounted by js/settings (modular inspector catalog) -->
             </div>
           </div>
         </div>
@@ -190,6 +102,6 @@
   </div><!-- /.site-frame -->
 
   <script src="lib/gsap/gsap.min.js"></script>
-  <script src="js/main.js"></script>
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>

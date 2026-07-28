@@ -13,7 +13,7 @@
   /* Heatmap field */
   --heat-field: #D2D2D2;
 
-  /* Shared accent — kept in sync with Settings Effect Color (JS) */
+  /* Shared accent — kept in sync with Settings Global Color (JS) */
   --accent-r: 255;
   --accent-g: 52;
   --accent-b: 158;
@@ -316,7 +316,7 @@ body {
 
 .settings__panel {
   --settings-radius: 28px;
-  --settings-panel-h: 268px;
+  --settings-panel-h: 420px;
   position: absolute;
   top: calc(100% + 10px);
   right: 0;
@@ -411,8 +411,8 @@ body {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 0 16px 18px;
+  gap: 4px;
+  padding: 0 10px 14px;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -429,7 +429,104 @@ body {
   background: transparent;
 }
 
+/* ── Collapsible inspector sections ───────────────────────── */
+.settings__section {
+  flex: 0 0 auto;
+  border-radius: 14px;
+}
+
+.settings__section-header {
+  appearance: none;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 6px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  color: rgba(28, 20, 10, 0.88);
+  transition: background 0.18s ease;
+}
+
+.settings__section-header:hover {
+  background: rgba(28, 20, 10, 0.04);
+}
+
+.settings__section-header:focus-visible {
+  outline: 2px solid rgba(58, 50, 40, 0.35);
+  outline-offset: 1px;
+}
+
+.settings__section-chevron {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  position: relative;
+}
+
+.settings__section-chevron::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-right: 1.5px solid rgba(58, 50, 40, 0.55);
+  border-bottom: 1.5px solid rgba(58, 50, 40, 0.55);
+  transform: rotate(-45deg) translate(-1px, 1px);
+  transform-origin: center;
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.settings__section.is-open .settings__section-chevron::before {
+  transform: rotate(45deg) translate(-1px, -1px);
+}
+
+.settings__section-title {
+  font-family: var(--f-settings);
+  font-size: 0.92rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+}
+
+.settings__section-panel {
+  overflow: hidden;
+  height: 0;
+  opacity: 0;
+  transition:
+    height 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.settings__section-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 2px 6px 12px;
+}
+
+.settings__section-body:empty {
+  padding-bottom: 4px;
+}
+
+.settings__section-body:empty::after {
+  content: 'No settings yet';
+  font-family: var(--f-settings);
+  font-size: 0.72rem;
+  font-weight: 300;
+  color: rgba(32, 26, 18, 0.38);
+  padding: 2px 0 6px;
+}
+
 .settings__row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings__row-body {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -567,9 +664,10 @@ body {
 
 /* Segmented control — native to the settings sheet */
 .settings__seg {
+  --seg-count: 2;
   position: relative;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(var(--seg-count), 1fr);
   align-items: stretch;
   width: 100%;
   height: 34px;
@@ -579,15 +677,11 @@ body {
   box-shadow: inset 0 0 0 1px rgba(28, 20, 10, 0.08);
 }
 
-.settings__seg--triple {
-  grid-template-columns: 1fr 1fr 1fr;
-}
-
 .settings__seg-thumb {
   position: absolute;
   top: 3px;
   left: 3px;
-  width: calc(50% - 3px);
+  width: calc((100% - 6px) / var(--seg-count));
   height: calc(100% - 6px);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.72);
@@ -599,20 +693,8 @@ body {
   z-index: 0;
 }
 
-.settings__seg--triple .settings__seg-thumb {
-  width: calc((100% - 6px) / 3);
-}
-
-.settings__seg[data-active="off"] .settings__seg-thumb,
-.settings__seg[data-active="wave"] .settings__seg-thumb {
-  transform: translateX(100%);
-}
-
-.settings__seg[data-active="lightning"] .settings__seg-thumb {
-  transform: translateX(200%);
-}
-
-.settings__seg--triple .settings__seg-opt {
+.settings__seg--triple .settings__seg-opt,
+.settings__seg--n .settings__seg-opt {
   font-size: 0.62rem;
   letter-spacing: 0.01em;
 }
@@ -624,7 +706,7 @@ body {
   border: 0;
   background: transparent;
   margin: 0;
-  padding: 0;
+  padding: 0 2px;
   font-family: var(--f-settings);
   font-size: 0.68rem;
   font-weight: 400;
@@ -634,10 +716,19 @@ body {
   cursor: pointer;
   border-radius: 999px;
   transition: color 0.18s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .settings__seg-opt.is-active {
   color: rgba(28, 20, 10, 0.92);
+}
+
+.settings__seg-opt.is-placeholder,
+.settings__seg-opt:disabled {
+  color: rgba(58, 50, 40, 0.28);
+  cursor: not-allowed;
 }
 
 .settings__seg-opt:focus-visible {
@@ -647,6 +738,25 @@ body {
 
 .settings__row.is-disabled .settings__seg-opt {
   cursor: not-allowed;
+}
+
+.settings__seg-placeholder {
+  appearance: none;
+  width: 100%;
+  height: 30px;
+  margin: 0;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(28, 20, 10, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(28, 20, 10, 0.05);
+  font-family: var(--f-settings);
+  font-size: 0.62rem;
+  font-weight: 300;
+  letter-spacing: 0.02em;
+  color: rgba(58, 50, 40, 0.32);
+  cursor: not-allowed;
+  text-align: left;
 }
 
 /* ============================================================
@@ -766,6 +876,8 @@ body[data-motion="on"][data-bg-mode="lightning"] .lightning-cursor.is-in-field {
   .settings__btn,
   .settings__panel,
   .settings__seg-thumb,
+  .settings__section-panel,
+  .settings__section-chevron::before,
   .site-frame,
   .topnav,
   .topnav__brand,
