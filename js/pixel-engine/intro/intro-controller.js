@@ -59,7 +59,7 @@ export function createIntroController(deps) {
 
   const INTRO_LINES = [
     { text: 'Hey there,',                pace: 1.00 },
-    { text: 'My name is Canaan Brown.',  pace: 1.40 },
+    { text: 'my name is Canaan',         pace: 1.40 },
     { text: 'Welcome to my website.',    pace: 1.12 },
     { text: 'Are you ready to explore?', pace: 1.30 },
   ];

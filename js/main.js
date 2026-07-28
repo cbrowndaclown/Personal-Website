@@ -33,13 +33,32 @@ import { createPixelEngine } from './pixel-engine/index.js';
     let revealed = false;
     let accum = 0;
     let homeScrollRaf = 0;
-    /* Locked until Pixel FS boot finishes — no visual change, only input mute */
+    /* Locked only during exclusive boot (loading ring). Restored when intro begins. */
     let navInteractive = false;
 
     function unlockNav() {
       navInteractive = true;
     }
 
+    /* Unlock as soon as exclusive boot ends and typography/intro starts.
+       pixelbootready remains a fallback for skip / reduced-motion paths. */
+    window.addEventListener('pixelintrostart', (e) => {
+      const phase = e.detail && e.detail.phase;
+      /* emitPhase tags every boot beat — only unlock once exclusive boot is over.
+         Bare intro-start (no phase) comes from typography construction / skip. */
+      if (!phase) {
+        unlockNav();
+        return;
+      }
+      if (
+        phase === 'typography_construction' ||
+        phase === 'typography' ||
+        phase === 'ready' ||
+        phase === 'stabilizing'
+      ) {
+        unlockNav();
+      }
+    });
     window.addEventListener('pixelbootready', unlockNav);
 
     function setRevealed(next) {
@@ -134,7 +153,7 @@ import { createPixelEngine } from './pixel-engine/index.js';
     }
 
     /* Document scroll is locked; wheel (desktop) + touch swipe (mobile/tablet)
-       drive reveal. Muted entirely until pixelbootready. */
+       drive reveal. Muted only while exclusive boot owns the stage. */
     window.addEventListener(
       'wheel',
       (e) => {

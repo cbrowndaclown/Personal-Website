@@ -22,6 +22,9 @@
   /* Nav height — site-frame parks at -navH, reveals at 0 */
   --topnav-h: 58px;
   --topnav-divider: rgba(229, 229, 229, 0.5); /* #E5E5E5 @ 50% */
+
+  /* Boot indicator accent — matches Pixel Engine BOOT_RED */
+  --boot-accent-rgb: 214, 46, 46;
 }
 
 /* ============================================================
@@ -844,6 +847,79 @@ body[data-boot] .stage__field {
   user-select: none;
 }
 
+/* Boot status — red "Booting…" beneath the loading ring during exclusive boot only */
+.boot-status {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(50% + clamp(40px, 9.5vmin, 68px));
+  z-index: 2;
+  display: none;
+  justify-content: center;
+  pointer-events: none;
+  user-select: none;
+}
+
+body[data-boot="powering_on"] .boot-status,
+body[data-boot="grid_generation"] .boot-status,
+body[data-boot="calibration"] .boot-status,
+body[data-boot="display_clear"] .boot-status,
+body[data-boot="self_test"] .boot-status {
+  display: flex;
+}
+
+.boot-status__text {
+  display: inline-flex;
+  align-items: baseline;
+  color: rgb(var(--boot-accent-rgb));
+  font-family: var(--f-sans);
+  font-weight: 600;
+  font-size: clamp(12px, 1.7vw, 15px);
+  letter-spacing: 0.06em;
+  line-height: 1;
+  white-space: nowrap;
+  animation: boot-status-bob 1.35s ease-in-out infinite;
+  will-change: transform;
+}
+
+.boot-status__label {
+  flex: 0 0 auto;
+}
+
+/* Fixed 3ch slot so only trailing dots animate — no horizontal jitter */
+.boot-status__ellipsis {
+  display: inline-block;
+  flex: 0 0 3ch;
+  width: 3ch;
+  overflow: hidden;
+  vertical-align: baseline;
+  text-align: left;
+  font-family: var(--f-mono);
+  letter-spacing: 0;
+}
+
+.boot-status__ellipsis::before {
+  content: '...';
+  display: block;
+  width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  animation: boot-ellipsis 0.4s infinite;
+}
+
+@keyframes boot-ellipsis {
+  0%, 24.999% { width: 0; }
+  25%, 49.999% { width: 1ch; }
+  50%, 74.999% { width: 2ch; }
+  75%, 100%    { width: 3ch; }
+}
+
+/* Subtle vertical bob — mirrors Pixel FS idle float presence */
+@keyframes boot-status-bob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-3.2px); }
+}
+
 /* Energy / self-test boot — dormant black field inside the Pixel Engine only.
    Includes stabilizing so the completed lattice is not abandoned mid-handoff. */
 body[data-boot="powering_on"] .stage__field,
@@ -921,6 +997,15 @@ body[data-motion="on"][data-bg-mode="lightning"] .lightning-cursor.is-in-field {
 
   .lightning-cursor {
     transition: none;
+  }
+
+  .boot-status__text {
+    animation: none;
+  }
+
+  .boot-status__ellipsis::before {
+    animation: none;
+    width: 3ch;
   }
 }
 
