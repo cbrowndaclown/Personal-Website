@@ -78,6 +78,8 @@ export function createIntroController(deps) {
   let holdingFF = false;
   let killed = false;
   let contentLocked = false; /* exclusive boot owns the PE canvas */
+  /* Directory LEDs ("Scroll up/down") must not exist until post-boot reveal */
+  let directoryAllowed = false;
   let phaseStartTime = 0; /* content clock ms origin */
   let contentElapsed = 0;
   let lastWallNow = 0;
@@ -727,20 +729,22 @@ export function createIntroController(deps) {
   /* ── directory LED bake / clear ───────────────────────────────────────── */
 
   function clearDirectoryLeds() {
-    if (!dOn) return;
-    dOn.fill(0);
-    if (dTarget) dTarget.fill(0);
-    if (dLevel) dLevel.fill(0);
-    if (dOnAt) dOnAt.fill(0);
-    if (dDetachAt) dDetachAt.fill(0);
-    if (dGoneAt) dGoneAt.fill(0);
-    if (dDriftX) dDriftX.fill(0);
-    if (dDriftY) dDriftY.fill(0);
-    if (dOx) dOx.fill(0);
-    if (dOy) dOy.fill(0);
-    if (dWordId) dWordId.fill(-1);
+    /* Drop buffers entirely so scroll text cannot linger in canvas state */
+    dTarget = null;
+    dOn = null;
+    dLevel = null;
+    dOnAt = null;
+    dDetachAt = null;
+    dGoneAt = null;
+    dDriftX = null;
+    dDriftY = null;
+    dOx = null;
+    dOy = null;
+    dWordId = null;
     dIdleWords = [];
     dBitmap = null;
+    idleYCache = null;
+    assembleMs = 0;
   }
 
   function arrowSizeFor(fontPx) {
@@ -835,6 +839,11 @@ export function createIntroController(deps) {
   }
 
   function bakeDirectory(opts) {
+    /* Hard gate — never generate scroll-up / scroll-down pixels early */
+    if (!directoryAllowed) {
+      clearDirectoryLeds();
+      return;
+    }
     const instant = !!(opts && opts.instant);
     const n = cols * rows;
     dTarget = new Float32Array(n);
@@ -1046,10 +1055,12 @@ export function createIntroController(deps) {
   /**
    * Clear all content LEDs and lock the intro out of the PE canvas
    * until typography construction is explicitly started.
+   * Directory pixels are destroyed — not hidden — until post-boot reveal.
    */
   function suppressContent() {
     clearDissolveTimer();
     clearIntroLeds();
+    directoryAllowed = false;
     clearDirectoryLeds();
     contentLocked = true;
     phase = 'idle';
@@ -1064,6 +1075,7 @@ export function createIntroController(deps) {
     opts = opts || {};
     if (killed) return;
     contentLocked = false;
+    directoryAllowed = false;
     ensureGrid();
     clearDissolveTimer();
     clearIntroLeds();
@@ -1099,6 +1111,7 @@ export function createIntroController(deps) {
 
   function enterDirectoryPhase() {
     if (killed) return;
+    directoryAllowed = true;
     clearIntroLeds();
     if (!dOn) bakeDirectory();
     resetContentClock();
@@ -1121,6 +1134,7 @@ export function createIntroController(deps) {
     clearDissolveTimer();
     killed = false;
     contentLocked = false;
+    directoryAllowed = true;
 
     if (opts.fromMotionReenable) {
       bakeDirectory();
@@ -1137,6 +1151,7 @@ export function createIntroController(deps) {
       dissolveTimer = setTimeout(function () {
         dissolveTimer = null;
         if (killed) return;
+        directoryAllowed = true;
         bakeDirectory();
         enterDirectoryPhase();
       }, wait);
@@ -1150,6 +1165,7 @@ export function createIntroController(deps) {
   function skipToDirectoryHold() {
     clearDissolveTimer();
     contentLocked = false;
+    directoryAllowed = true;
     ensureGrid();
     clearIntroLeds();
     if (cols >= 12 && rows >= 8 && animConfig.motion && !prefersReduced) {
@@ -1192,6 +1208,7 @@ export function createIntroController(deps) {
   function cancel() {
     killed = true;
     contentLocked = false;
+    directoryAllowed = false;
     clearDissolveTimer();
     clearIntroLeds();
     clearDirectoryLeds();
@@ -1363,7 +1380,7 @@ export function createIntroController(deps) {
     const t = phaseElapsedMs();
 
     if (phase === 'idle') {
-      if (!dBitmap) return false;
+      if (!directoryAllowed || !dBitmap) return false;
       const yCache = dIdleWords.length
         ? tickAllIdleWords(dIdleWords, assembleMs + 1, false)
         : null;
@@ -1375,6 +1392,7 @@ export function createIntroController(deps) {
       return updateIntroLeds(t);
     }
     if (phase === 'directory') {
+      if (!directoryAllowed) return false;
       const lit = updateDirectoryLeds(t);
       if (t >= assembleMs && assembleMs > 0) {
         enterIdle();
@@ -1388,20 +1406,21 @@ export function createIntroController(deps) {
   function brightness(i) {
     if (contentLocked) return 0;
     const a = iOn ? iOn[i] : 0;
-    const b = dOn ? dOn[i] : 0;
+    /* Directory contribution only after explicit post-boot reveal */
+    const b = directoryAllowed && dOn ? dOn[i] : 0;
     return a > b ? a : b;
   }
 
   function offsetX(i) {
     if (contentLocked) return 0;
-    const d = dOx ? dOx[i] : 0;
+    const d = directoryAllowed && dOx ? dOx[i] : 0;
     if (d) return d;
     return iOx ? iOx[i] : 0;
   }
 
   function offsetY(i) {
     if (contentLocked) return 0;
-    const d = dOy ? dOy[i] : 0;
+    const d = directoryAllowed && dOy ? dOy[i] : 0;
     if (d) return d;
     return iOy ? iOy[i] : 0;
   }
@@ -1426,12 +1445,18 @@ export function createIntroController(deps) {
     }
 
     if (phase === 'typography' || phase === 'dissolving') {
+      /* Keep directory destroyed while hero type owns the field */
+      clearDirectoryLeds();
       bakeIntro();
-    } else if (phase === 'directory') {
+    } else if (phase === 'directory' && directoryAllowed) {
       bakeDirectory();
-    } else if (phase === 'idle') {
+    } else if (phase === 'idle' && directoryAllowed && dBitmap) {
+      /* Only re-bake if directory was already revealed post-boot */
       bakeDirectory({ instant: true });
       paintDirectoryHold();
+    } else {
+      /* Pre-boot / pre-directory: never generate scroll text pixels */
+      clearDirectoryLeds();
     }
   }
 

@@ -54,10 +54,12 @@ export const BOOT_TIMING = Object.freeze({
   DISPLAY_CLEAR_MS: 780,
   DISPLAY_CLEAR_OVERLAP_MS: 0,
 
-  /* Arc → LED smile morph + brief recognition hold */
-  SMILE_MORPH_MS: 720,
-  SMILE_HOLD_MS: 560,
-  SELF_TEST_MS: 720 + 560,
+  /* Arc → full circle → LED smile morph + recognition hold */
+  CIRCLE_COMPLETE_MS: 560,
+  CIRCLE_HOLD_MS: 300,
+  SMILE_MORPH_MS: 780,
+  SMILE_HOLD_MS: 780,
+  SELF_TEST_MS: 560 + 300 + 780 + 780,
   SELF_TEST_OVERLAP_MS: 0,
 
   /* Smile dissolve as typography construction begins */

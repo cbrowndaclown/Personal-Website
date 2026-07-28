@@ -345,6 +345,13 @@ export function createBootController(options) {
 
   function schedule() {
     if (started) return;
+
+    /* Lock content immediately — before fonts.ready — so early grid resize
+       cannot bake "Scroll up/down" LEDs into the field ahead of boot. */
+    if (intro && typeof intro.suppressContent === 'function') {
+      intro.suppressContent();
+    }
+
     if (prefersReduced || !animConfig.motion || resolveActiveBgMode() !== 'heat') {
       ensureFieldSize();
       phase = BootPhase.SKIPPED;
