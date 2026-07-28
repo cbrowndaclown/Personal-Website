@@ -1,4 +1,4 @@
-/* STABILIZING — quiet handoff after typography; no competing field motion. */
+/* STABILIZING — quiet handoff after typography; presence buffer unchanged. */
 
 import { BOOT_TIMING } from '../constants.js';
 import { clamp01 } from '../math.js';
@@ -13,7 +13,7 @@ export function createStabilizingStage() {
 
     enter(ctx) {
       startMs = ctx.now;
-      ctx.field.fillPresence(1);
+      /* Do not fillPresence — boot already wrote the lattice */
       ctx.field.clearBrightness();
       ctx.field.clearMotion();
       if (ctx.intro && typeof ctx.intro.holdTypography === 'function') {
@@ -22,10 +22,8 @@ export function createStabilizingStage() {
     },
 
     update(ctx) {
-      const field = ctx.field;
-      field.fillPresence(1);
-      field.clearBrightness();
-      field.clearMotion();
+      ctx.field.clearBrightness();
+      ctx.field.clearMotion();
 
       const elapsed = ctx.now - startMs;
       return { done: clamp01(elapsed / BOOT_TIMING.STABILIZING_MS) >= 1 };
@@ -34,7 +32,6 @@ export function createStabilizingStage() {
     exit(ctx) {
       ctx.field.clearBrightness();
       ctx.field.clearMotion();
-      ctx.field.fillPresence(1);
     },
   };
 }

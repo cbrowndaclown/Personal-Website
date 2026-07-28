@@ -3,7 +3,6 @@
    holds briefly, then dissolves. The lattice stays fully initialized. */
 
 import { BOOT_TIMING, BOOT_ENERGY, bootEnergyDurationMs } from '../constants.js';
-import { clamp01 } from '../math.js';
 import { applyOrganicEnergyReveal, lockEnergy } from '../energy.js';
 
 const REVEAL_OPTS = Object.freeze({
@@ -38,7 +37,6 @@ export function createCalibrationStage() {
       const elapsed = ctx.now - startMs;
       const sweepMs = BOOT_TIMING.CALIBRATION_SWEEP_MS;
       const holdMs = BOOT_TIMING.WHITE_HOLD_MS;
-      /* One indicator revolution — arm close so it lands with the reveal */
       const closeLeadMs =
         bootEnergyDurationMs() / Math.max(1, BOOT_TIMING.INDICATOR_REVOLUTIONS);
 
@@ -46,7 +44,7 @@ export function createCalibrationStage() {
       field.clearMotion();
 
       if (phase === 'sweep') {
-        const u = clamp01(elapsed / sweepMs);
+        const u = elapsed / sweepMs;
         const settled = applyOrganicEnergyReveal(
           field,
           BOOT_ENERGY.LIGHT,
@@ -62,8 +60,8 @@ export function createCalibrationStage() {
 
         if (ctx.indicator) ctx.indicator.paint(field, ctx.now);
 
-        /* Wait for every white pixel — never force-fill the remainder */
-        if (elapsed >= sweepMs && settled) {
+        /* Every white pixel must flip individually — no completed-frame swap */
+        if (settled && elapsed >= sweepMs) {
           if (ctx.indicator && !closeArmed) {
             ctx.indicator.beginClose(ctx.now);
             closeArmed = true;
@@ -74,9 +72,8 @@ export function createCalibrationStage() {
       }
 
       /*
-        Lattice stays at the procedurally completed white state.
-        Do not lockEnergy / fill — that would snap any residual and read as
-        a bulk finish. Presence is left exactly as the final reveal wrote it.
+        Presence stays exactly as the procedural sweep left it.
+        Ring close / hold / dissolve only touch brightness.
       */
 
       if (phase === 'closing') {
@@ -123,7 +120,6 @@ export function createCalibrationStage() {
         return { done: false };
       }
 
-      /* Brief hold of the completed white display after the ring is gone */
       field.clearBrightness();
       const holdElapsed = ctx.now - startMs;
       if (holdElapsed >= holdMs) {
@@ -133,14 +129,7 @@ export function createCalibrationStage() {
     },
 
     exit(ctx) {
-      /* Preserve the fully generated white lattice for the intro handoff */
-      applyOrganicEnergyReveal(
-        ctx.field,
-        BOOT_ENERGY.LIGHT,
-        BOOT_ENERGY.WHITE,
-        1,
-        REVEAL_OPTS
-      );
+      /* Do not rewrite presence — the generated white lattice is the Pixel FS */
       ctx.field.clearBrightness();
       ctx.field.clearMotion();
       if (ctx.indicator && typeof ctx.indicator.dismiss === 'function') {

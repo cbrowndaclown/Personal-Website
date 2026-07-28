@@ -2,7 +2,6 @@
    Pixels initialize individually with organic L→R order. */
 
 import { BOOT_TIMING, BOOT_ENERGY } from '../constants.js';
-import { clamp01 } from '../math.js';
 import { applyOrganicEnergyReveal, lockEnergy } from '../energy.js';
 
 const REVEAL_OPTS = Object.freeze({
@@ -32,7 +31,8 @@ export function createPoweringOnStage() {
       if (!field.presence) return { done: true };
 
       const elapsed = ctx.now - startMs;
-      const u = clamp01(elapsed / BOOT_TIMING.POWERING_ON_MS);
+      /* Unclamped — algorithm keeps generating past nominal duration if needed */
+      const u = elapsed / BOOT_TIMING.POWERING_ON_MS;
 
       const settled = applyOrganicEnergyReveal(
         field,
@@ -45,22 +45,15 @@ export function createPoweringOnStage() {
       field.clearBrightness();
       if (ctx.indicator) ctx.indicator.paint(field, ctx.now);
 
-      /* Advance only after every pixel has flipped — never force-fill */
-      if (elapsed >= BOOT_TIMING.POWERING_ON_MS && settled) {
+      /* Finish only when every pixel has flipped individually */
+      if (settled && elapsed >= BOOT_TIMING.POWERING_ON_MS) {
         return { done: true };
       }
       return { done: false };
     },
 
     exit(ctx) {
-      /* Final procedural frame at u=1 — no bulk lockEnergy snap */
-      applyOrganicEnergyReveal(
-        ctx.field,
-        BOOT_ENERGY.BLACK,
-        BOOT_ENERGY.DARK,
-        1,
-        REVEAL_OPTS
-      );
+      /* Leave presence exactly as the procedural reveal wrote it */
       ctx.field.clearBrightness();
     },
   };

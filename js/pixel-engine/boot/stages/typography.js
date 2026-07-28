@@ -1,14 +1,8 @@
-/* TYPOGRAPHY_CONSTRUCTION — hero glyph LEDs construct on the completed
-   white Pixel FS. The boot lattice is preserved — never cleared to black. */
+/* TYPOGRAPHY_CONSTRUCTION — hero glyph LEDs construct on the existing
+   Pixel FS presence buffer. Boot already populated that buffer; this stage
+   must not clear, refill, or swap it. */
 
-import { BOOT_TIMING, BOOT_ENERGY } from '../constants.js';
-import { applyOrganicEnergyReveal } from '../energy.js';
-
-const WHITE_SETTLE = Object.freeze({
-  scatter: 0.3,
-  soft: 0.028,
-  seed: 0xc41b,
-});
+import { BOOT_TIMING } from '../constants.js';
 
 /**
  * Delegates glyph bake / migration to the intro content service.
@@ -20,18 +14,6 @@ export function createTypographyStage(options) {
   let startMs = 0;
   let completeAt = 0;
 
-  function preserveWhiteLattice(field) {
-    if (!field || !field.presence) return;
-    /* Idempotent procedural settle — keeps the completed boot display */
-    applyOrganicEnergyReveal(
-      field,
-      BOOT_ENERGY.LIGHT,
-      BOOT_ENERGY.WHITE,
-      1,
-      WHITE_SETTLE
-    );
-  }
-
   return {
     id: 'typography_construction',
     durationMs: null, /* driven by intro bake */
@@ -39,8 +21,10 @@ export function createTypographyStage(options) {
 
     enter(ctx) {
       startMs = ctx.now;
-      /* Keep the fully generated white lattice — do not fade/clear to black */
-      preserveWhiteLattice(ctx.field);
+      /*
+        Presence is left exactly as calibration generated it.
+        Only clear boot-indicator brightness — intro LEDs live in intro buffers.
+      */
       ctx.field.clearMotion();
       ctx.field.clearBrightness();
 
@@ -57,8 +41,7 @@ export function createTypographyStage(options) {
     },
 
     update(ctx) {
-      /* White Pixel FS remains the base; glyphs construct via intro LEDs */
-      preserveWhiteLattice(ctx.field);
+      /* Never touch presence — glyphs composite via intro brightness/offsets */
       ctx.field.clearMotion();
       ctx.field.clearBrightness();
 
@@ -72,10 +55,8 @@ export function createTypographyStage(options) {
       if (ctx.indicator && typeof ctx.indicator.reset === 'function') {
         ctx.indicator.reset();
       }
-      preserveWhiteLattice(ctx.field);
       ctx.field.clearBrightness();
       ctx.field.clearMotion();
-      /* Interactions unlock only after hero construction has settled */
       if (ctx && typeof ctx.setInteractive === 'function') {
         ctx.setInteractive(true);
       }

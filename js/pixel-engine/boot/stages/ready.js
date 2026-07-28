@@ -1,4 +1,5 @@
-/* READY — engine online; interactions unlock; post-boot content may continue. */
+/* READY — engine online; interactions unlock; post-boot content may continue.
+   Presence buffer is the same lattice boot generated — do not recreate it. */
 
 import { BOOT_TIMING } from '../constants.js';
 
@@ -19,10 +20,8 @@ export function createReadyStage(options) {
     enter(ctx) {
       startMs = ctx.now;
       directoryStarted = false;
-      ctx.field.fillPresence(1);
       ctx.field.clearBrightness();
       ctx.field.clearMotion();
-      /* Interactions already unlocked after typography; keep armed here for skip paths */
       ctx.setInteractive(true);
       ctx.setPhase('ready');
       ctx.emitReady();
@@ -34,7 +33,6 @@ export function createReadyStage(options) {
         directoryStarted = true;
         intro.beginDirectorySequence();
       }
-      /* Ready is terminal for the boot pipeline — never "done" for advancement */
       return { done: false, terminal: true };
     },
 

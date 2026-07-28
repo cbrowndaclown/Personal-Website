@@ -102,14 +102,16 @@ export function isExclusiveBootPhase(phase) {
 
 /**
  * Phases that paint with presence-as-luminance on the PE lattice.
- * Includes typography so the completed white Pixel FS carries into intro
- * without a clear/fade to black.
+ * Extends through typography + stabilizing so the completed white Pixel FS
+ * is never abandoned for a black clear between boot and intro.
  */
 export function isLatticeBootPhase(phase) {
   return (
     isExclusiveBootPhase(phase) ||
     phase === BootPhase.TYPOGRAPHY_CONSTRUCTION ||
-    phase === 'typography'
+    phase === BootPhase.STABILIZING ||
+    phase === 'typography' ||
+    phase === 'stabilizing'
   );
 }
 

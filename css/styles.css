@@ -844,14 +844,16 @@ body[data-boot] .stage__field {
   user-select: none;
 }
 
-/* Energy / self-test boot — dormant black field inside the Pixel Engine only */
+/* Energy / self-test boot — dormant black field inside the Pixel Engine only.
+   Includes stabilizing so the completed lattice is not abandoned mid-handoff. */
 body[data-boot="powering_on"] .stage__field,
 body[data-boot="grid_generation"] .stage__field,
 body[data-boot="calibration"] .stage__field,
 body[data-boot="display_clear"] .stage__field,
 body[data-boot="self_test"] .stage__field,
 body[data-boot="typography_construction"] .stage__field,
-body[data-boot="typography"] .stage__field {
+body[data-boot="typography"] .stage__field,
+body[data-boot="stabilizing"] .stage__field {
   background-color: #000000;
 }
 

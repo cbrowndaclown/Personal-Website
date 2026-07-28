@@ -359,6 +359,8 @@ export function createHeatStyle(deps) {
     let alive = hasTrail || active || introAlive;
     const latticeBoot = latticeBootActive();
     const indicatorAccent = indicatorAccentActive();
+    /* Keep painting while boot owns the lattice — never stall on a black clear */
+    if (latticeBoot) alive = true;
 
     if (latticeBoot) {
       ctx.fillStyle = '#000000';
@@ -476,9 +478,9 @@ export function createHeatStyle(deps) {
       }
 
       /*
-        Lattice boot paint:
+        Lattice boot paint (shared BootField presence):
         - Indicator phases: presence = energy ladder, boot brightness = red arc/ring
-        - Typography handoff: presence stays at completed white, intro LEDs construct on top
+        - Typography+: same presence buffer stays fully generated; intro LEDs composite on top
       */
       const bootSignal = indicatorAccent ? introHv : 0;
       const typeSignal = indicatorAccent ? 0 : introHv;
@@ -535,9 +537,8 @@ export function createHeatStyle(deps) {
         ctx.fillRect(cx - sInner * 0.5, cy - sInner * 0.5, sInner, sInner);
       }
 
-      /* Energy boot: luminance ladder + red indicator.
-         Typography: white glyph LEDs over the preserved white lattice.
-         Operational: FIELD → COOL → accent. */
+      /* Energy boot + intro handoff: luminance from shared presence + LEDs.
+         Operational: FIELD → COOL → accent from the same presence buffer. */
       let r;
       let g;
       let b;

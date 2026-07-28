@@ -147,8 +147,14 @@ export function createBootController(options) {
       return;
     }
 
-    const elapsed = now - lead.startedAt;
     const overlap = lead.instance.overlapMs || 0;
+    /*
+      Zero-overlap stages (energy ladder) must finish every pixel before the
+      next stage starts — never spawn early and lockEnergy over unfinished cells.
+    */
+    if (overlap <= 0) return;
+
+    const elapsed = now - lead.startedAt;
     const threshold = Math.max(0, lead.instance.durationMs - overlap);
     if (elapsed >= threshold && nextIndex < stageDefs.length) {
       const nextDef = stageDefs[nextIndex];
@@ -372,6 +378,7 @@ export function createBootController(options) {
   }
 
   function onResize(cols, rows) {
+    /* allocate() copies overlapping presence — never wipe the lattice to black */
     field.allocate(cols, rows);
     if (phase === BootPhase.READY || phase === BootPhase.SKIPPED) {
       field.fillPresence(1);
@@ -380,9 +387,12 @@ export function createBootController(options) {
   }
 
   function presence(i) {
-    if (interactive || phase === BootPhase.READY || phase === BootPhase.SKIPPED) {
-      return 1;
-    }
+    /*
+      Always read the shared BootField presence buffer — the same lattice boot
+      generates and Heat paints afterward. Never short-circuit to 1 (that
+      abandoned the buffer and faked a completed frame).
+    */
+    if (!field.presence) return 1;
     return field.getPresence(i);
   }
 
