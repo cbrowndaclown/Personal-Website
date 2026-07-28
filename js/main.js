@@ -216,8 +216,8 @@
       });
     }
 
-    /* Document scroll is locked; wheel is the sole reveal gesture.
-       Allowed during directory assemble so nav can open mid-animation. */
+    /* Document scroll is locked; wheel (desktop) + touch swipe (mobile/tablet)
+       drive reveal. Allowed during directory assemble so nav can open mid-animation. */
     window.addEventListener(
       'wheel',
       (e) => {
@@ -226,6 +226,75 @@
       },
       { passive: true }
     );
+
+    /* Touch: swipe down (finger moves down) opens nav; swipe up hides —
+       maps to the same intent as scroll-up / scroll-down on desktop. */
+    let touchActive = false;
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchLastY = 0;
+    let touchAxisLocked = false; /* once set, gesture is vertical or ignored */
+    let touchIsVertical = false;
+
+    function touchIgnored(target) {
+      return !!(target && target.closest && target.closest('.settings'));
+    }
+
+    window.addEventListener(
+      'touchstart',
+      (e) => {
+        if (e.touches.length !== 1 || touchIgnored(e.target)) {
+          touchActive = false;
+          return;
+        }
+        const t = e.touches[0];
+        touchActive = true;
+        touchStartX = t.clientX;
+        touchStartY = t.clientY;
+        touchLastY = t.clientY;
+        touchAxisLocked = false;
+        touchIsVertical = false;
+        accum = 0;
+      },
+      { passive: true }
+    );
+
+    window.addEventListener(
+      'touchmove',
+      (e) => {
+        if (!touchActive || e.touches.length !== 1) return;
+        const t = e.touches[0];
+        const dx = t.clientX - touchStartX;
+        const dy = t.clientY - touchStartY;
+
+        if (!touchAxisLocked) {
+          if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+          touchAxisLocked = true;
+          touchIsVertical = Math.abs(dy) >= Math.abs(dx);
+          if (!touchIsVertical) {
+            touchActive = false;
+            return;
+          }
+        } else if (!touchIsVertical) {
+          return;
+        }
+
+        const deltaFinger = t.clientY - touchLastY;
+        touchLastY = t.clientY;
+        /* Finger down → negative intent (open); finger up → positive (hide) */
+        applyIntent(-deltaFinger);
+      },
+      { passive: true }
+    );
+
+    function endTouchGesture() {
+      touchActive = false;
+      touchAxisLocked = false;
+      touchIsVertical = false;
+    }
+
+    window.addEventListener('touchend', endTouchGesture, { passive: true });
+    window.addEventListener('touchcancel', endTouchGesture, { passive: true });
   })();
 
   /* ─────────────────────────────────────────────────────────────────────────
