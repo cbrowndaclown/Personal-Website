@@ -1,6 +1,6 @@
 /* Boot field — shared SoA presence buffer for Pixel FS energy + operational rest.
    Heat / Wave / Lightning sample this same presence via the Animation Manager.
-   Boot populates it in place; later phases must not swap to a different lattice. */
+   Boot populates it in place; density rebuilds release() then allocate fresh. */
 
 /**
  * @returns {object}
@@ -20,14 +20,33 @@ export function createBootField() {
   let oy = null;
 
   /**
-   * (Re)allocate buffers. When the grid size changes, copy overlapping
-   * presence so a resize never wipes a partially or fully generated lattice
-   * back to black.
+   * Drop every buffer and geometry reference from the previous lattice.
+   * Call before allocating a new grid on Pixel Density rebuild.
    */
-  function allocate(nextCols, nextRows) {
+  function release() {
+    cols = 0;
+    rows = 0;
+    n = 0;
+    presence = null;
+    brightness = null;
+    ox = null;
+    oy = null;
+  }
+
+  /**
+   * (Re)allocate buffers. When the grid size changes, copy overlapping
+   * presence so a window resize never wipes a partially generated lattice
+   * back to black. Pass `{ fresh: true }` for Pixel Density rebuilds so no
+   * stale presence/indices survive from the previous cell size.
+   * @param {number} nextCols
+   * @param {number} nextRows
+   * @param {{ fresh?: boolean }} [opts]
+   */
+  function allocate(nextCols, nextRows, opts) {
     const c = nextCols | 0;
     const r = nextRows | 0;
-    if (c === cols && r === rows && presence) return;
+    const fresh = !!(opts && opts.fresh);
+    if (c === cols && r === rows && presence && !fresh) return;
 
     const prevPresence = presence;
     const prevBright = brightness;
@@ -42,7 +61,7 @@ export function createBootField() {
     ox = new Float32Array(n);
     oy = new Float32Array(n);
 
-    if (prevPresence && prevCols > 0 && prevRows > 0 && n > 0) {
+    if (!fresh && prevPresence && prevCols > 0 && prevRows > 0 && n > 0) {
       const copyCols = Math.min(prevCols, cols);
       const copyRows = Math.min(prevRows, rows);
       for (let y = 0; y < copyRows; y++) {
@@ -98,6 +117,7 @@ export function createBootField() {
 
   return {
     allocate,
+    release,
     clear,
     fillPresence,
     clearMotion,

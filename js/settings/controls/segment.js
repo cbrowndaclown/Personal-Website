@@ -59,6 +59,9 @@ export function createSegment(opts) {
     root.appendChild(btn);
   });
 
+  let locked = false;
+  let activeValue = '';
+
   function resolveSelectable(value) {
     if (selectable.indexOf(value) !== -1) return value;
     return selectable[0] || value;
@@ -66,6 +69,8 @@ export function createSegment(opts) {
 
   function syncThumb(active) {
     const resolved = resolveSelectable(active);
+    if (resolved === activeValue) return;
+    activeValue = resolved;
     const btn = buttons.get(resolved);
     const index = btn ? Number(btn.dataset.index) || 0 : 0;
     thumb.style.transform = `translateX(${index * 100}%)`;
@@ -83,12 +88,15 @@ export function createSegment(opts) {
   }
 
   function setLocked(on) {
+    const next = !!on;
+    if (locked === next) return;
+    locked = next;
     buttons.forEach((btn) => {
       if (btn.classList.contains('is-placeholder')) {
         btn.disabled = true;
         return;
       }
-      btn.disabled = !!on;
+      btn.disabled = locked;
     });
   }
 
@@ -96,7 +104,7 @@ export function createSegment(opts) {
     const opt = e.target.closest('.settings__seg-opt');
     if (!opt || opt.disabled) return;
     const value = opt.dataset.value;
-    if (!value || value === root.dataset.active) return;
+    if (!value || value === activeValue) return;
     syncThumb(value);
     opts.onChange(value);
   });

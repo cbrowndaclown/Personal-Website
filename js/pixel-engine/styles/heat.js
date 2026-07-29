@@ -1,5 +1,8 @@
 /* Pixel FS — Magnetic (heat). V1 simulation preserved. */
 
+import { PixelEvents } from '../constants.js';
+import { computeGridLayout } from '../grid-manager.js';
+
 /**
  * @param {object} deps
  */
@@ -8,27 +11,37 @@ export function createHeatStyle(deps) {
   const stage = deps.stage;
   const animConfig = deps.animConfig;
   const resolveActiveBgMode = deps.resolveActiveBgMode;
+  const pixelBehavior = deps.pixelBehavior;
+  const cursorMode = deps.cursorMode;
+  const perfMgr = deps.performance;
   const pixelField = deps.pixelField;
   const pixelIntro = deps.pixelIntro;
+  const events = deps.events;
+  const grid = deps.grid;
   if (!canvas || !stage) {
     return { id: 'heat', implemented: true, mount() {}, destroy() {} };
   }
 
-  const CELL     = 5;      /* CSS pixels per cell — finer grid */
-  const MAX_DISP = 0.40;   /* subtler max yield — expensive restraint */
+  /* Live via Performance → Pixel Density (default 5 preserves V1). */
+  let CELL = (perfMgr && typeof perfMgr.getCellSize === 'function')
+    ? perfMgr.getCellSize()
+    : 5;
+  /* MAX_DISP default 0.40 — live via shared Pixel Behavior (reactionStrength) */
   const HEAT_IN  = 0.09;   /* color lags motion — keep snappy under cursor */
-  const HEAT_OUT = 0.018;  /* slow atmospheric cool — path lingers, same peak */
+  /* HEAT_OUT default 0.018 — live via animConfig.heatDecaySpeed */
   const MOUSE_NEAR = 0.11; /* soft when cursor is close to sample */
   const MOUSE_FAR  = 0.26; /* catches up when pointer leaps */
-  const DOT      = CELL - 2;
+  let DOT = Math.max(1, CELL - 2);
   const EPS      = 0.0006;
+  let _perfRev = -1;
+  let effectQuality = 1;
 
   /* ── Visual / influence (tweak freely) ──────────────────────────────────
-     Soft coral heat radiating through the dot field.  These knobs only
-     affect presentation + brush extent — not spring / damping math. */
-  const RADIUS          = 11.8;             /* ~35% smaller soft brush (was 18.2) */
-  const SIGMA           = 4.9;              /* scaled with radius — soft rim, no hard edge */
-  const COLOR_INTENSITY = 0.92;             /* max heat presence under the cursor */
+     Soft coral heat radiating through the dot field.  Brush extent,
+     intensity, and cool-down are driven by animConfig (Settings). */
+  const DEFAULT_RADIUS = 11.8;
+  const DEFAULT_SIGMA  = 4.9;              /* scaled with radius — soft rim */
+  const SIGMA_RATIO    = DEFAULT_SIGMA / DEFAULT_RADIUS;
   /* HOT comes from animConfig.effectColor — shared with Wave */
   const COLOR_FALLOFF   = 0.72;             /* <1 lifts soft fringe at the outer edge */
   const GLOW_OPACITY    = 0.95;             /* peak pink blend strength */
@@ -61,9 +74,53 @@ export function createHeatStyle(deps) {
     );
   }
 
-  function indicatorAccentActive() {
-    if (typeof pixelField.indicatorAccentActive === 'function') {
-      return pixelField.indicatorAccentActive();
+  /**
+   * Startup lattice build only — black clear + FIELD claim as cells generate.
+   * Density rebuild must never use this path (powered gray panel stays lit).
+   */
+  function bootMaterializeActive() {
+    return latticeBootActive();
+  }
+
+  /** Density sync — pixels materialize over an already-powered gray panel. */
+  function densitySyncActive() {
+    return (
+      typeof pixelField.recalibrationActive === 'function' &&
+      pixelField.recalibrationActive()
+    );
+  }
+
+  /** Progressive lattice claim (boot black→FIELD, or density gray→pixels). */
+  function latticeMaterializeActive() {
+    return bootMaterializeActive() || densitySyncActive();
+  }
+
+  /** Density teardown — gray panel shows through as pixels retire (not black). */
+  function teardownActive() {
+    return (
+      typeof pixelField.teardownActive === 'function' &&
+      pixelField.teardownActive()
+    );
+  }
+
+  /**
+   * Density teardown / sync — internal system op; never borrow Settings RGB.
+   * Resting lattice stays FIELD → COOL; energize / residual heat lift toward white.
+   */
+  function densityOpsActive() {
+    if (typeof pixelField.densityOpsActive === 'function') {
+      return pixelField.densityOpsActive();
+    }
+    return (
+      teardownActive() ||
+      (typeof pixelField.recalibrationActive === 'function' &&
+        pixelField.recalibrationActive())
+    );
+  }
+
+  function exclusiveBootActive() {
+    if (typeof pixelField.exclusiveBootActive === 'function') {
+      return pixelField.exclusiveBootActive();
     }
     const p = document.body.dataset.boot;
     return (
@@ -75,11 +132,17 @@ export function createHeatStyle(deps) {
     );
   }
 
+  function indicatorAccentActive() {
+    if (typeof pixelField.indicatorAccentActive === 'function') {
+      return pixelField.indicatorAccentActive();
+    }
+    return exclusiveBootActive();
+  }
+
   /* ── Spring (silicone / fabric) ─────────────────────────────────────────
      Overdamped mass-spring: force pulls dots, then they ease home.
-     Return is softer than engagement; nonlinear drag kills bounce. */
-  const STIFF_PULL   = 0.078; /* responsive under pressure */
-  const STIFF_RETURN = 0.026; /* slow fabric recovery */
+     Return is softer than engagement; nonlinear drag kills bounce.
+     STIFF_PULL / STIFF_RETURN live via shared Pixel Behavior. */
   const DRAG         = 0.29;  /* base velocity drag */
   const DRAG_QUAD    = 0.42;  /* extra drag at speed — settles clean */
   const V_MAX        = 0.20;  /* soft ceiling, no hard pops */
@@ -89,8 +152,115 @@ export function createHeatStyle(deps) {
   const TRAIL_DECAY    = 0.50; /* tip-led; history only softens the wave */
   const TRAIL_MIN_STEP = 0.36; /* dense samples — liquid continuity */
   const TRAIL_FORCE    = 0.90; /* displacement gain */
-  const TRAIL_FADE     = 0.965; /* slow wake dissolve after pointer leaves */
+  /* TRAIL_FADE default 0.965 — live via shared Pixel Behavior (trailLifetime) */
   const TRAIL_FADE_CUT = 0.015; /* drop samples only once nearly invisible */
+
+  /* Shared Pixel Behavior — modes read through pixelBehavior, not animConfig directly */
+  const BEHAVIOR_DEFAULTS =
+    (pixelBehavior && pixelBehavior.defaults) ||
+    Object.freeze({
+      reactionStrength: 0.4,
+      movementSpeed: 0.078,
+      returnSpeed: 0.026,
+      trailLifetime: 0.965,
+    });
+  let MAX_DISP = BEHAVIOR_DEFAULTS.reactionStrength;
+  let STIFF_PULL = BEHAVIOR_DEFAULTS.movementSpeed;
+  let STIFF_RETURN = BEHAVIOR_DEFAULTS.returnSpeed;
+  let TRAIL_FADE = BEHAVIOR_DEFAULTS.trailLifetime;
+  let _behaviorRev = -1;
+  let _cursorModeRev = -1;
+  let activeCursorMode = 'standard';
+  const _cursorOut = { targetX: 0, targetY: 0, motion: true, heatHold: 1 };
+
+  /** Pull cached behavior only when the shared layer revision advances. */
+  function syncBehaviorFromConfig() {
+    if (!pixelBehavior) return false;
+    const rev = pixelBehavior.getRevision();
+    if (rev === _behaviorRev) return false;
+    _behaviorRev = rev;
+    const bh = pixelBehavior.values;
+    MAX_DISP = bh.reactionStrength;
+    STIFF_PULL = bh.movementSpeed;
+    STIFF_RETURN = bh.returnSpeed;
+    TRAIL_FADE = bh.trailLifetime;
+    return true;
+  }
+
+  function syncCursorModeFromConfig() {
+    if (!cursorMode) {
+      activeCursorMode = 'standard';
+      return false;
+    }
+    const rev = cursorMode.getRevision();
+    if (rev === _cursorModeRev) return false;
+    _cursorModeRev = rev;
+    activeCursorMode = cursorMode.get();
+    return true;
+  }
+
+  /**
+   * Pull Performance cache — density remount is owned by PixelDensityChanged.
+   * Soft paths must not change CELL without recalculating cols/rows (that left
+   * a gray uncovered strip: rows*oldCount * newCell < viewH).
+   * @param {{ applyDensity?: boolean }} [opts]
+   * @returns {{ changed: boolean, densityChanged: boolean }}
+   */
+  function syncPerformanceFromConfig(opts) {
+    const applyDensity = !opts || opts.applyDensity !== false;
+    if (!perfMgr || typeof perfMgr.getRevision !== 'function') {
+      effectQuality = 1;
+      return { changed: false, densityChanged: false };
+    }
+    const rev = perfMgr.getRevision();
+    if (rev === _perfRev) {
+      effectQuality =
+        typeof perfMgr.getEffectiveQuality === 'function'
+          ? perfMgr.getEffectiveQuality()
+          : 1;
+      return { changed: false, densityChanged: false };
+    }
+    _perfRev = rev;
+    const nextCell =
+      typeof perfMgr.getCellSize === 'function' ? perfMgr.getCellSize() : CELL;
+    const densityChanged = nextCell !== CELL;
+    if (applyDensity && densityChanged) {
+      CELL = nextCell;
+      DOT = Math.max(1, CELL - 2);
+    }
+    effectQuality =
+      typeof perfMgr.getEffectiveQuality === 'function'
+        ? perfMgr.getEffectiveQuality()
+        : 1;
+    return { changed: true, densityChanged };
+  }
+
+  /**
+   * Adopt shared grid geometry (single source of truth with BootField).
+   * @param {object} [info]
+   */
+  function adoptGridInfo(info) {
+    if (info && info.cols > 0 && info.rows > 0 && info.cell > 0) {
+      CELL = info.cell;
+      DOT = Math.max(1, CELL - 2);
+      cols = info.cols | 0;
+      rows = info.rows | 0;
+      viewW = info.viewW > 0 ? info.viewW : viewW;
+      viewH = info.viewH > 0 ? info.viewH : viewH;
+      if (info.dpr > 0) dpr = info.dpr;
+      return;
+    }
+    const rect = syncStageRect();
+    const layout = computeGridLayout(rect.width, rect.height, CELL);
+    cols = layout.cols;
+    rows = layout.rows;
+    viewW = layout.viewW;
+    viewH = layout.viewH;
+  }
+
+  syncBehaviorFromConfig();
+  syncCursorModeFromConfig();
+  syncPerformanceFromConfig();
 
   const ctx = canvas.getContext('2d', { alpha: false });
   let cols = 0;
@@ -108,7 +278,10 @@ export function createHeatStyle(deps) {
   let smY  = -1;
   let pointerIn = false;
   let running = false;
-  let enabled = animConfig.motion && resolveActiveBgMode() === 'heat';
+  let enabled =
+    animConfig.motion &&
+    resolveActiveBgMode() === 'heat' &&
+    !!animConfig.heatEnabled;
   let viewW = 0;
   let viewH = 0;
   let dpr = 1;
@@ -148,17 +321,44 @@ export function createHeatStyle(deps) {
   }
 
   function resize() {
+    /* Density rebuild pipeline owns lattice size — do not invent a parallel grid. */
+    if (
+      pixelField &&
+      typeof pixelField.densityChangeLocked === 'function' &&
+      pixelField.densityChangeLocked()
+    ) {
+      const authority =
+        typeof pixelField.getDensityAuthority === 'function'
+          ? pixelField.getDensityAuthority()
+          : null;
+      if (authority && authority.cols > 0) {
+        adoptGridInfo(authority);
+        if (enabled) {
+          applySurface();
+          paintRest();
+          if (pixelField.isActive()) start();
+        }
+      }
+      return;
+    }
     const rect = syncStageRect();
-    viewW = Math.max(1, Math.round(rect.width));
-    viewH = Math.max(1, Math.round(rect.height));
     dpr = Math.min(window.devicePixelRatio || 1, 2);
-
-    const nextCols = Math.ceil(viewW / CELL);
-    const nextRows = Math.ceil(viewH / CELL);
+    if (grid && grid.cell > 0) {
+      CELL = grid.cell;
+      DOT = Math.max(1, CELL - 2);
+    } else if (typeof perfMgr.getCellSize === 'function') {
+      CELL = perfMgr.getCellSize();
+      DOT = Math.max(1, CELL - 2);
+    }
+    const layout = computeGridLayout(rect.width, rect.height, CELL);
+    const nextCols = layout.cols;
+    const nextRows = layout.rows;
     const gridChanged = nextCols !== cols || nextRows !== rows;
 
     cols = nextCols;
     rows = nextRows;
+    viewW = layout.viewW;
+    viewH = layout.viewH;
     const n = cols * rows;
 
     if (gridChanged || !heat) {
@@ -168,7 +368,9 @@ export function createHeatStyle(deps) {
       vx    = new Float32Array(n);
       vy    = new Float32Array(n);
       trail.length = 0;
+      smX = smY = -1;
     }
+    /* Window resize only — density rebuilds boot via PixelDensityChanged. */
     if (gridChanged) pixelField.onResize(cols, rows);
 
     /* Shared canvas — only claim the surface while Heat is active */
@@ -178,10 +380,51 @@ export function createHeatStyle(deps) {
     if (pixelField.isActive()) start();
   }
 
+  /**
+   * Full local rebuild after Pixel Density changes. Always reallocates sim
+   * buffers from the authoritative GridInfo — never recomputes cols/rows/cell.
+   * @param {object} [info] — shared grid layout from PixelDensityChanged
+   */
+  function rebuildForDensity(info) {
+    syncPerformanceFromConfig({ applyDensity: true });
+    if (info && info.cols > 0 && info.rows > 0) {
+      adoptGridInfo(info);
+    } else if (
+      pixelField &&
+      typeof pixelField.getDensityAuthority === 'function' &&
+      pixelField.getDensityAuthority()
+    ) {
+      adoptGridInfo(pixelField.getDensityAuthority());
+    } else if (grid && typeof grid.getInfo === 'function') {
+      adoptGridInfo(grid.getInfo());
+    } else {
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      adoptGridInfo();
+    }
+    if (info && info.dpr > 0) dpr = info.dpr;
+    else dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const n = Math.max(0, cols * rows);
+
+    heat = new Float32Array(n);
+    ox = new Float32Array(n);
+    oy = new Float32Array(n);
+    vx = new Float32Array(n);
+    vy = new Float32Array(n);
+    trail.length = 0;
+    pointerIn = false;
+    ptrX = ptrY = -1;
+    smX = smY = -1;
+
+    if (!enabled) return;
+    applySurface();
+    paintRest();
+    start();
+  }
+
   function paintRest() {
-    const latticeBoot = latticeBootActive();
-    /* Ungenerated cells stay black; generated cells own the real FIELD bg. */
-    if (latticeBoot) {
+    const bootMaterialize = bootMaterializeActive();
+    /* Boot: ungenerated cells stay black. Density sync: gray panel stays lit. */
+    if (bootMaterialize) {
       ctx.fillStyle = '#000000';
     } else {
       ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
@@ -195,7 +438,7 @@ export function createHeatStyle(deps) {
       if (presence <= 0.001) continue;
       const x = i % cols;
       const y = (i / cols) | 0;
-      if (latticeBoot) {
+      if (bootMaterialize) {
         /* Permanently initialize this cell's resting Pixel FS background */
         ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
         ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
@@ -217,9 +460,9 @@ export function createHeatStyle(deps) {
   }
 
   /* Soft Gaussian × smootherstep rim — pressure blooms, never stamps. */
-  function falloff(d2, d) {
-    const g = Math.exp(-d2 / (2 * SIGMA * SIGMA));
-    const edge = smootherstep(1 - d / RADIUS);
+  function falloff(d2, d, radius, sigma) {
+    const g = Math.exp(-d2 / (2 * sigma * sigma));
+    const edge = smootherstep(1 - d / radius);
     return Math.pow(g * edge, 0.88);
   }
 
@@ -280,9 +523,14 @@ export function createHeatStyle(deps) {
       }
       rebuildTrailWeights();
     } else if (trail.length) {
-      /* Softly age the wake out — pressure wave dissipates, no hard cut */
+      /* Softly age the wake out — pressure wave dissipates, no hard cut.
+         Paint mode leans on Trail Lifetime for longer persistence. */
+      let fade = TRAIL_FADE;
+      if (activeCursorMode === 'paint') {
+        fade = Math.min(0.995, TRAIL_FADE + (1 - TRAIL_FADE) * 0.55);
+      }
       for (let t = 0; t < trail.length; t++) {
-        trail[t].w *= TRAIL_FADE;
+        trail[t].w *= fade;
       }
       while (trail.length && trail[trail.length - 1].w < TRAIL_FADE_CUT) trail.pop();
     }
@@ -294,14 +542,66 @@ export function createHeatStyle(deps) {
       return;
     }
 
-    /* Live Settings accent — intro LEDs + cursor heat share this HOT */
-    const HOT = [
-      animConfig.effectColor.r,
-      animConfig.effectColor.g,
-      animConfig.effectColor.b,
-    ];
+    const nowMs = performance.now();
+    if (
+      perfMgr &&
+      typeof perfMgr.beginFrameIfDue === 'function' &&
+      !perfMgr.beginFrameIfDue(nowMs)
+    ) {
+      requestAnimationFrame(tick);
+      return;
+    }
 
-    const introAlive = pixelField.update(performance.now());
+    syncCursorModeFromConfig();
+    /* Adaptive may ease quality between revision bumps — refresh cheaply. */
+    if (perfMgr && typeof perfMgr.getEffectiveQuality === 'function') {
+      effectQuality = perfMgr.getEffectiveQuality();
+    }
+
+    /* Live Settings accent — intro LEDs + cursor heat share this HOT.
+       Density teardown / sync stay neutral (COOL) so the rebuild reads as ops. */
+    const densityOps = densityOpsActive();
+    const HOT = densityOps
+      ? COOL
+      : [
+          animConfig.effectColor.r,
+          animConfig.effectColor.g,
+          animConfig.effectColor.b,
+        ];
+
+    /* Live Settings — brush knobs (defaults match pre-settings V1) */
+    const RADIUS =
+      Number(animConfig.heatRadius) > 0
+        ? Number(animConfig.heatRadius)
+        : DEFAULT_RADIUS;
+    const SIGMA = RADIUS * SIGMA_RATIO;
+    const COLOR_INTENSITY = Number.isFinite(Number(animConfig.heatIntensity))
+      ? Number(animConfig.heatIntensity)
+      : 0.92;
+    let HEAT_OUT =
+      Number(animConfig.heatDecaySpeed) > 0
+        ? Number(animConfig.heatDecaySpeed)
+        : 0.018;
+    /* Paint: linger via Trail Lifetime — slow color decay without permanent marks */
+    if (activeCursorMode === 'paint') {
+      HEAT_OUT *= 0.22 + (1 - TRAIL_FADE) * 2.5;
+    }
+    /* Effect Quality — soften intensity + slightly faster cool-down when reduced */
+    const q = effectQuality;
+    const qualityIntensity = COLOR_INTENSITY * (0.55 + 0.45 * q);
+    const qualityHeatOut = HEAT_OUT * (1 + (1 - q) * 0.35);
+    const bloomStrength = BLOOM_STRENGTH * q;
+    const bloomThreshold = BLOOM_THRESHOLD + (1 - q) * 0.12;
+    const introAlive = pixelField.update(nowMs);
+    const latticeBoot = latticeBootActive();
+    const materialize = latticeMaterializeActive();
+    const tearingDown = teardownActive();
+    const exclusiveBoot = exclusiveBootActive();
+    const indicatorAccent = indicatorAccentActive();
+    const applyCursorMod =
+      cursorMode && typeof cursorMode.applyHeatCursorMode === 'function'
+        ? cursorMode.applyHeatCursorMode
+        : null;
 
     /* Adaptive chase — responsive across gaps, velvet up close */
     if (pointerIn) {
@@ -319,11 +619,8 @@ export function createHeatStyle(deps) {
       }
     }
 
-    const active =
-      pointerIn &&
-      smX >= 0 &&
-      (typeof pixelField.interactionsEnabled !== 'function' ||
-        pixelField.interactionsEnabled());
+    /* Pointer is always tracked; only exclusive boot suppresses heat forces */
+    const active = pointerIn && smX >= 0 && !exclusiveBoot;
     if (active) {
       updateTrail(smX / CELL, smY / CELL, true);
     } else {
@@ -356,13 +653,11 @@ export function createHeatStyle(deps) {
     }
 
     let alive = hasTrail || active || introAlive;
-    const latticeBoot = latticeBootActive();
-    const indicatorAccent = indicatorAccentActive();
-    /* Keep painting while boot owns the lattice — never stall on a black clear */
-    if (latticeBoot) alive = true;
+    /* Keep painting while boot / density sync / teardown owns the lattice */
+    if (materialize || tearingDown) alive = true;
 
-    /* Boot progressively claims FIELD; ops clear the full resting backdrop. */
-    if (latticeBoot) {
+    /* Boot materialize clears black; density sync / ops keep the gray panel lit. */
+    if (bootMaterializeActive()) {
       ctx.fillStyle = '#000000';
     } else {
       ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
@@ -370,8 +665,10 @@ export function createHeatStyle(deps) {
     ctx.fillRect(0, 0, viewW, viewH);
 
     const nCells = cols * rows;
-    /* During exclusive / lattice boot the PE owns the frame — no cursor heat */
-    const allowHeat = !latticeBoot;
+    /* Exclusive boot owns the frame; typography+ composites cursor heat with intro LEDs.
+       Teardown gates per-cell via cellInteractive + presence clear. */
+    const allowHeat = !exclusiveBoot;
+    const freezeMode = activeCursorMode === 'freeze';
 
     for (let i = 0; i < nCells; i++) {
       const x = i % cols;
@@ -380,6 +677,7 @@ export function createHeatStyle(deps) {
       let targetX = 0;
       let targetY = 0;
       let pressure = 0;
+      let heatHold = 1;
 
       if (allowHeat && hasTrail && x >= x0 && x <= x1 && y >= y0 && y <= y1) {
         let fx = 0;
@@ -395,7 +693,7 @@ export function createHeatStyle(deps) {
           if (d2 > RADIUS * RADIUS) continue;
 
           const d = Math.sqrt(d2);
-          const f = falloff(d2, d) * p.w;
+          const f = falloff(d2, d, RADIUS, SIGMA) * p.w;
           if (f < EPS) continue;
 
           blend = blend + f * (1 - blend);
@@ -407,24 +705,57 @@ export function createHeatStyle(deps) {
           }
         }
 
-        pressure = blend * COLOR_INTENSITY;
+        pressure = blend * qualityIntensity;
+
+        /* Density sync / teardown — interaction only on live cells */
+        if (
+          typeof pixelField.cellInteractive === 'function' &&
+          !pixelField.cellInteractive(i)
+        ) {
+          pressure = 0;
+          fx = 0;
+          fy = 0;
+        }
 
         const mag = Math.hypot(fx, fy);
         if (mag > EPS) {
           /* Soft magnitude curve — yield eases in, never clips hard */
           const push = smootherstep(Math.min(1, mag * 1.15)) * MAX_DISP * TRAIL_FORCE;
-          targetX = (fx / mag) * push;
-          targetY = (fy / mag) * push;
+          if (applyCursorMod) {
+            applyCursorMod(
+              activeCursorMode,
+              {
+                fx,
+                fy,
+                push,
+                blend,
+                cellIndex: i,
+                timeMs: nowMs,
+                maxDisp: MAX_DISP,
+              },
+              _cursorOut
+            );
+            targetX = _cursorOut.targetX;
+            targetY = _cursorOut.targetY;
+            heatHold = _cursorOut.heatHold;
+          } else {
+            targetX = (fx / mag) * push;
+            targetY = (fy / mag) * push;
+          }
+        } else if (freezeMode && blend > 0.02) {
+          targetX = 0;
+          targetY = 0;
         }
       }
 
       /* Color follows pressure — ease both ways, no stepped tint */
       const h = heat[i];
       if (allowHeat) {
+        const outRate = qualityHeatOut * heatHold;
         if (pressure > h) {
           heat[i] = h + (pressure - h) * HEAT_IN;
         } else {
-          heat[i] = h + (0 - h) * HEAT_OUT;
+          heat[i] = h + (0 - h) * outRate;
           if (heat[i] < EPS) heat[i] = 0;
         }
       } else if (heat[i] !== 0) {
@@ -433,10 +764,18 @@ export function createHeatStyle(deps) {
 
       /* Spring-damper: pressure displaces, then soft fabric return to rest */
       if (allowHeat) {
-        springAxis(ox[i], vx[i], targetX);
-        ox[i] = _s.pos; vx[i] = _s.vel;
-        springAxis(oy[i], vy[i], targetY);
-        oy[i] = _s.pos; vy[i] = _s.vel;
+        if (freezeMode && pressure > 0.02) {
+          /* Stabilize under cursor — kill velocity, ease toward rest */
+          springAxis(ox[i], vx[i] * 0.35, 0);
+          ox[i] = _s.pos; vx[i] = _s.vel * 0.4;
+          springAxis(oy[i], vy[i] * 0.35, 0);
+          oy[i] = _s.pos; vy[i] = _s.vel * 0.4;
+        } else {
+          springAxis(ox[i], vx[i], targetX);
+          ox[i] = _s.pos; vx[i] = _s.vel;
+          springAxis(oy[i], vy[i], targetY);
+          oy[i] = _s.pos; vy[i] = _s.vel;
+        }
       } else {
         ox[i] = oy[i] = vx[i] = vy[i] = 0;
       }
@@ -448,9 +787,21 @@ export function createHeatStyle(deps) {
       const presence =
         typeof pixelField.presence === 'function' ? pixelField.presence(i) : 1;
 
-      /* Undrawn lattice cells stay invisible until energy reaches them */
-      if (presence <= 0.001 && introHv <= 0 && !introDrift && heat[i] < EPS) {
-        continue;
+      /* Teardown wave — retire sim the moment the cell drops out of interaction */
+      if (
+        tearingDown &&
+        typeof pixelField.cellInteractive === 'function' &&
+        !pixelField.cellInteractive(i)
+      ) {
+        heat[i] = 0;
+        ox[i] = oy[i] = vx[i] = vy[i] = 0;
+      }
+
+      /* Retired / ungenerated cells — clear sim and reveal the panel beneath */
+      if (presence <= 0.001) {
+        heat[i] = 0;
+        ox[i] = oy[i] = vx[i] = vy[i] = 0;
+        if (introHv <= 0 && !introDrift) continue;
       }
 
       /* Microscopic sleep only — never hard-stop a visible settle */
@@ -481,6 +832,7 @@ export function createHeatStyle(deps) {
         Shared BootField presence drives the live Pixel FS:
         - Boot: each generated cell initializes FIELD bg + FIELD→COOL dots
         - Indicator: boot brightness tints with BOOT_RED
+        - Density teardown / sync: neutral COOL lift only (no Settings RGB)
         - Intro+: Settings HOT tints LED brightness on the same resting lattice
       */
       const bootSignal = indicatorAccent ? introHv : 0;
@@ -496,7 +848,7 @@ export function createHeatStyle(deps) {
       const disp = Math.min(1, Math.hypot(ox[i], oy[i]) / (MAX_DISP + EPS));
       const depth = Math.min(1, heat[i] * 0.5 + disp * 0.45);
       const scale = 1 - smootherstep(depth) * 0.24;
-      const presenceScale = latticeBoot
+      const presenceScale = materialize
         ? Math.min(1, 0.55 + Math.max(presence, typeSignal) * 0.45)
         : Math.min(1, 0.35 + presence * 0.65);
       const size  = DOT * scale * presenceScale * (1 + (heat[i] > 0 ? tint * GLOW_SIZE : 0));
@@ -506,8 +858,9 @@ export function createHeatStyle(deps) {
       const cx = homeX + introDX;
       const cy = homeY + introDY;
 
-      /* Claim this cell's resting FIELD background as soon as it is generated */
-      if (latticeBoot && presence > 0.001) {
+      /* Claim resting FIELD background only while boot paints over black.
+         Density sync already clears to gray — pixels materialize on top. */
+      if (bootMaterializeActive() && presence > 0.001) {
         ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
         ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
       }
@@ -527,16 +880,16 @@ export function createHeatStyle(deps) {
         ? Math.min(1, Math.pow(typeSignal * typeSignal * (3 - 2 * typeSignal), COLOR_FALLOFF) * GLOW_OPACITY)
         : tint;
 
-      if (drawTint > BLOOM_THRESHOLD && (indicatorAccent || typeSignal > 0.001 || heat[i] > EPS)) {
+      if (q > 0.08 && drawTint > bloomThreshold && (indicatorAccent || typeSignal > 0.001 || heat[i] > EPS)) {
         const bloom = smootherstep(
-          (drawTint - BLOOM_THRESHOLD) / (1 - BLOOM_THRESHOLD)
+          (drawTint - bloomThreshold) / (1 - bloomThreshold)
         );
         const br = (accent[0] + (255 - accent[0]) * 0.58) | 0;
         const bg = (accent[1] + (255 - accent[1]) * 0.58) | 0;
         const bb = (accent[2] + (255 - accent[2]) * 0.58) | 0;
         const bloomGain = indicatorAccent ? 0.85 : 1;
-        const aOuter = bloom * BLOOM_STRENGTH * 0.32 * bloomGain;
-        const aInner = bloom * BLOOM_STRENGTH * 0.55 * bloomGain;
+        const aOuter = bloom * bloomStrength * 0.32 * bloomGain;
+        const aInner = bloom * bloomStrength * 0.55 * bloomGain;
         const sOuter = size + DOT * BLOOM_SPREAD * 0.75;
         const sInner = size + DOT * BLOOM_SPREAD * 0.35;
 
@@ -546,7 +899,7 @@ export function createHeatStyle(deps) {
         ctx.fillRect(cx - sInner * 0.5, cy - sInner * 0.5, sInner, sInner);
       }
 
-      /* Boot + intro + ops: one resting formula — FIELD → COOL → Settings accent */
+      /* Boot + intro + ops: FIELD → COOL → accent (BOOT_RED / neutral COOL / Settings HOT) */
       let r = FIELD[0] + (COOL[0] - FIELD[0]) * Math.min(1, presence);
       let g = FIELD[1] + (COOL[1] - FIELD[1]) * Math.min(1, presence);
       let b = FIELD[2] + (COOL[2] - FIELD[2]) * Math.min(1, presence);
@@ -562,6 +915,10 @@ export function createHeatStyle(deps) {
 
       ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
       ctx.fillRect(cx - size * 0.5, cy - size * 0.5, size, size);
+    }
+
+    if (perfMgr && typeof perfMgr.endFrame === 'function') {
+      perfMgr.endFrame(performance.now());
     }
 
     if (alive) {
@@ -581,6 +938,11 @@ export function createHeatStyle(deps) {
   }
 
   function setEnabled(on) {
+    on = !!on;
+    if (enabled === on) {
+      if (on && !running && pixelField.isActive()) start();
+      return;
+    }
     enabled = on;
     if (!enabled) {
       /* Keep pixelField running across Heat ↔ Wave ↔ Lightning switches */
@@ -596,6 +958,11 @@ export function createHeatStyle(deps) {
         vy.fill(0);
       }
       running = false;
+      /* Still on Heat style but effect toggled off — show resting field */
+      if (resolveActiveBgMode() === 'heat' && viewW) {
+        applySurface();
+        paintRest();
+      }
       return;
     }
     /* Reclaim shared canvas when returning to Heat */
@@ -608,9 +975,14 @@ export function createHeatStyle(deps) {
     if (pixelField.isActive()) start();
   }
 
+  function heatShouldRun(mode) {
+    const active = mode !== undefined ? mode : resolveActiveBgMode();
+    return active === 'heat' && !!animConfig.heatEnabled;
+  }
+
   window.addEventListener('bgmodechange', (e) => {
     const mode = e.detail && e.detail.mode;
-    setEnabled(mode === 'heat');
+    setEnabled(heatShouldRun(mode));
     if (mode == null) pixelField.cancel();
   });
 
@@ -626,9 +998,25 @@ export function createHeatStyle(deps) {
     if (enabled) start();
   });
 
-  window.addEventListener('animconfigchange', () => {
+  window.addEventListener('animconfigchange', (e) => {
+    /* Soft behavior / quality / FPS — density rebuild is PixelDensityChanged.
+       Never apply a new CELL here without remounting cols/rows. */
+    if (e.detail && e.detail.soft) {
+      syncBehaviorFromConfig();
+      syncCursorModeFromConfig();
+      syncPerformanceFromConfig({ applyDensity: false });
+      return;
+    }
+    syncPerformanceFromConfig({ applyDensity: false });
+    setEnabled(heatShouldRun());
     if (enabled) start();
   });
+
+  if (events && typeof events.on === 'function') {
+    events.on(PixelEvents.PixelDensityChanged, (info) => {
+      rebuildForDensity(info);
+    });
+  }
 
   window.addEventListener('resize', resize, { passive: true });
   if (typeof ResizeObserver !== 'undefined') {
@@ -636,19 +1024,12 @@ export function createHeatStyle(deps) {
     ro.observe(stage);
   }
 
-  document.addEventListener('mousemove', (e) => {
+  /* Shared InteractionManager pointer stream — always sample; heat application
+     is gated in tick via exclusiveBoot only (intro does not pause tracking). */
+  function applyPointerSample(x, y, inside) {
     if (!enabled) return;
-    if (
-      typeof pixelField.interactionsEnabled === 'function' &&
-      !pixelField.interactionsEnabled()
-    ) {
-      return;
-    }
-    syncStageRect();
-    const x = e.clientX - stageLeft;
-    const y = e.clientY - stageTop;
-    const inside = x >= 0 && y >= 0 && x <= viewW && y <= viewH;
     if (inside) {
+      if (pointerIn && ptrX === x && ptrY === y) return;
       ptrX = x;
       ptrY = y;
       pointerIn = true;
@@ -658,14 +1039,29 @@ export function createHeatStyle(deps) {
       ptrX = ptrY = -1;
       start(); /* springs ease the field back to rest */
     }
-  }, { passive: true });
+  }
 
-  document.documentElement.addEventListener('mouseleave', () => {
-    if (!enabled) return;
-    pointerIn = false;
-    ptrX = ptrY = -1;
-    start(); /* springs ease the field back to rest */
-  });
+  if (events && typeof events.on === 'function') {
+    events.on(PixelEvents.MouseMoved, (p) => {
+      applyPointerSample(p.x, p.y, !!p.inside);
+    });
+    events.on(PixelEvents.PointerLeft, () => {
+      applyPointerSample(-1, -1, false);
+    });
+  } else {
+    document.addEventListener('mousemove', (e) => {
+      if (!enabled) return;
+      syncStageRect();
+      const x = e.clientX - stageLeft;
+      const y = e.clientY - stageTop;
+      const inside = x >= 0 && y >= 0 && x <= viewW && y <= viewH;
+      applyPointerSample(x, y, inside);
+    }, { passive: true });
+
+    document.documentElement.addEventListener('mouseleave', () => {
+      applyPointerSample(-1, -1, false);
+    });
+  }
 
   resize();
   pixelIntro.schedule();
@@ -673,6 +1069,13 @@ export function createHeatStyle(deps) {
   return {
     id: 'heat',
     implemented: true,
+    /** Live Pixel Behavior values applied by this mode. */
+    getPixelBehavior: () => ({
+      reactionStrength: MAX_DISP,
+      movementSpeed: STIFF_PULL,
+      returnSpeed: STIFF_RETURN,
+      trailLifetime: TRAIL_FADE,
+    }),
     mount() {},
     destroy() {},
   };

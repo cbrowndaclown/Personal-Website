@@ -5,6 +5,7 @@
  * @param {string} opts.id
  * @param {string} opts.title
  * @param {boolean} [opts.defaultOpen]
+ * @param {string} [opts.className] — extra class(es), e.g. nested subsection chrome
  * @param {(body: HTMLElement, helpers: object) => void} [opts.build]
  * @param {object} [opts.helpers] — setTitle + any host helpers passed into build
  * @returns {{
@@ -18,7 +19,7 @@
  */
 export function createSection(opts) {
   const root = document.createElement('section');
-  root.className = 'settings__section';
+  root.className = ['settings__section', opts.className].filter(Boolean).join(' ');
   root.dataset.section = opts.id;
 
   const header = document.createElement('button');

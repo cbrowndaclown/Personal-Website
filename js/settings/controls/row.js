@@ -46,8 +46,10 @@ export function createRow(opts) {
   root.appendChild(body);
 
   function setDisabled(on) {
-    root.classList.toggle('is-disabled', !!on);
-    root.setAttribute('aria-disabled', on ? 'true' : 'false');
+    const next = !!on;
+    if (root.classList.contains('is-disabled') === next) return;
+    root.classList.toggle('is-disabled', next);
+    root.setAttribute('aria-disabled', next ? 'true' : 'false');
   }
 
   return { root, body, labelId, setDisabled };

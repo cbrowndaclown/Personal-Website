@@ -1,6 +1,7 @@
 /* Pixel FS Manager — plugin registry for field styles (Heat / Wave / Lightning…).
    Styles register themselves; the manager tracks the active implementation
-   and will eventually mediate transitions. V1 preserves per-style enable logic. */
+   and will eventually mediate transitions. Shared Pixel Behavior is injected
+   via style deps (not owned here). V1 preserves per-style enable logic. */
 
 import { PIXEL_FIELD_STYLES, PixelEvents } from './constants.js';
 

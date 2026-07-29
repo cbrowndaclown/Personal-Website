@@ -1,5 +1,6 @@
-/* READY — engine online; interactions unlock; post-boot content may continue.
-   Presence buffer is the same lattice boot generated — do not recreate it. */
+/* READY — engine online; directory / menu content may continue.
+   Cursor tracking is already live from typography; presence buffer is the
+   same lattice boot generated — do not recreate it. */
 
 import { BOOT_TIMING } from '../constants.js';
 

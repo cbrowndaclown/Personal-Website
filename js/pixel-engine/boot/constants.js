@@ -89,7 +89,8 @@ export function bootEnergyDurationMs() {
 
 /**
  * Phases where the Pixel Engine lattice owns the canvas exclusively
- * (no hero type, directory, cursor heat, or other Pixel FS content).
+ * (no hero type, directory, or other Pixel FS content).
+ * Cursor heat is suppressed here; it resumes at typography construction.
  */
 export function isExclusiveBootPhase(phase) {
   return (

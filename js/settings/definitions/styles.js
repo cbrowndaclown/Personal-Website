@@ -11,7 +11,7 @@
 
 /** @type {PixelFsStyleDef[]} */
 export const PIXEL_FS_STYLES = [
-  { id: 'heat', label: 'Magnetic', implemented: true },
+  { id: 'heat', label: 'Heat', implemented: true },
   { id: 'wave', label: 'Wave', implemented: true },
   { id: 'lightning', label: 'Lightning', implemented: true },
   { id: 'experimental', label: 'Experimental', implemented: false, disabled: true },

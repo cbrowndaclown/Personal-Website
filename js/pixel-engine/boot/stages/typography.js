@@ -32,6 +32,11 @@ export function createTypographyStage(options) {
         ctx.indicator.dismiss();
       }
 
+      /* Cursor tracking + Pixel Behavior stay armed for the whole intro. */
+      if (ctx && typeof ctx.setInteractive === 'function') {
+        ctx.setInteractive(true);
+      }
+
       intro.beginTypographyConstruction({ seedCells: null });
       const ledMs = intro.getTypographyDurationMs();
       completeAt =

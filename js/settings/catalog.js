@@ -1,16 +1,14 @@
-/* Settings catalog — assembles the inspector from declarative definitions. */
+/* Settings catalog — assembles the inspector from declarative categories. */
 
 import {
-  STATIC_SECTIONS,
-  STYLE_SETTINGS_SECTION,
-  PIXEL_FS_STYLE_SETTINGS,
+  SETTINGS_CATEGORIES,
+  EMPTY_SETTINGS_MESSAGE,
   getStyleById,
-  getStyleLabel,
 } from './definitions/index.js';
-import { bindSettings, bindStyleSpecificSettings } from './render.js';
+import { bindCategorySettings } from './render.js';
 
 /**
- * Resolve which style drives the style-specific settings header/body.
+ * Resolve which Pixel FS style is active for style-scoped settings.
  * @param {object} api
  * @returns {string}
  */
@@ -21,56 +19,40 @@ function resolveUiStyleId(api) {
 }
 
 /**
- * Ordered inspector categories. Sections and controls come from definitions;
- * add a SettingDef (or a new style entry) instead of hand-building UI.
+ * Ordered inspector categories from SETTINGS_CATEGORIES.
+ * Add a SettingDef with a matching categoryId (and optional sectionId) to
+ * grow a section — no hand-built UI required.
  *
  * @param {object} api
+ * @param {{ suppressSync?: () => void, allowSync?: () => void, requestSync?: () => void }} [syncGate]
  * @returns {Array<{
  *   id: string,
- *   title: string | ((api: object) => string),
+ *   title: string,
  *   defaultOpen?: boolean,
- *   build: (body: HTMLElement, helpers?: object) => { sync: () => void }
+ *   build: (body: HTMLElement) => {
+ *     sync: () => void,
+ *     sections?: Array<{
+ *       id: string,
+ *       root: HTMLElement,
+ *       isOpen: () => boolean,
+ *       setOpen: (o: boolean, a?: boolean) => void
+ *     }>
+ *   }
  * }>}
  */
-export function getSettingsCatalog(api) {
-  const pixelFs = STATIC_SECTIONS.find((s) => s.id === 'pixel-fs');
-  const trailing = STATIC_SECTIONS.filter((s) => s.id !== 'pixel-fs');
-
-  /** @type {Array<{ id: string, title: string | ((api: object) => string), defaultOpen?: boolean, build: Function }>} */
-  const catalog = [];
-
-  if (pixelFs) {
-    catalog.push({
-      id: pixelFs.id,
-      title: pixelFs.title,
-      defaultOpen: !!pixelFs.defaultOpen,
-      build: (body) => bindSettings(body, pixelFs.settings, api),
-    });
-  }
-
-  catalog.push({
-    id: STYLE_SETTINGS_SECTION.id,
-    title: (a) => `${getStyleLabel(resolveUiStyleId(a))} Settings`,
-    defaultOpen: !!STYLE_SETTINGS_SECTION.defaultOpen,
-    build: (body, helpers) =>
-      bindStyleSpecificSettings(body, {
+export function getSettingsCatalog(api, syncGate) {
+  return SETTINGS_CATEGORIES.map((category) => ({
+    id: category.id,
+    title: category.title,
+    defaultOpen: !!category.defaultOpen,
+    build: (body) =>
+      bindCategorySettings(body, {
+        categoryId: category.id,
+        sections: category.sections || [],
         api,
-        styleSettings: PIXEL_FS_STYLE_SETTINGS,
-        emptyMessage: STYLE_SETTINGS_SECTION.emptyMessage,
-        setTitle: helpers && helpers.setTitle,
         resolveStyleId: resolveUiStyleId,
-        getStyleLabel,
+        emptyMessage: category.emptyMessage || EMPTY_SETTINGS_MESSAGE,
+        syncGate,
       }),
-  });
-
-  trailing.forEach((section) => {
-    catalog.push({
-      id: section.id,
-      title: section.title,
-      defaultOpen: !!section.defaultOpen,
-      build: (body) => bindSettings(body, section.settings, api),
-    });
-  });
-
-  return catalog;
+  }));
 }

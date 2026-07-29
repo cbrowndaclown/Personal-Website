@@ -3,6 +3,7 @@
    ========================================================================== */
 
 import { initSettings } from './settings/index.js';
+import { initSettingsPersistence } from './settings/persist.js';
 import { createPixelEngine } from './pixel-engine/index.js';
 
 (function () {
@@ -33,32 +34,19 @@ import { createPixelEngine } from './pixel-engine/index.js';
     let revealed = false;
     let accum = 0;
     let homeScrollRaf = 0;
-    /* Locked only during exclusive boot (loading ring). Restored when intro begins. */
+    /* Locked until intro (typography) completes — menu/directory may open settings. */
     let navInteractive = false;
 
     function unlockNav() {
       navInteractive = true;
     }
 
-    /* Unlock as soon as exclusive boot ends and typography/intro starts.
-       pixelbootready remains a fallback for skip / reduced-motion paths. */
-    window.addEventListener('pixelintrostart', (e) => {
-      const phase = e.detail && e.detail.phase;
-      /* emitPhase tags every boot beat — only unlock once exclusive boot is over.
-         Bare intro-start (no phase) comes from typography construction / skip. */
-      if (!phase) {
-        unlockNav();
-        return;
-      }
-      if (
-        phase === 'typography_construction' ||
-        phase === 'typography' ||
-        phase === 'ready' ||
-        phase === 'stabilizing'
-      ) {
-        unlockNav();
-      }
-    });
+    /* Intro owns the field — keep top nav parked for the full typography
+       sequence so settings / density cannot corrupt the intro lattice.
+       Unlock as soon as the menu (directory) animation begins. */
+    window.addEventListener('pixeldirectorystart', unlockNav);
+    window.addEventListener('pixeldirectoryhold', unlockNav);
+    /* Skip / reduced-motion / instant-ready paths */
     window.addEventListener('pixelbootready', unlockNav);
 
     function setRevealed(next) {
@@ -251,6 +239,43 @@ import { createPixelEngine } from './pixel-engine/index.js';
       getLastImplementedBgMode: engine.getLastImplementedBgMode,
       getEffectColor: engine.getEffectColor,
       setEffectColor: engine.setEffectColor,
+      getHeatEnabled: engine.getHeatEnabled,
+      setHeatEnabled: engine.setHeatEnabled,
+      getHeatIntensity: engine.getHeatIntensity,
+      setHeatIntensity: engine.setHeatIntensity,
+      getHeatRadius: engine.getHeatRadius,
+      setHeatRadius: engine.setHeatRadius,
+      getHeatDecaySpeed: engine.getHeatDecaySpeed,
+      setHeatDecaySpeed: engine.setHeatDecaySpeed,
+      getPixelReactionStrength: engine.getPixelReactionStrength,
+      setPixelReactionStrength: engine.setPixelReactionStrength,
+      getPixelMovementSpeed: engine.getPixelMovementSpeed,
+      setPixelMovementSpeed: engine.setPixelMovementSpeed,
+      getPixelReturnSpeed: engine.getPixelReturnSpeed,
+      setPixelReturnSpeed: engine.setPixelReturnSpeed,
+      getPixelTrailLifetime: engine.getPixelTrailLifetime,
+      setPixelTrailLifetime: engine.setPixelTrailLifetime,
+      getCursorMode: engine.getCursorMode,
+      setCursorMode: engine.setCursorMode,
+      getPixelDensity: engine.getPixelDensity,
+      setPixelDensity: engine.setPixelDensity,
+      isPixelDensityLocked: engine.isPixelDensityLocked,
+      getEffectQuality: engine.getEffectQuality,
+      setEffectQuality: engine.setEffectQuality,
+      getFrameRateTarget: engine.getFrameRateTarget,
+      setFrameRateTarget: engine.setFrameRateTarget,
+      getAdaptivePerformance: engine.getAdaptivePerformance,
+      setAdaptivePerformance: engine.setAdaptivePerformance,
+      beginBatch: engine.beginBatch,
+      endBatch: engine.endBatch,
+    });
+
+    /* Auto-persist the complete animConfig whenever settings change.
+       Simulation updates immediately; storage writes are debounced.
+       Restore runs earlier inside createPixelEngine (before Pixel FS init). */
+    initSettingsPersistence({
+      animConfig: engine.animConfig,
+      events: engine.events,
     });
 
     /* Debug / compatibility handles */

@@ -1,17 +1,30 @@
 /* Intro content service — typography + directory LED sequences.
    Boot lifecycle is owned by the Boot Controller; this module supplies
    glyph construction, migration, directory assemble, and idle float.
-*/
+
+   Lattice geometry (cols / rows / cell) is adopted from the shared GridManager
+   or the density-rebuild authority — never invented from pending Settings. */
+
+import {
+  cellSizeFromDensity,
+  PERFORMANCE_DEFAULTS,
+} from '../performance-manager.js';
+import { computeGridLayout } from '../grid-manager.js';
+import { CELL as DEFAULT_CELL } from '../constants.js';
 
 /**
  * @param {object} deps
  * @param {object} deps.animConfig
  * @param {boolean} deps.prefersReduced
  * @param {() => string|null} [deps.resolveActiveBgMode]
+ * @param {ReturnType<import('../grid-manager.js').createGridManager>} [deps.grid]
+ * @param {ReturnType<import('../performance-manager.js').createPerformanceManager>} [deps.performance]
  */
 export function createIntroController(deps) {
   const animConfig = deps.animConfig;
   const prefersReduced = deps.prefersReduced;
+  const sharedGrid = deps.grid || null;
+  const perfMgr = deps.performance || null;
 
   const FF_RATE = 4;
 
@@ -44,6 +57,37 @@ export function createIntroController(deps) {
   const DIR_DRIFT_MAX      = 28;
   const HOLD_SENTINEL      = 1e15;
 
+  /* Startup directory assemble — deliberate full-length reveal. */
+  const DIR_TIMING = Object.freeze({
+    msPerCol: DIR_MS_PER_COL,
+    revealMin: DIR_REVEAL_MIN,
+    revealMax: DIR_REVEAL_MAX,
+    linePause: DIR_LINE_PAUSE,
+    jitterMs: DIR_JITTER_MS,
+    clusterMs: DIR_CLUSTER_MS,
+    sparkLeadMs: 45,
+    sparkSpreadMs: 55,
+    sparkLifeMin: 80,
+    sparkLifeSpan: 170,
+  });
+
+  /*
+    Density-rebuild directory assemble — same procedural style, ~35% shorter.
+    Tightens line pauses and reveal windows; does not raise playback rate.
+  */
+  const DIR_TIMING_DENSITY = Object.freeze({
+    msPerCol: 20,
+    revealMin: 1040,
+    revealMax: 2500,
+    linePause: 520,
+    jitterMs: 28,
+    clusterMs: 34,
+    sparkLeadMs: 30,
+    sparkSpreadMs: 38,
+    sparkLifeMin: 55,
+    sparkLifeSpan: 115,
+  });
+
   /* Organic idle float — per-word decisions, easeInOutSine steps (CSS px) */
   const IDLE_STEP_MIN_PX   = 2.2;
   const IDLE_STEP_MAX_PX   = 5.0;
@@ -54,8 +98,36 @@ export function createIntroController(deps) {
   const IDLE_MOVE_MAX_MS   = 980;
   const IDLE_START_MIN_MS  = 180;
   const IDLE_START_MAX_MS  = 1400;
-  /* Must match heatmap / wave CELL — idle Y (px) → fractional row shift */
-  const LED_CELL           = 5;
+  /* Must match heatmap / wave CELL — idle Y (px) → fractional row shift.
+     Always read the applied lattice cell (shared grid / authority), never the
+     pending Settings density — that desynced menu spacing mid-rebuild. */
+  function getLedCell() {
+    if (ledCell > 0) return ledCell;
+    if (sharedGrid && sharedGrid.cell > 0) return sharedGrid.cell;
+    if (perfMgr && typeof perfMgr.getCellSize === 'function') {
+      const c = perfMgr.getCellSize();
+      if (c > 0) return c;
+    }
+    const density =
+      animConfig && animConfig.performance
+        ? animConfig.performance.pixelDensity
+        : PERFORMANCE_DEFAULTS.pixelDensity;
+    return cellSizeFromDensity(density);
+  }
+
+  /**
+   * Adopt authoritative lattice geometry. Absolute assign — never Math.max
+   * with a stale larger grid (that left menu strides mismatched after density ↓).
+   * @param {{ cols: number, rows: number, cell?: number }} info
+   */
+  function adoptGrid(info) {
+    if (!info || !(info.cols > 0) || !(info.rows > 0)) return;
+    cols = info.cols | 0;
+    rows = info.rows | 0;
+    if (info.cell > 0) ledCell = Number(info.cell);
+    else if (sharedGrid && sharedGrid.cell > 0) ledCell = sharedGrid.cell;
+    idleYCache = null;
+  }
 
   const INTRO_LINES = [
     { text: 'Hey there,',                pace: 1.00 },
@@ -90,6 +162,8 @@ export function createIntroController(deps) {
 
   let cols = 0;
   let rows = 0;
+  /** Applied cell pitch (CSS px) — matches GridManager / style CELL. */
+  let ledCell = DEFAULT_CELL;
   let introTotalMs = 0;
   let typographyDurationMs = 0;
   let assembleMs = 0;
@@ -326,7 +400,7 @@ export function createIntroController(deps) {
   */
   function scatterIdleLight(buf, x, y, level, shiftPx) {
     if (!(level > 0)) return;
-    const dest = y + shiftPx / LED_CELL;
+    const dest = y + shiftPx / getLedCell();
     const yFloor = Math.floor(dest);
     const f = dest - yFloor;
     const y1 = yFloor + 1;
@@ -350,13 +424,33 @@ export function createIntroController(deps) {
     }
   }
 
+  /**
+   * Pull geometry from the shared GridManager when local dims are unset.
+   * Absolute assignment from the live grid — single source of truth.
+   */
   function ensureGrid() {
-    if (cols >= 12 && rows >= 8) return;
+    if (sharedGrid && sharedGrid.cols >= 12 && sharedGrid.rows >= 8) {
+      adoptGrid({
+        cols: sharedGrid.cols,
+        rows: sharedGrid.rows,
+        cell: sharedGrid.cell,
+      });
+      return;
+    }
+    if (cols >= 12 && rows >= 8) {
+      if (!(ledCell > 0) && sharedGrid && sharedGrid.cell > 0) {
+        ledCell = sharedGrid.cell;
+      }
+      return;
+    }
     const stage = document.getElementById('stage');
     if (!stage) return;
     const rect = stage.getBoundingClientRect();
-    cols = Math.max(cols, Math.ceil(Math.max(1, rect.width) / 5) | 0);
-    rows = Math.max(rows, Math.ceil(Math.max(1, rect.height) / 5) | 0);
+    const cell = getLedCell();
+    const layout = computeGridLayout(rect.width, rect.height, cell);
+    cols = layout.cols;
+    rows = layout.rows;
+    ledCell = layout.cell;
   }
 
   function setBoot(flag) {
@@ -420,6 +514,52 @@ export function createIntroController(deps) {
     if (iMigrateMs) iMigrateMs.fill(0);
     if (iWordId) iWordId.fill(-1);
     iIdleWords = [];
+  }
+
+  /**
+   * Fully release intro LED buffers and geometry from the previous grid.
+   * Density rebuild calls this so no cached pixel map survives.
+   */
+  function destroyIntroLeds() {
+    iTarget = null;
+    iOn = null;
+    iLevel = null;
+    iOnAt = null;
+    iDetachAt = null;
+    iGoneAt = null;
+    iLine = null;
+    iDriftX = null;
+    iDriftY = null;
+    iOx = null;
+    iOy = null;
+    iMigrateMs = null;
+    iWordId = null;
+    iIdleWords = [];
+  }
+
+  /**
+   * Drop every menu / typography reference tied to the previous lattice.
+   * Preserves only caller-owned settings (animConfig).
+   */
+  function destroyGridState() {
+    clearDissolveTimer();
+    destroyIntroLeds();
+    clearDirectoryLeds();
+    idleYCache = null;
+    contentLocked = true;
+    directoryAllowed = false;
+    phase = 'idle';
+    typographySettled = false;
+    holdingFF = false;
+    timeScale = 1;
+    killed = false;
+    introTotalMs = 0;
+    typographyDurationMs = 0;
+    assembleMs = 0;
+    cols = 0;
+    rows = 0;
+    ledCell = 0;
+    resetContentClock();
   }
 
   function fitIntroFont(octx, lines, maxWidth, startPx) {
@@ -696,8 +836,8 @@ export function createIntroController(deps) {
         const homeX = i % cols;
         const homeY = (i / cols) | 0;
         /* Drift from smile cell toward glyph home — same pixels continue the story */
-        iDriftX[i] = (seed.x - homeX) * LED_CELL;
-        iDriftY[i] = (seed.y - homeY) * LED_CELL;
+        iDriftX[i] = (seed.x - homeX) * getLedCell();
+        iDriftY[i] = (seed.y - homeY) * getLedCell();
         iOnAt[i] = Math.min(iOnAt[i], 12 + s * 10);
         iMigrateMs[i] = Math.max(
           iMigrateMs[i],
@@ -886,6 +1026,9 @@ export function createIntroController(deps) {
       return;
     }
     const instant = !!(opts && opts.instant);
+    /* Density rebuild uses a tighter timing profile; startup stays DIR_TIMING. */
+    const timing =
+      opts && opts.densityRebuild ? DIR_TIMING_DENSITY : DIR_TIMING;
     const n = cols * rows;
     dTarget = new Float32Array(n);
     dOn = new Float32Array(n);
@@ -939,8 +1082,11 @@ export function createIntroController(deps) {
       const revealMs = instant
         ? 0
         : Math.min(
-            DIR_REVEAL_MAX,
-            Math.max(DIR_REVEAL_MIN, spanX * DIR_MS_PER_COL * DIR_LINES[L].pace)
+            timing.revealMax,
+            Math.max(
+              timing.revealMin,
+              spanX * timing.msPerCol * DIR_LINES[L].pace,
+            ),
           );
       const lineStart = cursor;
       const lineCx = (sampled.minX + sampled.maxX) * 0.5;
@@ -975,8 +1121,9 @@ export function createIntroController(deps) {
         const clusterX = (x / 2) | 0;
         const clusterY = (y / 2) | 0;
         const clusterId = clusterX + clusterY * 4099 + L * 9176;
-        const clusterOff = (hash01(clusterId, 0xc01) - 0.5) * DIR_CLUSTER_MS;
-        const jitter = (hash01(i, 0xc11 + L) - 0.5) * DIR_JITTER_MS;
+        const clusterOff =
+          (hash01(clusterId, 0xc01) - 0.5) * timing.clusterMs;
+        const jitter = (hash01(i, 0xc11 + L) - 0.5) * timing.jitterMs;
         const n1 = hash01(i, 0xc22 + L);
 
         let litAt = instant
@@ -1030,8 +1177,13 @@ export function createIntroController(deps) {
             const n1 = hash01(i, 0xc55 + L);
             const n2 = hash01(i, 0xc66 + L);
             const waveT = lineStart + Math.max(0, Math.min(revealMs, xNorm * revealMs));
-            const sparkOn = Math.max(lineStart, waveT - 45 + (n1 - 0.5) * 55);
-            const life = 80 + n2 * 170;
+            const sparkOn = Math.max(
+              lineStart,
+              waveT -
+                timing.sparkLeadMs +
+                (n1 - 0.5) * timing.sparkSpreadMs,
+            );
+            const life = timing.sparkLifeMin + n2 * timing.sparkLifeSpan;
             const sparkGone = Math.min(lineEnd - 16, sparkOn + life);
             if (sparkGone <= sparkOn) continue;
             dOnAt[i] = sparkOn;
@@ -1043,7 +1195,7 @@ export function createIntroController(deps) {
       }
 
       cursor = lineStart + revealMs;
-      if (L < lineCount - 1) cursor += instant ? 0 : DIR_LINE_PAUSE;
+      if (L < lineCount - 1) cursor += instant ? 0 : timing.linePause;
     }
 
     assembleMs = cursor;
@@ -1112,6 +1264,113 @@ export function createIntroController(deps) {
     /* Do not touch data-boot — boot controller owns it during exclusive phases */
   }
 
+  /**
+   * Density recalibration arm — hide menu, lock content, adopt NEW grid geometry.
+   * Prefer destroyGridState + rasterizeMenuForGrid from the density pipeline.
+   * @param {number} nextCols
+   * @param {number} nextRows
+   * @param {{ cols?: number, rows?: number, cell?: number }} [gridInfo]
+   */
+  function armDensityRecalibration(nextCols, nextRows, gridInfo) {
+    destroyGridState();
+    if (gridInfo && gridInfo.cols > 0 && gridInfo.rows > 0) {
+      adoptGrid(gridInfo);
+    } else {
+      cols = nextCols | 0;
+      rows = nextRows | 0;
+      if (sharedGrid && sharedGrid.cell > 0) ledCell = sharedGrid.cell;
+    }
+    contentLocked = true;
+    directoryAllowed = false;
+  }
+
+  /**
+   * Stage 4 — bake menu LEDs for the new grid while keeping content locked
+   * so nothing paints until the rebuild animation finishes.
+   * @param {{ cols: number, rows: number, cell?: number }} gridInfo
+   * @param {{ densityRebuild?: boolean, instant?: boolean }} [opts]
+   */
+  function rasterizeMenuForGrid(gridInfo, opts) {
+    opts = opts || {};
+    destroyIntroLeds();
+    clearDirectoryLeds();
+    idleYCache = null;
+    if (gridInfo) adoptGrid(gridInfo);
+    else ensureGrid();
+    clearDissolveTimer();
+    killed = false;
+    /* Allow bake buffers; keep locked so brightness()/update stay silent. */
+    directoryAllowed = true;
+    contentLocked = true;
+    bakeDirectory(
+      opts.instant
+        ? { instant: true }
+        : opts.densityRebuild !== false
+          ? { densityRebuild: true }
+          : undefined,
+    );
+    phase = 'idle';
+    typographySettled = true;
+    holdingFF = false;
+    timeScale = 1;
+    resetContentClock();
+  }
+
+  /**
+   * Stage 6 — unlock and play (or snap) the pre-rasterized menu.
+   * Rebakes only if stage 4 never produced buffers.
+   * @param {{ cols: number, rows: number, cell?: number }} gridInfo
+   * @param {{ fromDensityRebuild?: boolean, instant?: boolean }} [opts]
+   */
+  function revealMenuAfterRebuild(gridInfo, opts) {
+    opts = opts || {};
+    if (gridInfo) adoptGrid(gridInfo);
+    clearDissolveTimer();
+    killed = false;
+    contentLocked = false;
+    directoryAllowed = true;
+    clearIntroLeds();
+
+    if (!dOn || !dBitmap) {
+      bakeDirectory(
+        opts.instant
+          ? { instant: true }
+          : { densityRebuild: true },
+      );
+    }
+
+    if (opts.instant) {
+      paintDirectoryHold();
+      phase = 'idle';
+      holdingFF = false;
+      timeScale = 1;
+      typographySettled = true;
+      setBoot(null);
+      window.dispatchEvent(new CustomEvent('pixeldirectorystart'));
+      window.dispatchEvent(new CustomEvent('pixeldirectoryhold'));
+      return;
+    }
+
+    resetContentClock();
+    phase = 'directory';
+    setBoot('directory');
+    window.dispatchEvent(new CustomEvent('pixeldirectorystart'));
+  }
+
+  /**
+   * Regenerate the pixel menu specifically for an authoritative grid and replay.
+   * @param {{ cols: number, rows: number, cell?: number }} gridInfo
+   * @param {{ fromDensityRebuild?: boolean, instant?: boolean }} [opts]
+   */
+  function rebuildMenuForGrid(gridInfo, opts) {
+    opts = opts || {};
+    rasterizeMenuForGrid(gridInfo, {
+      densityRebuild: !!opts.fromDensityRebuild,
+      instant: !!opts.instant,
+    });
+    revealMenuAfterRebuild(gridInfo, opts);
+  }
+
   function beginTypographyConstruction(opts) {
     opts = opts || {};
     if (killed) return;
@@ -1177,8 +1436,18 @@ export function createIntroController(deps) {
     contentLocked = false;
     directoryAllowed = true;
 
-    if (opts.fromMotionReenable) {
-      bakeDirectory();
+    if (opts.fromMotionReenable || opts.fromDensityRebuild) {
+      /* Density rebuild must use the authority grid — never recompute independently. */
+      if (opts.grid) adoptGrid(opts.grid);
+      else ensureGrid();
+      clearIntroLeds();
+      bakeDirectory(
+        opts.instant
+          ? { instant: true }
+          : opts.fromDensityRebuild
+            ? { densityRebuild: true }
+            : undefined,
+      );
       enterDirectoryPhase();
       return;
     }
@@ -1474,9 +1743,33 @@ export function createIntroController(deps) {
   function onResize(nextCols, nextRows) {
     const c = nextCols | 0;
     const r = nextRows | 0;
-    if (c === cols && r === rows) return;
-    cols = c;
-    rows = r;
+    const cell =
+      sharedGrid && sharedGrid.cell > 0 ? sharedGrid.cell : ledCell;
+    if (c === cols && r === rows && cell === ledCell) return;
+    adoptGrid({ cols: c, rows: r, cell });
+    rebakeAfterGridChange();
+  }
+
+  /**
+   * Pixel Density rebuild — always rebake from authoritative geometry so LED
+   * maps stay aligned with Heat/Wave/Lightning. Prefer rebuildMenuForGrid
+   * when the density pipeline supplies a frozen GridInfo.
+   * @param {number} nextCols
+   * @param {number} nextRows
+   * @param {{ cols?: number, rows?: number, cell?: number }} [gridInfo]
+   */
+  function rebuildForDensity(nextCols, nextRows, gridInfo) {
+    if (gridInfo && gridInfo.cols > 0 && gridInfo.rows > 0) {
+      adoptGrid(gridInfo);
+    } else {
+      cols = nextCols | 0;
+      rows = nextRows | 0;
+      if (sharedGrid && sharedGrid.cell > 0) ledCell = sharedGrid.cell;
+    }
+    /* Drop idle caches keyed to the old pitch */
+    idleYCache = null;
+    iIdleWords = [];
+    dIdleWords = [];
 
     /* During exclusive boot, never bake directory / type into the PE canvas */
     if (contentLocked) {
@@ -1485,18 +1778,64 @@ export function createIntroController(deps) {
       return;
     }
 
+    const gridSnap = { cols, rows, cell: ledCell };
+
+    /* Menu animation active — rebuild LEDs and restart assemble on new grid */
+    if (phase === 'directory' || phase === 'dissolving') {
+      clearDissolveTimer();
+      clearIntroLeds();
+      clearDirectoryLeds();
+      beginDirectorySequence({
+        fromDensityRebuild: true,
+        grid: gridSnap,
+      });
+      return;
+    }
+
+    /* Menu complete — regenerate pixel text without replaying intro */
+    if (phase === 'idle' && directoryAllowed) {
+      clearIntroLeds();
+      bakeDirectory({ instant: true });
+      paintDirectoryHold();
+      return;
+    }
+
+    /* Intro typography — nav is locked during play. If type already settled
+       (ready delay before menu), jump straight into a menu rebuild. */
+    if (phase === 'typography') {
+      clearDirectoryLeds();
+      if (typographySettled) {
+        clearIntroLeds();
+        beginDirectorySequence({
+          fromDensityRebuild: true,
+          grid: gridSnap,
+        });
+        return;
+      }
+      bakeIntro();
+      return;
+    }
+
+    clearDirectoryLeds();
+  }
+
+  function rebakeAfterGridChange() {
+    /* Window resize — soft rebake; density uses rebuildForDensity (may restart menu). */
+    if (contentLocked) {
+      clearIntroLeds();
+      clearDirectoryLeds();
+      return;
+    }
+
     if (phase === 'typography' || phase === 'dissolving') {
-      /* Keep directory destroyed while hero type owns the field */
       clearDirectoryLeds();
       bakeIntro();
     } else if (phase === 'directory' && directoryAllowed) {
       bakeDirectory();
     } else if (phase === 'idle' && directoryAllowed && dBitmap) {
-      /* Only re-bake if directory was already revealed post-boot */
       bakeDirectory({ instant: true });
       paintDirectoryHold();
     } else {
-      /* Pre-boot / pre-directory: never generate scroll text pixels */
       clearDirectoryLeds();
     }
   }
@@ -1539,6 +1878,7 @@ export function createIntroController(deps) {
     update: update,
     isActive: isActive,
     onResize: onResize,
+    rebuildForDensity: rebuildForDensity,
     cancel: cancel,
     schedule: schedule,
     beginFastForward: beginFastForward,
@@ -1552,6 +1892,13 @@ export function createIntroController(deps) {
 
     /* Boot content API */
     suppressContent: suppressContent,
+    destroyGridState: destroyGridState,
+    adoptGrid: adoptGrid,
+    getLedCell: getLedCell,
+    armDensityRecalibration: armDensityRecalibration,
+    rasterizeMenuForGrid: rasterizeMenuForGrid,
+    revealMenuAfterRebuild: revealMenuAfterRebuild,
+    rebuildMenuForGrid: rebuildMenuForGrid,
     beginTypographyConstruction: beginTypographyConstruction,
     getTypographyDurationMs: getTypographyDurationMs,
     isTypographySettled: isTypographySettled,

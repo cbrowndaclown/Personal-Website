@@ -1,6 +1,8 @@
 /* Pixel FS — Lightning (weather field + strike timing). V1 preserved. */
 
 import { createLightningStrikeController } from './lightning-strike.js';
+import { PixelEvents } from '../constants.js';
+import { computeGridLayout } from '../grid-manager.js';
 
 /**
  * @param {object} deps
@@ -10,10 +12,252 @@ export function createLightningStyle(deps) {
   const stage = deps.stage;
   const animConfig = deps.animConfig;
   const resolveActiveBgMode = deps.resolveActiveBgMode;
+  const pixelBehavior = deps.pixelBehavior;
+  const cursorMode = deps.cursorMode;
+  const perfMgr = deps.performance;
   const pixelField = deps.pixelField;
+  const events = deps.events;
+  const grid = deps.grid;
   if (!canvas || !stage) {
     return { id: 'lightning', implemented: true, mount() {}, destroy() {} };
   }
+
+  /* Shared Pixel Behavior → Lightning strikes. Defaults match V1 exactly
+     (scale = 1 at PIXEL_BEHAVIOR_DEFAULTS). Remap only when revision advances. */
+  const BEHAVIOR_DEFAULTS =
+    (pixelBehavior && pixelBehavior.defaults) ||
+    Object.freeze({
+      reactionStrength: 0.4,
+      movementSpeed: 0.078,
+      returnSpeed: 0.026,
+      trailLifetime: 0.965,
+    });
+  const BEHAVIOR_TRAIL_RANGE = Object.freeze({ min: 0.85, max: 0.995 });
+  const behavior =
+    (pixelBehavior && pixelBehavior.values) ||
+    {
+      reactionStrength: BEHAVIOR_DEFAULTS.reactionStrength,
+      movementSpeed: BEHAVIOR_DEFAULTS.movementSpeed,
+      returnSpeed: BEHAVIOR_DEFAULTS.returnSpeed,
+      trailLifetime: BEHAVIOR_DEFAULTS.trailLifetime,
+    };
+
+  /* Strike timing baselines (pre-settings V1) — live vars feed spawn. */
+  const BASE_RISE_MIN = 8;
+  const BASE_RISE_MAX = 20;
+  const BASE_ACTIVE_MIN = 300;
+  const BASE_ACTIVE_MAX = 900;
+  const BASE_AFTERGLOW_MIN = 200;
+  const BASE_AFTERGLOW_MAX = 500;
+
+  /* Trail Lifetime → afterglow duration range (default trail → exact V1). */
+  const AG_MIN_AT_TRAIL_MIN = 80;
+  const AG_MAX_AT_TRAIL_MIN = 160;
+  const AG_MIN_AT_TRAIL_MAX = 700;
+  const AG_MAX_AT_TRAIL_MAX = 1100;
+
+  let reactionScale = 1;
+  let moveScale = 1;
+  let returnScale = 1;
+  let riseMin = BASE_RISE_MIN;
+  let riseMax = BASE_RISE_MAX;
+  let activeMin = BASE_ACTIVE_MIN;
+  let activeMax = BASE_ACTIVE_MAX;
+  let afterglowMin = BASE_AFTERGLOW_MIN;
+  let afterglowMax = BASE_AFTERGLOW_MAX;
+  let _behaviorRev = -1;
+  let _cursorModeRev = -1;
+  let _perfRev = -1;
+  let effectQuality = 1;
+  let activeCursorMode = 'standard';
+  let cursorBias = {
+    pull: 1,
+    scatter: 1,
+    freeze: false,
+    rainPush: 0,
+    fieldGlow: 0,
+    fieldIllum: 0,
+    spark: 0,
+    paintTrail: false,
+    freezeField: false,
+  };
+
+  /* Paint mode trail — shared across weather layers, aged by Trail Lifetime */
+  const CURSOR_PAINT_MAX = 20;
+  const CURSOR_PAINT_STEP = 7;
+  const cursorPaintTrail = [];
+
+  function pushCursorPaint(x, y) {
+    const head = cursorPaintTrail[0];
+    if (!head) {
+      cursorPaintTrail.push({ x: x, y: y, w: 1 });
+      return;
+    }
+    const dist = Math.hypot(x - head.x, y - head.y);
+    if (dist < CURSOR_PAINT_STEP * 0.4) {
+      head.x = x;
+      head.y = y;
+      head.w = 1;
+      return;
+    }
+    const steps = Math.max(1, Math.ceil(dist / CURSOR_PAINT_STEP));
+    for (let s = 1; s <= steps; s++) {
+      const t = s / steps;
+      cursorPaintTrail.unshift({
+        x: head.x + (x - head.x) * t,
+        y: head.y + (y - head.y) * t,
+        w: 1,
+      });
+    }
+    while (cursorPaintTrail.length > CURSOR_PAINT_MAX) cursorPaintTrail.pop();
+  }
+
+  function ageCursorPaint() {
+    if (!cursorPaintTrail.length) return;
+    const fade = Math.min(0.995, behavior.trailLifetime);
+    for (let i = 0; i < cursorPaintTrail.length; i++) {
+      cursorPaintTrail[i].w *= fade;
+    }
+    while (
+      cursorPaintTrail.length &&
+      cursorPaintTrail[cursorPaintTrail.length - 1].w < 0.04
+    ) {
+      cursorPaintTrail.pop();
+    }
+  }
+
+  function remapTrailToAfterglow(trail) {
+    const tMin = BEHAVIOR_TRAIL_RANGE.min;
+    const tMax = BEHAVIOR_TRAIL_RANGE.max;
+    const tDef = BEHAVIOR_DEFAULTS.trailLifetime;
+    const v = Number(trail);
+    if (!Number.isFinite(v) || v <= tMin) {
+      return { min: AG_MIN_AT_TRAIL_MIN, max: AG_MAX_AT_TRAIL_MIN };
+    }
+    if (v >= tMax) {
+      return { min: AG_MIN_AT_TRAIL_MAX, max: AG_MAX_AT_TRAIL_MAX };
+    }
+    if (v === tDef) {
+      return { min: BASE_AFTERGLOW_MIN, max: BASE_AFTERGLOW_MAX };
+    }
+    if (v < tDef) {
+      const span = tDef - tMin;
+      const t = span > 0 ? (v - tMin) / span : 1;
+      return {
+        min: AG_MIN_AT_TRAIL_MIN + (BASE_AFTERGLOW_MIN - AG_MIN_AT_TRAIL_MIN) * t,
+        max: AG_MAX_AT_TRAIL_MIN + (BASE_AFTERGLOW_MAX - AG_MAX_AT_TRAIL_MIN) * t,
+      };
+    }
+    const span = tMax - tDef;
+    const t = span > 0 ? (v - tDef) / span : 1;
+    return {
+      min: BASE_AFTERGLOW_MIN + (AG_MIN_AT_TRAIL_MAX - BASE_AFTERGLOW_MIN) * t,
+      max: BASE_AFTERGLOW_MAX + (AG_MAX_AT_TRAIL_MAX - BASE_AFTERGLOW_MAX) * t,
+    };
+  }
+
+  /**
+   * Map shared Pixel Behavior → live Lightning strike params.
+   * Uses cached scales from the shared layer; afterglow remap stays local.
+   * @returns {boolean} true when strike params changed
+   */
+  function applyBehaviorToLightning() {
+    const rev = pixelBehavior ? pixelBehavior.getRevision() : 0;
+    if (rev === _behaviorRev) return false;
+    _behaviorRev = rev;
+
+    const sc = (pixelBehavior && pixelBehavior.scales) || {
+      reaction: 1,
+      movement: 1,
+      return: 1,
+    };
+    reactionScale = sc.reaction;
+    moveScale = sc.movement;
+    returnScale = sc.return;
+
+    const moveDiv = Math.max(moveScale, 1e-6);
+    const returnDiv = Math.max(returnScale, 1e-6);
+    riseMin = BASE_RISE_MIN / moveDiv;
+    riseMax = BASE_RISE_MAX / moveDiv;
+    activeMin = BASE_ACTIVE_MIN / returnDiv;
+    activeMax = BASE_ACTIVE_MAX / returnDiv;
+
+    const ag = remapTrailToAfterglow(behavior.trailLifetime);
+    afterglowMin = ag.min;
+    afterglowMax = ag.max;
+    return true;
+  }
+
+  function syncBehaviorFromConfig() {
+    /* Shared layer already synced on AnimConfigChange — only apply locally. */
+    return applyBehaviorToLightning();
+  }
+
+  function syncCursorModeFromConfig() {
+    if (!cursorMode) {
+      activeCursorMode = 'standard';
+      cursorBias = {
+        pull: 1,
+        scatter: 1,
+        freeze: false,
+        rainPush: 0,
+        fieldGlow: 0,
+        fieldIllum: 0,
+        spark: 0,
+        paintTrail: false,
+        freezeField: false,
+      };
+      return false;
+    }
+    const rev = cursorMode.getRevision();
+    if (rev === _cursorModeRev) return false;
+    _cursorModeRev = rev;
+    activeCursorMode = cursorMode.get();
+    cursorBias =
+      typeof cursorMode.lightningCursorBias === 'function'
+        ? cursorMode.lightningCursorBias(activeCursorMode)
+        : {
+            pull: 1,
+            scatter: 1,
+            freeze: false,
+            rainPush: 0,
+            fieldGlow: 0,
+            fieldIllum: 0,
+            spark: 0,
+            paintTrail: false,
+            freezeField: false,
+          };
+    if (!cursorBias.paintTrail) cursorPaintTrail.length = 0;
+    return true;
+  }
+
+  /**
+   * @returns {{ changed: boolean, densityChanged: boolean }}
+   */
+  function syncPerformanceFromConfig() {
+    if (!perfMgr || typeof perfMgr.getRevision !== 'function') {
+      effectQuality = 1;
+      return { changed: false, densityChanged: false };
+    }
+    const rev = perfMgr.getRevision();
+    if (rev === _perfRev) {
+      effectQuality =
+        typeof perfMgr.getEffectiveQuality === 'function'
+          ? perfMgr.getEffectiveQuality()
+          : 1;
+      return { changed: false, densityChanged: false };
+    }
+    _perfRev = rev;
+    effectQuality =
+      typeof perfMgr.getEffectiveQuality === 'function'
+        ? perfMgr.getEffectiveQuality()
+        : 1;
+    return { changed: true, densityChanged: false };
+  }
+
+  syncBehaviorFromConfig();
+  syncCursorModeFromConfig();
+  syncPerformanceFromConfig();
 
   (function initLightningStrikeController() {
     /* ── Strike timing (formerly SYSTEM 8) ─────────────────────────────────── */
@@ -63,19 +307,16 @@ export function createLightningStyle(deps) {
     }
 
     window.addEventListener('bgmodechange', syncMode);
-    window.addEventListener('animconfigchange', syncMode);
+    window.addEventListener('animconfigchange', (e) => {
+      /* Soft Pixel Behavior — strike apply lives in the weather IIFE only. */
+      if (e.detail && e.detail.soft) return;
+      syncMode();
+    });
 
     document.addEventListener('mousemove', (e) => {
       lastClientX = e.clientX;
       lastClientY = e.clientY;
       if (!lightningModeSelected()) {
-        controller.setCursorInField(false);
-        return;
-      }
-      if (
-        typeof pixelField.interactionsEnabled === 'function' &&
-        !pixelField.interactionsEnabled()
-      ) {
         controller.setCursorInField(false);
         return;
       }
@@ -96,11 +337,21 @@ export function createLightningStyle(deps) {
 
   (function initLightningMode() {
     /* ── Weather field (formerly SYSTEM 9) ─────────────────────────────────── */
-    const CELL  = 5;
-    const DOT   = CELL - 2;
+    let CELL = (perfMgr && typeof perfMgr.getCellSize === 'function')
+      ? perfMgr.getCellSize()
+      : 5;
+    let DOT = Math.max(1, CELL - 2);
     const FIELD = [210, 210, 210];
     const COOL  = [255, 255, 255];
 
+    function applyPerformanceDensity() {
+      if (!perfMgr || typeof perfMgr.getCellSize !== 'function') return false;
+      const next = perfMgr.getCellSize();
+      if (next === CELL) return false;
+      CELL = next;
+      DOT = Math.max(1, CELL - 2);
+      return true;
+    }
     /* Soft bloom knobs — match Heat/Wave LED presence language */
     const COLOR_FALLOFF   = 0.72;
     const BLOOM_THRESHOLD = 0.22;
@@ -413,8 +664,12 @@ export function createLightningStyle(deps) {
 
         let n = 0;
         const pad = 14;
-        for (let iy = -pad; iy <= pad && n < MAX_CLOUD_CELLS; iy++) {
-          for (let ix = -pad; ix <= pad && n < MAX_CLOUD_CELLS; ix++) {
+        const cloudBudget = Math.max(
+          48,
+          Math.round(MAX_CLOUD_CELLS * (0.4 + 0.6 * effectQuality)),
+        );
+        for (let iy = -pad; iy <= pad && n < cloudBudget; iy++) {
+          for (let ix = -pad; ix <= pad && n < cloudBudget; ix++) {
             let best = 0;
             for (let L = 0; L < lobes; L++) {
               const nx = (ix - lobeOx[L]) / lobeRx[L];
@@ -645,6 +900,12 @@ export function createLightningStyle(deps) {
       }
 
       function updateRain(dt) {
+        syncCursorModeFromConfig();
+        const bias = cursorBias;
+        const hasPtr = ptrX >= 0 && ptrY >= 0;
+        const rainR = 130;
+        const rainR2 = rainR * rainR;
+
         let i = 0;
         while (i < liveCount) {
           const d = dropPool[liveDrops[i]];
@@ -657,6 +918,31 @@ export function createLightningStyle(deps) {
           const wobble =
             Math.sin(d.life * d.wobbleFreq + d.phase) * d.wobbleAmp;
           d.vx += ((wind * 0.55 + wobble) - d.vx) * Math.min(1, dt * 1.8);
+
+          if (hasPtr && (bias.rainPush !== 0 || bias.freezeField || bias.spark > 0)) {
+            const dx = d.x - ptrX;
+            const dy = d.y - ptrY;
+            const d2 = dx * dx + dy * dy;
+            if (d2 < rainR2 && d2 > 1) {
+              const dist = Math.sqrt(d2);
+              const fall = 1 - dist / rainR;
+              if (bias.freezeField) {
+                d.vx *= 1 - fall * 0.85;
+                d.vy *= 1 - fall * 0.92;
+              } else {
+                const inv = (bias.rainPush * fall * 55 * dt) / dist;
+                d.vx += dx * inv;
+                d.vy += dy * inv * 0.4;
+                if (bias.spark > 0) {
+                  const j =
+                    Math.sin(d.x * 0.17 + d.y * 0.11 + d.life * 9.1) * 18 * bias.spark * fall;
+                  d.vx += j * dt;
+                  d.vy += j * 0.35 * dt;
+                }
+              }
+            }
+          }
+
           d.x += d.vx * dt;
           d.y += d.vy * dt;
           /* Slight terminal-speed ease — heavier drops settle into pace */
@@ -820,20 +1106,20 @@ export function createLightningStyle(deps) {
       const BAND_NEAR = 0.75;
       const BAND_MID = 0.95;
 
-      const RISE_MIN = 8;
-      const RISE_MAX = 20;
-      const ACTIVE_MIN = 300;
-      const ACTIVE_MAX = 900;
-      const AFTERGLOW_MIN = 200;
-      const AFTERGLOW_MAX = 500;
+      /* Rise / active / afterglow ranges are live via shared Pixel Behavior
+         (riseMin/Max, activeMin/Max, afterglowMin/Max at style scope). */
 
-      /* Base stamp radii — scaled per-strike by rolled width */
+      /* Base stamp radii — scaled per-strike by rolled width + reaction */
       const BASE_MAIN_RADIUS = 4.2;
       const BASE_BRANCH_RADIUS = 2.5;
       const BASE_ILLUM_RADIUS = 16;
       const GLOW_EPS = 0.006;
-      const SAMPLE_STEP = CELL * 0.6;
       const STRIKE_BLOOM_THRESHOLD = 0.28;
+
+      function sampleStepPx() {
+        /* Lower Effect Quality → coarser bolt sampling (fewer stamps). */
+        return CELL * (0.6 + (1 - effectQuality) * 0.55);
+      }
 
       const HISTORY_SIZE = 14;
       const MIN_SEPARATION = 72;
@@ -1134,37 +1420,58 @@ export function createLightningStyle(deps) {
         return n;
       }
 
-      /* Cursor as electrical attractor — distance bands keep the storm alive but focused. */
+      /* Cursor as electrical attractor — distance bands keep the storm alive but focused.
+         Cursor Mode adjusts pull / scatter without a separate animation loop. */
       function pickStrikeTarget() {
+        syncCursorModeFromConfig();
+        const bias = cursorBias;
         const cx = ptrX >= 0 ? ptrX : viewW * 0.5;
         const cy = ptrY >= 0 ? ptrY : viewH * 0.45;
+
+        if (bias.freeze) {
+          /* Stabilize — hold strikes near last calm target, no chase */
+          clampInto(scratchTarget, cx + rand(-18, 18), cy + rand(-12, 12));
+          scratchTarget.y = Math.max(CELL * 6, Math.min(scratchTarget.y, viewH - CELL * 2));
+          return scratchTarget;
+        }
+
         const speed = Math.hypot(ptrVX, ptrVY);
-        const leadX = speed > 0.3 ? clamp01(speed / 18) * ptrVX * 3.2 : 0;
-        const leadY = speed > 0.3 ? clamp01(speed / 18) * ptrVY * 1.4 : 0;
+        const leadX = speed > 0.3 ? clamp01(speed / 18) * ptrVX * 3.2 * moveScale : 0;
+        const leadY = speed > 0.3 ? clamp01(speed / 18) * ptrVY * 1.4 * moveScale : 0;
         const ax = cx + leadX;
         const ay = cy + leadY;
         const farCap = Math.min(TARGET_FAR_MAX, Math.max(TARGET_MID + 40, Math.hypot(viewW, viewH) * 0.32));
+        const scatter = Math.max(0.35, bias.scatter);
+        const pull = bias.pull;
 
         for (let attempt = 0; attempt < 22; attempt++) {
           const band = Math.random();
           let dist;
           if (band < BAND_NEAR) {
             /* ~75% land within ~100px of the cursor */
-            dist = Math.sqrt(Math.random()) * TARGET_NEAR;
+            dist = Math.sqrt(Math.random()) * TARGET_NEAR * scatter;
             dist = Math.max(14, dist);
           } else if (band < BAND_MID) {
             /* ~20% within ~200px */
-            dist = TARGET_NEAR + Math.random() * (TARGET_MID - TARGET_NEAR);
+            dist = TARGET_NEAR + Math.random() * (TARGET_MID - TARGET_NEAR) * scatter;
           } else {
             /* ~5% farther — keeps the storm unpredictable */
-            dist = TARGET_MID + Math.random() * (farCap - TARGET_MID);
+            dist = TARGET_MID + Math.random() * (farCap - TARGET_MID) * scatter;
+          }
+
+          /* Repel pushes landings outward; Attract tightens toward cursor */
+          if (pull < 0) {
+            dist = Math.max(dist, TARGET_MID * (0.55 + Math.abs(pull) * 0.45));
+          } else if (pull > 1) {
+            dist *= 1 / pull;
           }
 
           const angle = rand(0, Math.PI * 2);
           let tx = ax + Math.cos(angle) * dist;
           let ty = ay + Math.sin(angle) * dist;
           /* Soft vertical pull toward the attractor so bolts feel drawn to the cursor */
-          ty = ty * 0.62 + ay * 0.38 + rand(-10, 10);
+          const pullAmt = Math.max(0, Math.min(1, 0.38 * Math.max(pull, 0)));
+          ty = ty * (1 - pullAmt) + ay * pullAmt + rand(-10, 10) * scatter;
 
           clampInto(scratchTarget, tx, ty);
           scratchTarget.y = Math.max(CELL * 6, Math.min(scratchTarget.y, viewH - CELL * 2));
@@ -1174,24 +1481,32 @@ export function createLightningStyle(deps) {
 
         /* Escape hatch — push away from the densest recent hit while staying near cursor */
         const escapeAng = rand(0, Math.PI * 2);
+        const escapeR = pull < 0 ? rand(90, 160) : rand(48, 110);
         clampInto(
           scratchTarget,
-          ax + Math.cos(escapeAng) * rand(48, 110),
-          ay + Math.sin(escapeAng) * rand(28, 80)
+          ax + Math.cos(escapeAng) * escapeR,
+          ay + Math.sin(escapeAng) * rand(28, 80) * scatter
         );
         scratchTarget.y = Math.max(CELL * 6, scratchTarget.y);
         return scratchTarget;
       }
 
       function pickOrigin() {
+        syncCursorModeFromConfig();
+        const bias = cursorBias;
         const cursorX = ptrX >= 0 ? ptrX : viewW * 0.5;
-        const tight = rand(24, 100);
+        const tight = rand(24, 100) * Math.max(0.5, bias.scatter);
         let ox = cursorX + rand(-tight, tight);
 
-        const roll = Math.random();
-        if (roll < 0.2) ox = cursorX + rand(-tight * 2.2, tight * 2.2);
-        else if (roll < 0.3) {
-          ox = cursorX + (Math.random() < 0.5 ? -1 : 1) * rand(tight * 1.3, tight * 2.6);
+        if (bias.pull < 0) {
+          /* Repel origins drift away from cursor */
+          ox = cursorX + (Math.random() < 0.5 ? -1 : 1) * rand(tight * 1.4, tight * 2.8);
+        } else {
+          const roll = Math.random();
+          if (roll < 0.2) ox = cursorX + rand(-tight * 2.2, tight * 2.2);
+          else if (roll < 0.3) {
+            ox = cursorX + (Math.random() < 0.5 ? -1 : 1) * rand(tight * 1.3, tight * 2.6);
+          }
         }
 
         scratchOrigin.x = clampX(ox);
@@ -1268,22 +1583,24 @@ export function createLightningStyle(deps) {
         const mainPersonality = fillPathPersonality(scratchPersonality, false);
 
         s.born = now;
-        /* Appear almost instantly, then hold active 0.3–0.9s before afterglow */
-        s.riseMs = rand(RISE_MIN, RISE_MAX);
-        s.activeMs = rand(ACTIVE_MIN, ACTIVE_MAX);
-        s.afterglowMs = rand(AFTERGLOW_MIN, AFTERGLOW_MAX);
+        /* Appear / hold / afterglow durations from shared Pixel Behavior */
+        s.riseMs = rand(riseMin, riseMax);
+        s.activeMs = rand(activeMin, activeMax);
+        s.afterglowMs = rand(afterglowMin, afterglowMax);
         s.brightness = rand(0.86, 1.0);
         s.flickerAmp = rand(0.035, 0.1);
-        s.flickerFreqA = rand(26, 48);
-        s.flickerFreqB = rand(52, 78);
-        s.flickerFreqC = rand(88, 130);
+        /* Movement Speed scales flicker tempo (baked at spawn) */
+        s.flickerFreqA = rand(26, 48) * moveScale;
+        s.flickerFreqB = rand(52, 78) * moveScale;
+        s.flickerFreqC = rand(88, 130) * moveScale;
         s.flickerPhaseA = rand(0, Math.PI * 2);
         s.flickerPhaseB = rand(0, Math.PI * 2);
         s.flickerPhaseC = rand(0, Math.PI * 2);
         s.width = width;
-        s.mainRadius = BASE_MAIN_RADIUS * width;
-        s.branchRadius = BASE_BRANCH_RADIUS * width * branchScale;
-        s.illumRadius = BASE_ILLUM_RADIUS * (0.85 + width * 0.45);
+        /* Reaction Strength scales stamp size; energy applied live in envelopes */
+        s.mainRadius = BASE_MAIN_RADIUS * width * reactionScale;
+        s.branchRadius = BASE_BRANCH_RADIUS * width * branchScale * reactionScale;
+        s.illumRadius = BASE_ILLUM_RADIUS * (0.85 + width * 0.45) * reactionScale;
         s.illumStrength = rand(0.55, 0.9) * (0.9 + width * 0.15);
         s.mainLen = generateBolt(
           origin.x, origin.y,
@@ -1347,10 +1664,11 @@ export function createLightningStyle(deps) {
 
         const rise = s.riseMs;
         const active = s.activeMs;
+        const peak = s.brightness * reactionScale;
 
         /* Near-instant appear */
         if (age < rise) {
-          return s.brightness * smootherstep(age / Math.max(1, rise));
+          return peak * smootherstep(age / Math.max(1, rise));
         }
 
         /* Active phase only — subtle unstable electricity flicker */
@@ -1362,7 +1680,7 @@ export function createLightningStyle(deps) {
             Math.sin(t * s.flickerFreqB + s.flickerPhaseB) * s.flickerAmp * 0.55;
           const crackleWave = Math.sin(t * s.flickerFreqC + s.flickerPhaseC);
           const crackle = crackleWave > 0.9 ? 0.9 : crackleWave < -0.92 ? 0.94 : 1;
-          return s.brightness * clamp01(flicker * crackle);
+          return peak * clamp01(flicker * crackle);
         }
 
         /* Active bolt is replaced by afterglow — no more full bolt body */
@@ -1376,7 +1694,7 @@ export function createLightningStyle(deps) {
         const afterAge = age - start;
         if (afterAge >= s.afterglowMs) return 0;
         /* Smooth fade of the lighter electrical afterimage */
-        return s.brightness * 0.72 * (1 - smootherstep(afterAge / s.afterglowMs));
+        return s.brightness * reactionScale * 0.72 * (1 - smootherstep(afterAge / s.afterglowMs));
       }
 
       /* Surrounding pixel illumination — lives through active + afterglow, then gone */
@@ -1386,15 +1704,16 @@ export function createLightningStyle(deps) {
 
         const rise = s.riseMs;
         const end = activeEndMs(s);
+        const peak = s.illumStrength * reactionScale;
 
         if (age < rise) {
-          return s.illumStrength * smootherstep(age / Math.max(1, rise));
+          return peak * smootherstep(age / Math.max(1, rise));
         }
         if (age < end) {
-          return s.illumStrength;
+          return peak;
         }
         const afterAge = age - end;
-        return s.illumStrength * (1 - smootherstep(afterAge / s.afterglowMs));
+        return peak * (1 - smootherstep(afterAge / s.afterglowMs));
       }
 
       function stampPoint(buf, px, py, energy, radius, softPow) {
@@ -1436,7 +1755,7 @@ export function createLightningStyle(deps) {
           const x1 = ptsX[i + 1];
           const y1 = ptsY[i + 1];
           const dist = Math.hypot(x1 - x0, y1 - y0);
-          const steps = Math.max(1, (dist / SAMPLE_STEP) | 0);
+          const steps = Math.max(1, (dist / sampleStepPx()) | 0);
           const inv = 1 / steps;
           const rSeg = varyWidth
             ? radius * (0.93 + 0.12 * Math.sin(i * 1.7 + x0 * 0.03))
@@ -1549,9 +1868,118 @@ export function createLightningStyle(deps) {
           }
         }
 
+        /* Cursor Mode energy field — continuous electrical presence between strikes */
+        const cursorLit = applyCursorEnergyField(now);
+        if (cursorLit.glow) anyGlow = true;
+        if (cursorLit.after) anyAfter = true;
+        if (cursorLit.illum) anyIllum = true;
+
         glowAlive = anyGlow;
         afterAlive = anyAfter;
         illumAlive = anyIllum;
+      }
+
+      /**
+       * Stamp Cursor Mode presence into glow / illum / after.
+       * Attract pulls energy in; Repel forms a ring; Disturb sparks;
+       * Freeze stabilizes a calm disk; Paint leaves a Trail Lifetime trail.
+       */
+      function applyCursorEnergyField(now) {
+        syncCursorModeFromConfig();
+        const bias = cursorBias;
+        const out = { glow: false, after: false, illum: false };
+
+        if (bias.paintTrail) ageCursorPaint();
+
+        if (ptrX < 0) {
+          if (bias.paintTrail && cursorPaintTrail.length) {
+            for (let t = 0; t < cursorPaintTrail.length; t++) {
+              const p = cursorPaintTrail[t];
+              if (p.w < 0.05) continue;
+              stampPoint(illum, p.x, p.y, 0.55 * p.w * reactionScale, 3.2, 2);
+              stampPoint(after, p.x, p.y, 0.35 * p.w * reactionScale, 4.0, 2);
+              out.illum = true;
+              out.after = true;
+            }
+          }
+          return out;
+        }
+
+        const gE = bias.fieldGlow * (0.55 + 0.45 * reactionScale);
+        const iE = bias.fieldIllum * (0.55 + 0.45 * reactionScale);
+        const rScale = Math.max(0.65, reactionScale);
+
+        if (bias.freezeField) {
+          stampPoint(illum, ptrX, ptrY, Math.max(0.4, iE), 5.2 * rScale, 2);
+          stampPoint(glow, ptrX, ptrY, 0.18 * rScale, 2.4 * rScale, 3);
+          out.illum = true;
+          out.glow = true;
+          return out;
+        }
+
+        if (gE > 0.02) {
+          if (bias.rainPush > 0.1) {
+            /* Repel — energized ring pushed away from cursor */
+            const ring = 18 * rScale;
+            for (let k = 0; k < 8; k++) {
+              const ang = (k / 8) * Math.PI * 2 + now * 0.0011;
+              stampPoint(
+                glow,
+                ptrX + Math.cos(ang) * ring,
+                ptrY + Math.sin(ang) * ring * 0.72,
+                gE * 0.55,
+                2.1 * rScale,
+                3
+              );
+            }
+            stampPoint(glow, ptrX, ptrY, gE * 0.2, 1.6 * rScale, 3);
+          } else {
+            stampPoint(glow, ptrX, ptrY, gE, 3.4 * rScale, 2);
+          }
+          out.glow = true;
+        }
+
+        if (iE > 0.02) {
+          const illumR = bias.rainPush < -0.1 ? 6.2 * rScale : 4.6 * rScale;
+          stampPoint(illum, ptrX, ptrY, iE, illumR, 2);
+          out.illum = true;
+        }
+
+        if (bias.spark > 0) {
+          const sparks = 5 + ((bias.spark * 4) | 0);
+          for (let s = 0; s < sparks; s++) {
+            const n1 = Math.sin(now * 0.013 + s * 17.1 + ptrX * 0.05) * 43758.5453;
+            const n2 = Math.sin(now * 0.019 + s * 9.3 + ptrY * 0.07) * 43758.5453;
+            const j1 = n1 - Math.floor(n1);
+            const j2 = n2 - Math.floor(n2);
+            const ang = j1 * Math.PI * 2;
+            const dist = 8 + j2 * 28 * bias.spark;
+            const sx = ptrX + Math.cos(ang) * dist;
+            const sy = ptrY + Math.sin(ang) * dist * 0.8;
+            const se = (0.35 + j2 * 0.55) * bias.spark * reactionScale;
+            stampPoint(glow, sx, sy, se, 1.15 + j1 * 1.1, 3);
+            if (j2 > 0.55) {
+              stampPoint(illum, sx, sy, se * 0.45, 2.2, 2);
+              out.illum = true;
+            }
+          }
+          out.glow = true;
+        }
+
+        if (bias.paintTrail) {
+          for (let t = 0; t < cursorPaintTrail.length; t++) {
+            const p = cursorPaintTrail[t];
+            if (p.w < 0.05) continue;
+            stampPoint(illum, p.x, p.y, 0.7 * p.w * reactionScale, 3.4, 2);
+            stampPoint(after, p.x, p.y, 0.4 * p.w * reactionScale, 4.2, 2);
+            stampPoint(glow, p.x, p.y, 0.22 * p.w * reactionScale, 1.8, 3);
+            out.illum = true;
+            out.after = true;
+            out.glow = true;
+          }
+        }
+
+        return out;
       }
 
       function render(drawCtx) {
@@ -1669,8 +2097,17 @@ export function createLightningStyle(deps) {
         ptrVX = ptrVY = 0;
       }
 
-      function onResize(nextCols, nextRows) {
-        if (nextCols === gridCols && nextRows === gridRows && glow && after && illum) return;
+      function onResize(nextCols, nextRows, force) {
+        if (
+          !force &&
+          nextCols === gridCols &&
+          nextRows === gridRows &&
+          glow &&
+          after &&
+          illum
+        ) {
+          return;
+        }
         gridCols = nextCols;
         gridRows = nextRows;
         const n = Math.max(1, gridCols * gridRows);
@@ -1685,6 +2122,17 @@ export function createLightningStyle(deps) {
 
       function isAlive() {
         if (glowAlive || afterAlive || illumAlive) return true;
+        if (cursorPaintTrail.length > 0) return true;
+        if (
+          ptrX >= 0 &&
+          cursorBias &&
+          (cursorBias.fieldGlow > 0 ||
+            cursorBias.fieldIllum > 0 ||
+            cursorBias.spark > 0 ||
+            cursorBias.freezeField)
+        ) {
+          return true;
+        }
         for (let i = 0; i < POOL_SIZE; i++) {
           if (pool[i].alive) return true;
         }
@@ -1740,6 +2188,7 @@ export function createLightningStyle(deps) {
     }
 
     function paintRest() {
+      /* Density sync generates over the powered gray panel — never a black cut. */
       ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
       ctx.fillRect(0, 0, viewW, viewH);
 
@@ -1765,18 +2214,62 @@ export function createLightningStyle(deps) {
       }
     }
 
-    function resize() {
-      const rect = syncStageRect();
-      viewW = Math.max(1, Math.round(rect.width));
-      viewH = Math.max(1, Math.round(rect.height));
-      dpr = Math.min(window.devicePixelRatio || 1, 2);
+    /** Density teardown / sync — neutral system colors only (no Settings RGB). */
+    function densityOpsActive() {
+      if (typeof pixelField.densityOpsActive === 'function') {
+        return pixelField.densityOpsActive();
+      }
+      return (
+        (typeof pixelField.teardownActive === 'function' &&
+          pixelField.teardownActive()) ||
+        (typeof pixelField.recalibrationActive === 'function' &&
+          pixelField.recalibrationActive())
+      );
+    }
 
-      const nextCols = Math.ceil(viewW / CELL);
-      const nextRows = Math.ceil(viewH / CELL);
+    function resize() {
+      if (
+        pixelField &&
+        typeof pixelField.densityChangeLocked === 'function' &&
+        pixelField.densityChangeLocked()
+      ) {
+        const authority =
+          typeof pixelField.getDensityAuthority === 'function'
+            ? pixelField.getDensityAuthority()
+            : null;
+        if (authority && authority.cols > 0 && authority.cell > 0) {
+          CELL = authority.cell;
+          DOT = Math.max(1, CELL - 2);
+          cols = authority.cols | 0;
+          rows = authority.rows | 0;
+          viewW = authority.viewW > 0 ? authority.viewW : viewW;
+          viewH = authority.viewH > 0 ? authority.viewH : viewH;
+          if (authority.dpr > 0) dpr = authority.dpr;
+          if (enabled) {
+            applySurface();
+            paintRest();
+            if (pixelField.isActive() || weatherAlive()) start();
+          }
+        }
+        return;
+      }
+      const rect = syncStageRect();
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      if (grid && grid.cell > 0) {
+        CELL = grid.cell;
+        DOT = Math.max(1, CELL - 2);
+      } else {
+        applyPerformanceDensity();
+      }
+      const layout = computeGridLayout(rect.width, rect.height, CELL);
+      const nextCols = layout.cols;
+      const nextRows = layout.rows;
       const gridChanged = nextCols !== cols || nextRows !== rows;
 
       cols = nextCols;
       rows = nextRows;
+      viewW = layout.viewW;
+      viewH = layout.viewH;
 
       if (gridChanged) {
         pixelField.onResize(cols, rows);
@@ -1791,10 +2284,63 @@ export function createLightningStyle(deps) {
       if (pixelField.isActive() || weatherAlive()) start();
     }
 
+    /**
+     * Full local rebuild after Pixel Density — always reset from authority.
+     * @param {object} [info]
+     */
+    function rebuildForDensity(info) {
+      syncPerformanceFromConfig();
+      const authority =
+        info && info.cols > 0
+          ? info
+          : pixelField &&
+              typeof pixelField.getDensityAuthority === 'function'
+            ? pixelField.getDensityAuthority()
+            : null;
+      if (authority && authority.cols > 0 && authority.rows > 0 && authority.cell > 0) {
+        CELL = authority.cell;
+        DOT = Math.max(1, CELL - 2);
+        cols = authority.cols | 0;
+        rows = authority.rows | 0;
+        viewW = authority.viewW > 0 ? authority.viewW : viewW;
+        viewH = authority.viewH > 0 ? authority.viewH : viewH;
+        if (authority.dpr > 0) dpr = authority.dpr;
+      } else {
+        applyPerformanceDensity();
+        const rect = syncStageRect();
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const layout = computeGridLayout(rect.width, rect.height, CELL);
+        cols = layout.cols;
+        rows = layout.rows;
+        viewW = layout.viewW;
+        viewH = layout.viewH;
+      }
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+      clickWeather.reset();
+      for (let i = 0; i < weatherLayers.length; i++) {
+        weatherLayers[i].onResize(cols, rows, true);
+        if (typeof weatherLayers[i].reset === 'function') {
+          weatherLayers[i].reset();
+        }
+      }
+      cursorPaintTrail.length = 0;
+      hideCursorDot();
+      lastNow = 0;
+
+      if (!enabled) return;
+      applySurface();
+      paintRest();
+      start();
+    }
+
     function renderIntroLeds() {
-      lightningTheme.sync();
-      const HOT = lightningTheme.base;
-      const GLOW = lightningTheme.glow;
+      const densityOps = densityOpsActive();
+      /* Density rebuild stays neutral; live Lightning uses the RGB theme. */
+      if (!densityOps) lightningTheme.sync();
+      const HOT = densityOps ? COOL : lightningTheme.base;
+      const GLOW = densityOps ? COOL : lightningTheme.glow;
+      const HI = densityOps ? COOL : lightningTheme.highlight;
       const n = cols * rows;
       let any = false;
 
@@ -1822,18 +2368,21 @@ export function createLightningStyle(deps) {
         const energy = introHv;
         const eased = energy * energy * (3 - 2 * energy);
         const tint = Math.min(1, Math.pow(eased, COLOR_FALLOFF));
+        const q = effectQuality;
+        const bloomStrength = BLOOM_STRENGTH * q;
+        const bloomThreshold = BLOOM_THRESHOLD + (1 - q) * 0.15;
 
-        if (tint > BLOOM_THRESHOLD) {
-          const bloom = (tint - BLOOM_THRESHOLD) / (1 - BLOOM_THRESHOLD);
+        if (q > 0.08 && tint > bloomThreshold) {
+          const bloom = (tint - bloomThreshold) / (1 - bloomThreshold);
           const bEase = bloom * bloom * (3 - 2 * bloom);
           const br = (GLOW[0] + (255 - GLOW[0]) * 0.2) | 0;
           const bg = (GLOW[1] + (255 - GLOW[1]) * 0.2) | 0;
           const bb = (GLOW[2] + (255 - GLOW[2]) * 0.2) | 0;
           const sOuter = size + DOT * BLOOM_SPREAD;
           const sInner = size + DOT * BLOOM_SPREAD * 0.45;
-          ctx.fillStyle = `rgba(${br},${bg},${bb},${bEase * BLOOM_STRENGTH * 0.34})`;
+          ctx.fillStyle = `rgba(${br},${bg},${bb},${bEase * bloomStrength * 0.34})`;
           ctx.fillRect(cx - sOuter * 0.5, cy - sOuter * 0.5, sOuter, sOuter);
-          ctx.fillStyle = `rgba(${br},${bg},${bb},${bEase * BLOOM_STRENGTH * 0.55})`;
+          ctx.fillStyle = `rgba(${br},${bg},${bb},${bEase * bloomStrength * 0.55})`;
           ctx.fillRect(cx - sInner * 0.5, cy - sInner * 0.5, sInner, sInner);
         }
 
@@ -1842,10 +2391,9 @@ export function createLightningStyle(deps) {
         let b = COOL[2] + (HOT[2] - COOL[2]) * tint;
         if (tint > 0) {
           const lift = tint * BLOOM_BRIGHTNESS;
-          const hi = lightningTheme.highlight;
-          r += (hi[0] - r) * lift;
-          g += (hi[1] - g) * lift * 0.85;
-          b += (hi[2] - b) * lift * 0.9;
+          r += (HI[0] - r) * lift;
+          g += (HI[1] - g) * lift * 0.85;
+          b += (HI[2] - b) * lift * 0.9;
         }
 
         ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
@@ -1868,6 +2416,19 @@ export function createLightningStyle(deps) {
         return;
       }
 
+      if (
+        perfMgr &&
+        typeof perfMgr.beginFrameIfDue === 'function' &&
+        !perfMgr.beginFrameIfDue(now)
+      ) {
+        requestAnimationFrame(tick);
+        return;
+      }
+
+      if (perfMgr && typeof perfMgr.getEffectiveQuality === 'function') {
+        effectQuality = perfMgr.getEffectiveQuality();
+      }
+
       /* Stable pacing — clamp spikes, floor tiny gaps so motion stays even */
       let dt = lastNow ? (now - lastNow) / 1000 : 1 / 60;
       if (dt > 0.045) dt = 0.045;
@@ -1877,18 +2438,37 @@ export function createLightningStyle(deps) {
       lightningTheme.sync();
 
       const introAlive = pixelField.update(now);
+      const densityOps = densityOpsActive();
+      const tearingDown =
+        typeof pixelField.teardownActive === 'function' &&
+        pixelField.teardownActive();
 
       paintRest();
 
-      for (let i = 0; i < weatherLayers.length; i++) {
-        weatherLayers[i].update(dt, now);
-      }
-      for (let i = 0; i < weatherLayers.length; i++) {
-        weatherLayers[i].render(ctx, cols, rows, CELL, DOT);
+      /* Weather is a live mode effect — hold it during density teardown / sync. */
+      if (!densityOps) {
+        for (let i = 0; i < weatherLayers.length; i++) {
+          weatherLayers[i].update(dt, now);
+        }
+        for (let i = 0; i < weatherLayers.length; i++) {
+          weatherLayers[i].render(ctx, cols, rows, CELL, DOT);
+        }
       }
 
       const ledsAlive = renderIntroLeds();
-      const alive = introAlive || ledsAlive || weatherAlive();
+      const recalib =
+        typeof pixelField.recalibrationActive === 'function' &&
+        pixelField.recalibrationActive();
+      const alive =
+        introAlive ||
+        ledsAlive ||
+        (!densityOps && weatherAlive()) ||
+        recalib ||
+        tearingDown;
+
+      if (perfMgr && typeof perfMgr.endFrame === 'function') {
+        perfMgr.endFrame(performance.now());
+      }
 
       if (alive) {
         requestAnimationFrame(tick);
@@ -1911,6 +2491,7 @@ export function createLightningStyle(deps) {
         running = false;
         lastNow = 0;
         hideCursorDot();
+        cursorPaintTrail.length = 0;
         clickWeather.reset();
         for (let i = 0; i < weatherLayers.length; i++) {
           weatherLayers[i].reset();
@@ -1920,6 +2501,7 @@ export function createLightningStyle(deps) {
 
       lightningTheme.sync();
       lastNow = 0;
+      cursorPaintTrail.length = 0;
       if (viewW) {
         applySurface();
         paintRest();
@@ -1948,10 +2530,26 @@ export function createLightningStyle(deps) {
       if (enabled) start();
     });
 
-    window.addEventListener('animconfigchange', () => {
+    window.addEventListener('animconfigchange', (e) => {
+      /* Soft behavior / quality — density rebuild is PixelDensityChanged.
+         Never applyPerformanceDensity on soft paths (would desync CELL from cols/rows). */
+      if (e.detail && e.detail.soft) {
+        const bh = syncBehaviorFromConfig();
+        const cm = syncCursorModeFromConfig();
+        syncPerformanceFromConfig();
+        if ((bh || cm) && enabled) start();
+        return;
+      }
+      syncPerformanceFromConfig();
       lightningTheme.sync();
       if (enabled) start();
     });
+
+    if (events && typeof events.on === 'function') {
+      events.on(PixelEvents.PixelDensityChanged, (info) => {
+        rebuildForDensity(info);
+      });
+    }
 
     /* SYSTEM 8 → SYSTEM 9: timing events become unique bolt geometry */
     window.addEventListener('lightningstrike', (e) => {
@@ -1961,6 +2559,15 @@ export function createLightningStyle(deps) {
         !pixelField.interactionsEnabled()
       ) {
         return;
+      }
+      if (
+        typeof pixelField.cellInteractive === 'function' &&
+        ptrX >= 0 &&
+        CELL > 0
+      ) {
+        const cx = Math.min(cols - 1, Math.max(0, (ptrX / CELL) | 0));
+        const cy = Math.min(rows - 1, Math.max(0, (ptrY / CELL) | 0));
+        if (!pixelField.cellInteractive(cy * cols + cx)) return;
       }
       const now = e.detail && e.detail.time != null ? e.detail.time : performance.now();
       if (strikes.spawn(now)) start();
@@ -1974,14 +2581,6 @@ export function createLightningStyle(deps) {
 
     document.addEventListener('mousemove', (e) => {
       if (!enabled) return;
-      if (
-        typeof pixelField.interactionsEnabled === 'function' &&
-        !pixelField.interactionsEnabled()
-      ) {
-        ptrX = ptrY = -1;
-        hideCursorDot();
-        return;
-      }
       syncStageRect();
       const x = e.clientX - stageLeft;
       const y = e.clientY - stageTop;
@@ -1992,6 +2591,8 @@ export function createLightningStyle(deps) {
       }
       ptrX = x;
       ptrY = y;
+      syncCursorModeFromConfig();
+      if (cursorBias.paintTrail) pushCursorPaint(x, y);
       showCursorDot(x, y);
       start();
     }, { passive: true });
@@ -2010,6 +2611,11 @@ export function createLightningStyle(deps) {
       const x = e.clientX - stageLeft;
       const y = e.clientY - stageTop;
       if (x < 0 || y < 0 || x > viewW || y > viewH) return;
+      if (typeof pixelField.cellInteractive === 'function' && CELL > 0) {
+        const cx = Math.min(cols - 1, Math.max(0, (x / CELL) | 0));
+        const cy = Math.min(rows - 1, Math.max(0, (y / CELL) | 0));
+        if (!pixelField.cellInteractive(cy * cols + cx)) return;
+      }
       clickWeather.spawn(x, y, performance.now());
       start();
     });
@@ -2025,6 +2631,8 @@ export function createLightningStyle(deps) {
   return {
     id: 'lightning',
     implemented: true,
+    /** Live Pixel Behavior snapshot received from the shared layer. */
+    getPixelBehavior: () => behavior,
     mount() {},
     destroy() {},
   };

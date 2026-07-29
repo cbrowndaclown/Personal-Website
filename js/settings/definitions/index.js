@@ -8,8 +8,16 @@ export {
 } from './styles.js';
 
 export {
-  PIXEL_FS_GLOBAL_SETTINGS,
-  PIXEL_FS_STYLE_SETTINGS,
-  STATIC_SECTIONS,
-  STYLE_SETTINGS_SECTION,
+  SETTINGS_CATEGORIES,
+  SETTINGS,
+  EMPTY_SETTINGS_MESSAGE,
+  getSettingsForCategory,
+  resetSettingsToDefaults,
 } from './settings.js';
+
+export {
+  PIXEL_UI_SCALE,
+  createUiScale,
+  scaledSliderSetting,
+  snapToStep,
+} from '../scale.js';

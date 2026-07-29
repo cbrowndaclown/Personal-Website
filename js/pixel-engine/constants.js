@@ -14,7 +14,7 @@ export const COOL = Object.freeze([255, 255, 255]);
 
 /** Pixel FS style registry — engine keys + availability. */
 export const PIXEL_FIELD_STYLES = Object.freeze({
-  heat:         { implemented: true,  label: 'Magnetic' },
+  heat:         { implemented: true,  label: 'Heat' },
   wave:         { implemented: true,  label: 'Wave' },
   lightning:    { implemented: true,  label: 'Lightning' },
   experimental: { implemented: false, label: 'Experimental' },
@@ -24,6 +24,21 @@ export const PIXEL_FIELD_STYLES = Object.freeze({
 export const PixelEvents = Object.freeze({
   GridInitialized: 'GridInitialized',
   GridResized: 'GridResized',
+  /** Pixel Density changed — full lattice rebuild (presence, LEDs, style sim). */
+  PixelDensityChanged: 'PixelDensityChanged',
+  /**
+   * Density change requested — tear down the live lattice before any remount.
+   * Grid cell size is NOT applied yet; rebuild follows in a later phase.
+   */
+  PixelDensityTeardownRequest: 'PixelDensityTeardownRequest',
+  /** Center-out density teardown started / finished. */
+  PixelDensityTeardownStart: 'PixelDensityTeardownStart',
+  PixelDensityTeardownEnd: 'PixelDensityTeardownEnd',
+  /** Full density transition finished (teardown + generate + menu hold). */
+  PixelDensityTransitionEnd: 'PixelDensityTransitionEnd',
+  /** Density recalibration sync started / finished (center-out presence wave). */
+  PixelRecalibrationStart: 'PixelRecalibrationStart',
+  PixelRecalibrationEnd: 'PixelRecalibrationEnd',
   PixelFSChanged: 'PixelFSChanged',
   SettingsUpdated: 'SettingsUpdated',
   InteractionDetected: 'InteractionDetected',

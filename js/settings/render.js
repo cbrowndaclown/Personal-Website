@@ -1,6 +1,20 @@
 /* Config → DOM — renders reusable controls from SettingDef entries. */
 
-import { createRow, createSegment, createRgbControl } from './controls/index.js';
+import {
+  createRow,
+  createSegment,
+  createRgbControl,
+  createToggle,
+  createSlider,
+  createDropdown,
+  createColorPicker,
+  createNumberInput,
+} from './controls/index.js';
+import { createSection } from './section.js';
+import {
+  SETTINGS,
+  EMPTY_SETTINGS_MESSAGE,
+} from './definitions/index.js';
 
 /**
  * Resolve option list for a setting definition.
@@ -12,13 +26,39 @@ function resolveOptions(def) {
 }
 
 /**
+ * Apply disabledWhen to a row + optional control lock.
+ * @param {ReturnType<typeof createRow>} row
+ * @param {{ setLocked?: (on: boolean) => void } | null} control
+ * @param {import('./definitions/settings.js').SettingDef} def
+ * @param {object} api
+ */
+function syncDisabled(row, control, def, api) {
+  const disabled =
+    typeof def.disabledWhen === 'function' && def.disabledWhen(api);
+  row.setDisabled(!!disabled);
+  if (control && typeof control.setLocked === 'function') {
+    control.setLocked(!!disabled);
+  }
+}
+
+/**
+ * Whether changing this setting may alter which rows are visible / enabled.
+ * Those need a full inspector sync; continuous knobs do not.
+ * @param {import('./definitions/settings.js').SettingDef} def
+ */
+function needsInspectorSync(def) {
+  return def.type === 'segment' || def.id === 'style' || def.id === 'motion';
+}
+
+/**
  * Mount one setting control into a section body.
  * @param {HTMLElement} body
  * @param {import('./definitions/settings.js').SettingDef} def
  * @param {object} api
- * @returns {{ sync: () => void }}
+ * @param {{ suppressSync?: () => void, allowSync?: () => void, requestSync?: () => void }} [syncGate]
+ * @returns {{ root: HTMLElement, sync: () => void }}
  */
-export function renderSetting(body, def, api) {
+export function renderSetting(body, def, api, syncGate) {
   const row = createRow({
     id: `settings-${def.id}-row`,
     label: def.label,
@@ -28,6 +68,20 @@ export function renderSetting(body, def, api) {
 
   /** @type {(() => void) | null} */
   let syncControl = null;
+
+  function applySet(value, extra) {
+    const quiet = syncGate && !needsInspectorSync(def);
+    if (quiet) syncGate.suppressSync();
+    try {
+      if (extra !== undefined) def.set(api, value, extra);
+      else def.set(api, value);
+    } finally {
+      if (quiet) syncGate.allowSync();
+    }
+    if (syncGate && needsInspectorSync(def) && typeof syncGate.requestSync === 'function') {
+      syncGate.requestSync();
+    }
+  }
 
   if (def.type === 'segment') {
     const allOptions = resolveOptions(def);
@@ -42,7 +96,7 @@ export function renderSetting(body, def, api) {
       labelledBy: row.labelId,
       value: initial,
       options: activeOptions,
-      onChange: (value) => def.set(api, value),
+      onChange: (value) => applySet(value),
     });
     row.body.appendChild(seg.root);
 
@@ -62,20 +116,18 @@ export function renderSetting(body, def, api) {
       });
 
     syncControl = () => {
-      const disabled = typeof def.disabledWhen === 'function' && def.disabledWhen(api);
       const value = def.resolveValue
         ? def.resolveValue(api, selectable)
         : def.get(api);
       seg.setValue(value);
-      row.setDisabled(!!disabled);
-      seg.setLocked(!!disabled);
+      syncDisabled(row, seg, def, api);
     };
   } else if (def.type === 'rgb') {
     const rgb = createRgbControl({
       id: `settings-${def.id}`,
       labelledBy: row.labelId,
       value: def.get(api),
-      onChange: (c, publish) => def.set(api, c, publish),
+      onChange: (c, publish) => applySet(c, publish),
     });
     if (def.metaRow) {
       const meta = row.root.querySelector('.settings__meta');
@@ -85,12 +137,91 @@ export function renderSetting(body, def, api) {
 
     syncControl = () => {
       rgb.setValue(def.get(api));
-      if (typeof def.disabledWhen === 'function') {
-        row.setDisabled(!!def.disabledWhen(api));
-      }
+      syncDisabled(row, null, def, api);
+    };
+  } else if (def.type === 'toggle') {
+    const toggle = createToggle({
+      id: `settings-${def.id}`,
+      labelledBy: row.labelId,
+      value: !!def.get(api),
+      onChange: (value) => applySet(value),
+    });
+    row.body.appendChild(toggle.root);
+
+    syncControl = () => {
+      toggle.setValue(!!def.get(api));
+      syncDisabled(row, toggle, def, api);
+    };
+  } else if (def.type === 'slider') {
+    const range = def.range || { min: 0, max: 100, step: 1 };
+    const slider = createSlider({
+      id: `settings-${def.id}`,
+      labelledBy: row.labelId,
+      value: Number(def.get(api)),
+      min: range.min,
+      max: range.max,
+      step: range.step,
+      unit: range.unit,
+      onChange: (value) => applySet(value),
+    });
+    row.body.appendChild(slider.root);
+
+    syncControl = () => {
+      slider.setValue(Number(def.get(api)));
+      syncDisabled(row, slider, def, api);
+    };
+  } else if (def.type === 'dropdown') {
+    const options = resolveOptions(def);
+    const dropdown = createDropdown({
+      id: `settings-${def.id}`,
+      labelledBy: row.labelId,
+      value: String(def.get(api)),
+      options,
+      onChange: (value) => applySet(value),
+    });
+    row.body.appendChild(dropdown.root);
+
+    syncControl = () => {
+      dropdown.setValue(String(def.get(api)));
+      syncDisabled(row, dropdown, def, api);
+    };
+  } else if (def.type === 'color') {
+    const color = createColorPicker({
+      id: `settings-${def.id}`,
+      labelledBy: row.labelId,
+      value: String(def.get(api)),
+      onChange: (value) => applySet(value),
+    });
+    if (def.metaRow) {
+      const meta = row.root.querySelector('.settings__meta');
+      if (meta) meta.appendChild(color.swatch);
+    }
+    row.body.appendChild(color.root);
+
+    syncControl = () => {
+      color.setValue(String(def.get(api)));
+      syncDisabled(row, color, def, api);
+    };
+  } else if (def.type === 'number') {
+    const range = def.range || {};
+    const number = createNumberInput({
+      id: `settings-${def.id}`,
+      labelledBy: row.labelId,
+      value: Number(def.get(api)),
+      min: range.min,
+      max: range.max,
+      step: range.step,
+      unit: range.unit,
+      onChange: (value) => applySet(value),
+    });
+    row.body.appendChild(number.root);
+
+    syncControl = () => {
+      number.setValue(Number(def.get(api)));
+      syncDisabled(row, number, def, api);
     };
   } else {
-    /* Reserved for slider / dropdown / toggle / button — leave a quiet stub row. */
+    /* Reserved / unknown types — quiet stub so the registry stays extensible. */
     const stub = document.createElement('span');
     stub.className = 'settings__empty';
     stub.textContent = `Unsupported control type: ${def.type}`;
@@ -98,9 +229,14 @@ export function renderSetting(body, def, api) {
     syncControl = () => {};
   }
 
+  if (def.styleId) {
+    row.root.dataset.styleId = def.styleId;
+  }
+
   body.appendChild(row.root);
 
   return {
+    root: row.root,
     sync() {
       if (syncControl) syncControl();
     },
@@ -108,76 +244,158 @@ export function renderSetting(body, def, api) {
 }
 
 /**
- * Render a list of setting definitions into a section body.
+ * Mount settings into a body and return sync + row handles.
  * @param {HTMLElement} body
  * @param {import('./definitions/settings.js').SettingDef[]} defs
  * @param {object} api
- * @returns {{ sync: () => void }}
+ * @param {{ suppressSync?: () => void, allowSync?: () => void, requestSync?: () => void }} [syncGate]
  */
-export function bindSettings(body, defs, api) {
-  const handles = (defs || []).map((def) => renderSetting(body, def, api));
-  return {
-    sync() {
-      handles.forEach((h) => h.sync());
-    },
-  };
+function mountSettingHandles(body, defs, api, syncGate) {
+  return defs.map((def) => ({
+    def,
+    ...renderSetting(body, def, api, syncGate),
+  }));
 }
 
 /**
- * Render style-specific settings for every registered style; show only the active group.
+ * Sync row visibility for style-scoped settings; returns visible count.
+ * @param {Array<{ def: import('./definitions/settings.js').SettingDef, root: HTMLElement, sync: () => void }>} handles
+ * @param {string} styleId
+ */
+function syncSettingHandles(handles, styleId) {
+  let visible = 0;
+  handles.forEach((handle) => {
+    const show = !handle.def.styleId || handle.def.styleId === styleId;
+    if (handle.root.hidden !== !show) {
+      handle.root.hidden = !show;
+    }
+    if (show) {
+      visible += 1;
+      handle.sync();
+    }
+  });
+  return visible;
+}
+
+/**
+ * Render every setting for a category, including config-driven nested
+ * sections. Style-scoped rows/sections hide when inactive; empty categories
+ * show a clean placeholder.
+ *
  * @param {HTMLElement} body
  * @param {object} opts
+ * @param {string} opts.categoryId
+ * @param {import('./definitions/settings.js').SettingsSectionDef[]} [opts.sections]
  * @param {object} opts.api
- * @param {Record<string, import('./definitions/settings.js').SettingDef[]>} opts.styleSettings
- * @param {string} opts.emptyMessage
- * @param {(title: string) => void} [opts.setTitle]
  * @param {(api: object) => string} opts.resolveStyleId
- * @param {(styleId: string) => string} opts.getStyleLabel
- * @returns {{ sync: () => void }}
+ * @param {string} [opts.emptyMessage]
+ * @param {{ suppressSync?: () => void, allowSync?: () => void, requestSync?: () => void }} [opts.syncGate]
+ * @returns {{
+ *   sync: () => void,
+ *   sections: Array<{
+ *     id: string,
+ *     root: HTMLElement,
+ *     body: HTMLElement,
+ *     isOpen: () => boolean,
+ *     setOpen: (open: boolean, animate?: boolean) => void,
+ *     setTitle: (text: string) => void
+ *   }>
+ * }}
  */
-export function bindStyleSpecificSettings(body, opts) {
-  const { api, styleSettings, emptyMessage, setTitle, resolveStyleId, getStyleLabel } =
-    opts;
+export function bindCategorySettings(body, opts) {
+  const {
+    categoryId,
+    sections: sectionDefs = [],
+    api,
+    resolveStyleId,
+    emptyMessage = EMPTY_SETTINGS_MESSAGE,
+    syncGate,
+  } = opts;
+
+  const knownSectionIds = new Set(sectionDefs.map((s) => s.id));
+  const categoryDefs = SETTINGS.filter((def) => def.categoryId === categoryId);
+  const rootDefs = categoryDefs.filter(
+    (def) => !def.sectionId || !knownSectionIds.has(def.sectionId)
+  );
 
   const empty = document.createElement('p');
   empty.className = 'settings__empty';
   empty.textContent = emptyMessage;
   body.appendChild(empty);
 
-  /** @type {Map<string, { root: HTMLElement, sync: () => void, count: number }>} */
-  const groups = new Map();
+  /** @type {Array<{ def: import('./definitions/settings.js').SettingsSectionDef, section: ReturnType<typeof createSection>, handles: ReturnType<typeof mountSettingHandles>, empty: HTMLElement, lastVisible: number }>} */
+  const nested = [];
 
-  Object.keys(styleSettings).forEach((styleId) => {
-    const defs = styleSettings[styleId] || [];
-    const group = document.createElement('div');
-    group.className = 'settings__style-group';
-    group.dataset.style = styleId;
-    group.hidden = true;
-    const bound = bindSettings(group, defs, api);
-    body.appendChild(group);
-    groups.set(styleId, { root: group, sync: bound.sync, count: defs.length });
+  sectionDefs.forEach((sectionDef) => {
+    const sectionEmptyMsg = sectionDef.emptyMessage || emptyMessage;
+    const section = createSection({
+      id: `${categoryId}__${sectionDef.id}`,
+      title: sectionDef.title,
+      defaultOpen: !!sectionDef.defaultOpen,
+      className: 'settings__section--nested',
+    });
+
+    const sectionEmpty = document.createElement('p');
+    sectionEmpty.className = 'settings__empty';
+    sectionEmpty.textContent = sectionEmptyMsg;
+    section.body.appendChild(sectionEmpty);
+
+    const defs = categoryDefs.filter((def) => def.sectionId === sectionDef.id);
+    const handles = mountSettingHandles(section.body, defs, api, syncGate);
+
+    if (sectionDef.styleId) {
+      section.root.dataset.styleId = sectionDef.styleId;
+    }
+
+    nested.push({
+      def: sectionDef,
+      section,
+      handles,
+      empty: sectionEmpty,
+      lastVisible: -1,
+    });
+    body.appendChild(section.root);
   });
+
+  const rootHandles = mountSettingHandles(body, rootDefs, api, syncGate);
+
+  let lastStyleId = null;
+  let lastVisible = -1;
 
   function sync() {
     const styleId = resolveStyleId(api);
-    const label = getStyleLabel(styleId);
-    if (typeof setTitle === 'function') {
-      setTitle(`${label} Settings`);
-    }
+    let visible = 0;
 
-    let activeCount = 0;
-    groups.forEach((group, id) => {
-      const isActive = id === styleId;
-      const show = isActive && group.count > 0;
-      group.root.hidden = !show;
-      if (isActive) {
-        activeCount = group.count;
-        if (show) group.sync();
+    nested.forEach((entry) => {
+      const sectionShow =
+        !entry.def.styleId || entry.def.styleId === styleId;
+      if (entry.section.root.hidden !== !sectionShow) {
+        entry.section.root.hidden = !sectionShow;
       }
+      if (!sectionShow) {
+        entry.lastVisible = 0;
+        return;
+      }
+
+      const sectionVisible = syncSettingHandles(entry.handles, styleId);
+      if (sectionVisible !== entry.lastVisible) {
+        entry.empty.hidden = sectionVisible > 0;
+        entry.lastVisible = sectionVisible;
+      }
+      if (sectionVisible > 0) visible += 1;
     });
 
-    empty.hidden = activeCount > 0;
+    visible += syncSettingHandles(rootHandles, styleId);
+
+    if (visible !== lastVisible || styleId !== lastStyleId) {
+      empty.hidden = visible > 0;
+      lastVisible = visible;
+      lastStyleId = styleId;
+    }
   }
 
-  return { sync };
+  return {
+    sync,
+    sections: nested.map((entry) => entry.section),
+  };
 }

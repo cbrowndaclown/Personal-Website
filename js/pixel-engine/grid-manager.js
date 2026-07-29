@@ -18,6 +18,56 @@ import { CELL, PixelEvents } from './constants.js';
  */
 
 /**
+ * Compute lattice size that fully covers a viewport.
+ *
+ * Uses the raw (possibly fractional) CSS box — never Math.round-then-ceil,
+ * which under-counts by a full row/column when the fractional part is in
+ * (0, 0.5) and the rounded edge lands on a cell boundary.
+ *
+ * viewW/viewH are ceil'd so the canvas backing never sits short of the stage.
+ *
+ * @param {number} width
+ * @param {number} height
+ * @param {number} cell
+ * @returns {{ cols: number, rows: number, viewW: number, viewH: number, cell: number }}
+ */
+export function computeGridLayout(width, height, cell) {
+  const c = cell > 0 && Number.isFinite(cell) ? cell : CELL;
+  const w = Math.max(0, Number(width) || 0);
+  const h = Math.max(0, Number(height) || 0);
+  /* Epsilon keeps exact multiples from floating one step past an integer. */
+  let cols = Math.max(1, Math.ceil(w / c - 1e-9));
+  let rows = Math.max(1, Math.ceil(h / c - 1e-9));
+  /* Hard coverage guarantee against float dust / adverse rounding. */
+  while (cols * c < w) cols += 1;
+  while (rows * c < h) rows += 1;
+  const viewW = Math.max(1, Math.ceil(w - 1e-9));
+  const viewH = Math.max(1, Math.ceil(h - 1e-9));
+  return { cols, rows, viewW, viewH, cell: c };
+}
+
+/**
+ * True when the lattice completely covers the measured viewport box.
+ * @param {{ cols: number, rows: number, cell: number, viewW?: number, viewH?: number }} layout
+ * @param {{ width: number, height: number }} box
+ * @returns {boolean}
+ */
+export function gridCoversViewport(layout, box) {
+  if (!layout || !box) return false;
+  const cell = layout.cell > 0 ? layout.cell : CELL;
+  const w = Math.max(0, Number(box.width) || 0);
+  const h = Math.max(0, Number(box.height) || 0);
+  const cols = layout.cols | 0;
+  const rows = layout.rows | 0;
+  if (cols < 1 || rows < 1 || !(cell > 0)) return false;
+  if (cols * cell + 1e-6 < w) return false;
+  if (rows * cell + 1e-6 < h) return false;
+  if (layout.viewW != null && layout.viewW + 1e-6 < w) return false;
+  if (layout.viewH != null && layout.viewH + 1e-6 < h) return false;
+  return true;
+}
+
+/**
  * @param {object} options
  * @param {HTMLElement} options.stage
  * @param {import('./events.js').EventSystem} options.events
@@ -49,22 +99,26 @@ export function createGridManager(options) {
 
   /**
    * Recompute grid from the stage box. Emits GridResized when dimensions change.
+   * @param {{ silent?: boolean, reason?: string }} [opts]
    * @returns {GridInfo}
    */
-  function measure() {
+  function measure(opts) {
+    const silent = !!(opts && opts.silent);
+    const reason = (opts && opts.reason) || null;
     const rect = syncStageRect();
-    viewW = Math.max(1, Math.round(rect.width));
-    viewH = Math.max(1, Math.round(rect.height));
     dpr = Math.min(window.devicePixelRatio || 1, 2);
 
-    const nextCols = Math.ceil(viewW / cell);
-    const nextRows = Math.ceil(viewH / cell);
+    const layout = computeGridLayout(rect.width, rect.height, cell);
+    const nextCols = layout.cols;
+    const nextRows = layout.rows;
+    viewW = layout.viewW;
+    viewH = layout.viewH;
     const changed = nextCols !== cols || nextRows !== rows;
 
     cols = nextCols;
     rows = nextRows;
 
-    /** @type {GridInfo} */
+    /** @type {GridInfo & { reason?: string|null, covers?: boolean }} */
     const info = {
       cols,
       rows,
@@ -76,9 +130,14 @@ export function createGridManager(options) {
       stageTop,
       rect,
       changed,
+      reason,
+      covers: gridCoversViewport(
+        { cols, rows, cell, viewW, viewH },
+        rect,
+      ),
     };
 
-    if (changed) {
+    if (changed && !silent) {
       events.emit(PixelEvents.GridResized, info);
     }
 
@@ -86,17 +145,66 @@ export function createGridManager(options) {
   }
 
   /**
-   * Future density control — cell size change reallocates the grid.
-   * @param {number} nextCell
+   * Remeasure until the lattice covers the live stage box.
+   * Call after density remounts before generation / paint begins.
+   * @returns {GridInfo}
    */
-  function setCellSize(nextCell) {
-    const n = Math.max(1, nextCell | 0);
-    if (n === cell) return getInfo();
-    cell = n;
-    /* Force changed=true path by clearing dims */
+  function ensureCoverage() {
+    let info = measure({ silent: true, reason: 'coverage' });
+    if (info.covers) return info;
+    /* One forced remount of dims — clears stale cols/rows before remeasure. */
     cols = 0;
     rows = 0;
-    return measure();
+    info = measure({ silent: true, reason: 'coverage' });
+    if (!info.covers) {
+      const layout = computeGridLayout(
+        info.rect.width,
+        info.rect.height,
+        cell,
+      );
+      cols = layout.cols;
+      rows = layout.rows;
+      viewW = layout.viewW;
+      viewH = layout.viewH;
+      info = {
+        ...info,
+        cols,
+        rows,
+        cell,
+        viewW,
+        viewH,
+        changed: true,
+        covers: gridCoversViewport(
+          { cols, rows, cell, viewW, viewH },
+          info.rect,
+        ),
+      };
+    }
+    return info;
+  }
+
+  /**
+   * Density control — cell size change reallocates the grid and emits
+   * PixelDensityChanged so boot/styles can fully reinitialize (not soft-patch).
+   * @param {number} nextCell
+   * @param {{ silent?: boolean }} [opts] — silent skips GridResized + PixelDensityChanged
+   *   (caller allocates the boot field first, then notifies styles).
+   */
+  function setCellSize(nextCell, opts) {
+    const n = Math.max(1, Number(nextCell));
+    if (!Number.isFinite(n) || n === cell) return getInfo();
+    cell = n;
+    /* Force remount of dims even when ceil(view/cell) is unchanged */
+    cols = 0;
+    rows = 0;
+    const info = measure({ silent: true, reason: 'density' });
+    info.changed = true;
+    info.reason = 'density';
+    if (!(opts && opts.silent)) {
+      events.emit(PixelEvents.GridResized, info);
+      events.emit(PixelEvents.PixelDensityChanged, info);
+    }
+    return info;
   }
 
   function getInfo() {
@@ -111,6 +219,10 @@ export function createGridManager(options) {
       stageTop,
       rect: stage.getBoundingClientRect(),
       changed: false,
+      covers: gridCoversViewport(
+        { cols, rows, cell, viewW, viewH },
+        stage.getBoundingClientRect(),
+      ),
     };
   }
 
@@ -143,6 +255,7 @@ export function createGridManager(options) {
     start,
     destroy,
     measure,
+    ensureCoverage,
     syncStageRect,
     setCellSize,
     getInfo,

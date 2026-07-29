@@ -3,6 +3,7 @@
 import { createSection } from './section.js';
 import { bindAccordion } from './accordion.js';
 import { getSettingsCatalog } from './catalog.js';
+import { resetSettingsToDefaults } from './definitions/index.js';
 
 /**
  * @param {object} api
@@ -25,19 +26,29 @@ export function initSettings(api) {
   let open = false;
   const icon = btn.querySelector('.settings__icon');
 
-  /* Gear spin tracks wheel/trackpad 1:1 — no inertia after scroll stops */
+  /* Gear spin tracks wheel/trackpad — rAF-coalesced, no forced JS scroll */
   let gearAngle = 0;
+  let gearRaf = 0;
+  let pendingGearDelta = 0;
   const GEAR_SCALE = 0.22;
   const GEAR_MIN_ANGLE = -75;
   const GEAR_MAX_ANGLE = 75;
 
   function nudgeGear(deltaY) {
     if (!deltaY) return;
-    gearAngle = Math.min(
-      GEAR_MAX_ANGLE,
-      Math.max(GEAR_MIN_ANGLE, gearAngle + deltaY * GEAR_SCALE)
-    );
-    if (icon) icon.style.transform = `rotate(${gearAngle}deg)`;
+    pendingGearDelta += deltaY;
+    if (gearRaf) return;
+    gearRaf = requestAnimationFrame(() => {
+      gearRaf = 0;
+      const delta = pendingGearDelta;
+      pendingGearDelta = 0;
+      if (!delta || !icon) return;
+      gearAngle = Math.min(
+        GEAR_MAX_ANGLE,
+        Math.max(GEAR_MIN_ANGLE, gearAngle + delta * GEAR_SCALE)
+      );
+      icon.style.transform = `rotate(${gearAngle}deg)`;
+    });
   }
 
   function setOpen(next) {
@@ -54,21 +65,40 @@ export function initSettings(api) {
     }
   }
 
-  /* Mount catalog sections (definitions → render → section chrome) */
+  /* Skip inspector DOM rewrites while the user is driving a continuous control */
+  let suppressSyncDepth = 0;
   const syncFns = [];
   const sectionHandles = [];
 
-  getSettingsCatalog(api).forEach((entry) => {
-    const title =
-      typeof entry.title === 'function' ? entry.title(api) : entry.title;
+  function syncFromConfig() {
+    if (suppressSyncDepth > 0) return;
+    syncFns.forEach((fn) => fn());
+  }
+
+  const syncGate = {
+    suppressSync() {
+      suppressSyncDepth += 1;
+    },
+    allowSync() {
+      suppressSyncDepth = Math.max(0, suppressSyncDepth - 1);
+    },
+    requestSync() {
+      syncFromConfig();
+    },
+  };
+
+  getSettingsCatalog(api, syncGate).forEach((entry) => {
     const section = createSection({
       id: entry.id,
-      title,
+      title: entry.title,
       defaultOpen: !!entry.defaultOpen,
-      build: (sectionBody, helpers) => {
-        const handle = entry.build(sectionBody, helpers);
+      build: (sectionBody) => {
+        const handle = entry.build(sectionBody);
         if (handle && typeof handle.sync === 'function') {
           syncFns.push(handle.sync);
+        }
+        if (handle && Array.isArray(handle.sections)) {
+          sectionHandles.push(...handle.sections);
         }
       },
     });
@@ -79,24 +109,60 @@ export function initSettings(api) {
   bindAccordion({
     container: body,
     sections: sectionHandles,
-    maxOpen: 2,
   });
 
-  function syncFromConfig() {
-    syncFns.forEach((fn) => fn());
-  }
+  /* Reset footer — data-driven via SETTINGS defaultValue */
+  const foot = document.createElement('div');
+  foot.className = 'settings__foot';
+  const resetBtn = document.createElement('button');
+  resetBtn.type = 'button';
+  resetBtn.className = 'settings__reset';
+  resetBtn.id = 'settings-reset';
+  resetBtn.textContent = 'Reset to Defaults';
+  resetBtn.setAttribute('aria-label', 'Reset all settings to defaults');
+  resetBtn.addEventListener('click', () => {
+    resetSettingsToDefaults(api);
+    syncFromConfig();
+  });
+  foot.appendChild(resetBtn);
+  panel.appendChild(foot);
 
-  window.addEventListener('animconfigchange', syncFromConfig);
+  window.addEventListener('animconfigchange', (e) => {
+    /* Soft Pixel Behavior updates paint the active slider themselves —
+       skip full inspector rewrites (no React/UI churn). */
+    if (e.detail && e.detail.soft) return;
+    syncFromConfig();
+  });
+  /* Density teardown / rebuild locks the Pixel Density slider mid-transition. */
+  window.addEventListener('pixeldensitylockchange', () => {
+    syncFromConfig();
+  });
   syncFromConfig();
 
-  /* Contain all wheel/trackpad to panel content; page scrolls when pointer leaves */
+  /*
+    Native scroll inside .settings__body — only preventDefault at edges /
+    over chrome so the page underneath does not move. Avoids rewriting
+    scrollTop on every wheel tick (main scroll lag source).
+  */
   panel.addEventListener(
     'wheel',
     (e) => {
       if (!open) return;
-      e.preventDefault();
       nudgeGear(e.deltaY);
-      body.scrollTop += e.deltaY;
+
+      const overBody = e.target === body || body.contains(/** @type {Node} */ (e.target));
+      if (overBody) {
+        const maxScroll = body.scrollHeight - body.clientHeight;
+        if (maxScroll <= 0) {
+          e.preventDefault();
+          return;
+        }
+        const atTop = body.scrollTop <= 0 && e.deltaY < 0;
+        const atBottom = body.scrollTop >= maxScroll - 0.5 && e.deltaY > 0;
+        if (atTop || atBottom) e.preventDefault();
+        return;
+      }
+      e.preventDefault();
     },
     { passive: false }
   );

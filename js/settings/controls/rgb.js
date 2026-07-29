@@ -69,12 +69,18 @@ export function createRgbControl(opts) {
   }
 
   function paint(rgb) {
-    channels.r.input.value = String(rgb.r);
-    channels.g.input.value = String(rgb.g);
-    channels.b.input.value = String(rgb.b);
-    channels.r.val.textContent = String(rgb.r);
-    channels.g.val.textContent = String(rgb.g);
-    channels.b.val.textContent = String(rgb.b);
+    const r = String(rgb.r);
+    const g = String(rgb.g);
+    const b = String(rgb.b);
+
+    if (channels.r.input.value !== r) channels.r.input.value = r;
+    if (channels.g.input.value !== g) channels.g.input.value = g;
+    if (channels.b.input.value !== b) channels.b.input.value = b;
+
+    if (channels.r.val.textContent !== r) channels.r.val.textContent = r;
+    if (channels.g.val.textContent !== g) channels.g.val.textContent = g;
+    if (channels.b.val.textContent !== b) channels.b.val.textContent = b;
+
     swatch.style.background = `rgb(${rgb.r},${rgb.g},${rgb.b})`;
   }
 

@@ -43,7 +43,7 @@ export function createRenderer(options) {
     const cell = override && override.cell != null ? override.cell : grid.cell || CELL;
     const viewW = override && override.viewW != null ? override.viewW : grid.viewW;
     const viewH = override && override.viewH != null ? override.viewH : grid.viewH;
-    const dot = cell - 2;
+    const dot = Math.max(1, cell - 2);
 
     ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
     ctx.fillRect(0, 0, viewW, viewH);
