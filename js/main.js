@@ -5,6 +5,7 @@
 import { initSettings } from './settings/index.js';
 import { initSettingsPersistence } from './settings/persist.js';
 import { createPixelEngine } from './pixel-engine/index.js';
+import { initAppScroll } from './app-scroll/index.js';
 
 (function () {
   'use strict';
@@ -16,212 +17,22 @@ import { createPixelEngine } from './pixel-engine/index.js';
   if (yearEl) yearEl.textContent = new Date().getFullYear();
 
   /* ─────────────────────────────────────────────────────────────────────────
-     1a. Top navigation — unified site-frame slides as one surface
-         Hidden:   translateY(-navH) — frame flush with viewport top
-         Revealed: translateY(0)     — nav attached above the frame
+     1. App scroll — (screen × nav) state machine
+         Down:  S1 Open → S1 Closed → S2 Closed
+         Up:    S2 Closed → S2 Open → S1 Open
+         One deliberate gesture → one edge. Nav uses existing site-frame
+         transform; screen changes are programmatic on #app-scroll.
+         Unlocks on pixeldirectory* / pixelbootready (same as prior topnav).
   ───────────────────────────────────────────────────────────────────────── */
-  (function initTopNav() {
-    const frame = document.getElementById('site-frame');
-    const nav = document.getElementById('topnav');
-    const homeBtn = document.getElementById('nav-home');
-    const home = document.getElementById('home');
-    if (!frame || !nav) return;
+  const appScroll = initAppScroll({
+    frame: document.getElementById('site-frame'),
+    nav: document.getElementById('topnav'),
+    shell: document.getElementById('app-scroll'),
+    screenIds: ['pixel-fs-screen-1', 'pixel-fs-screen-2'],
+  });
 
-    const SHOW_THRESHOLD = 56; /* px of upward intent before reveal */
-    const HIDE_THRESHOLD = 48; /* px of downward intent before hide */
-    const DIR_RESET_SLACK = 8;
-
-    let revealed = false;
-    let accum = 0;
-    let homeScrollRaf = 0;
-    /* Locked until intro (typography) completes — menu/directory may open settings. */
-    let navInteractive = false;
-
-    function unlockNav() {
-      navInteractive = true;
-    }
-
-    /* Intro owns the field — keep top nav parked for the full typography
-       sequence so settings / density cannot corrupt the intro lattice.
-       Unlock as soon as the menu (directory) animation begins. */
-    window.addEventListener('pixeldirectorystart', unlockNav);
-    window.addEventListener('pixeldirectoryhold', unlockNav);
-    /* Skip / reduced-motion / instant-ready paths */
-    window.addEventListener('pixelbootready', unlockNav);
-
-    function setRevealed(next) {
-      if (revealed === next) return;
-      revealed = next;
-      /* Only two states: parked (-navH via CSS) or flush (0) — no drift */
-      frame.classList.toggle('is-nav-revealed', revealed);
-      nav.setAttribute('aria-hidden', revealed ? 'false' : 'true');
-      accum = 0;
-      /* Hide settings if the nav parks away */
-      if (!revealed) {
-        window.dispatchEvent(new CustomEvent('topnavhide'));
-      }
-    }
-
-    function applyIntent(deltaY) {
-      if (!navInteractive || !deltaY) return;
-
-      if (accum !== 0 && Math.sign(deltaY) !== Math.sign(accum)) {
-        if (Math.abs(deltaY) >= DIR_RESET_SLACK) accum = 0;
-        else return;
-      }
-
-      accum += deltaY;
-
-      if (!revealed && accum <= -SHOW_THRESHOLD) {
-        setRevealed(true);
-      } else if (revealed && accum >= HIDE_THRESHOLD) {
-        setRevealed(false);
-      }
-    }
-
-    function getScrollY() {
-      return (
-        window.pageYOffset ||
-        document.documentElement.scrollTop ||
-        document.body.scrollTop ||
-        0
-      );
-    }
-
-    function easeInOutCubic(t) {
-      return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-    }
-
-    /* Smooth return to landing — ScrollToPlugin when present, else rAF */
-    function scrollToHome() {
-      const targetY = home
-        ? getScrollY() + home.getBoundingClientRect().top
-        : 0;
-
-      if (window.gsap && window.ScrollToPlugin) {
-        window.gsap.to(window, {
-          duration: 0.85,
-          scrollTo: { y: targetY, autoKill: true },
-          ease: 'power2.inOut',
-        });
-        return;
-      }
-
-      if (prefersReduced) {
-        window.scrollTo(0, targetY);
-        return;
-      }
-
-      if (homeScrollRaf) cancelAnimationFrame(homeScrollRaf);
-      const startY = getScrollY();
-      const delta = targetY - startY;
-      if (Math.abs(delta) < 1) return;
-
-      const duration = 850;
-      const startTime = performance.now();
-
-      function tick(now) {
-        const t = Math.min(1, (now - startTime) / duration);
-        window.scrollTo(0, startY + delta * easeInOutCubic(t));
-        if (t < 1) homeScrollRaf = requestAnimationFrame(tick);
-        else homeScrollRaf = 0;
-      }
-
-      homeScrollRaf = requestAnimationFrame(tick);
-    }
-
-    if (homeBtn) {
-      homeBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        if (!navInteractive) return;
-        scrollToHome();
-        /* Return to the parked landing composition */
-        setRevealed(false);
-      });
-    }
-
-    /* Document scroll is locked; wheel (desktop) + touch swipe (mobile/tablet)
-       drive reveal. Muted only while exclusive boot owns the stage. */
-    window.addEventListener(
-      'wheel',
-      (e) => {
-        if (!navInteractive) return;
-        if (e.target && e.target.closest && e.target.closest('.settings')) return;
-        applyIntent(e.deltaY);
-      },
-      { passive: true }
-    );
-
-    /* Touch: swipe down (finger moves down) opens nav; swipe up hides —
-       maps to the same intent as scroll-up / scroll-down on desktop. */
-    let touchActive = false;
-    let touchStartX = 0;
-    let touchStartY = 0;
-    let touchLastY = 0;
-    let touchAxisLocked = false; /* once set, gesture is vertical or ignored */
-    let touchIsVertical = false;
-
-    function touchIgnored(target) {
-      return !!(target && target.closest && target.closest('.settings'));
-    }
-
-    window.addEventListener(
-      'touchstart',
-      (e) => {
-        if (!navInteractive || e.touches.length !== 1 || touchIgnored(e.target)) {
-          touchActive = false;
-          return;
-        }
-        const t = e.touches[0];
-        touchActive = true;
-        touchStartX = t.clientX;
-        touchStartY = t.clientY;
-        touchLastY = t.clientY;
-        touchAxisLocked = false;
-        touchIsVertical = false;
-        accum = 0;
-      },
-      { passive: true }
-    );
-
-    window.addEventListener(
-      'touchmove',
-      (e) => {
-        if (!navInteractive || !touchActive || e.touches.length !== 1) return;
-        const t = e.touches[0];
-        const dx = t.clientX - touchStartX;
-        const dy = t.clientY - touchStartY;
-
-        if (!touchAxisLocked) {
-          if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
-          touchAxisLocked = true;
-          touchIsVertical = Math.abs(dy) >= Math.abs(dx);
-          if (!touchIsVertical) {
-            touchActive = false;
-            return;
-          }
-        } else if (!touchIsVertical) {
-          return;
-        }
-
-        const deltaFinger = t.clientY - touchLastY;
-        touchLastY = t.clientY;
-        /* Finger down → negative intent (open); finger up → positive (hide) */
-        applyIntent(-deltaFinger);
-      },
-      { passive: true }
-    );
-
-    function endTouchGesture() {
-      touchActive = false;
-      touchAxisLocked = false;
-      touchIsVertical = false;
-    }
-
-    window.addEventListener('touchend', endTouchGesture, { passive: true });
-    window.addEventListener('touchcancel', endTouchGesture, { passive: true });
-  })();
-
+  /* Debug / compatibility */
+  if (appScroll) window.appScroll = appScroll;
   /* ─────────────────────────────────────────────────────────────────────────
      Pixel Engine — grid, state, render, interaction, animation, Pixel FS
   ───────────────────────────────────────────────────────────────────────── */

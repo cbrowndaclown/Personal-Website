@@ -1056,29 +1056,94 @@ body {
 }
 
 /* ============================================================
-   PAGE SHELL — framed experience; no independent transform
+   PAGE SHELL — Ribbon frame: permanent outer shell.
+   Never a scroll container. Chrome padding + nameplate stay fixed;
+   #app-scroll moves Pixel FS screens inside.
    ============================================================ */
 .page-shell {
+  --shell-pad-top: clamp(27px, 3.5vh, 38px);
+  --shell-pad-x: clamp(8px, 1.7vw, 24px);
+
   position: relative;
   flex: 0 0 auto;
   width: 100%;
   height: 100vh;
   height: 100dvh;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  display: block;
   background-color: #FFFFFF;
   /* Original chrome: top + sides; bottom open */
   padding:
-    clamp(27px, 3.5vh, 38px)
-    clamp(8px, 1.7vw, 24px)
+    var(--shell-pad-top)
+    var(--shell-pad-x)
     0;
+  overflow: hidden;
+}
+
+/* ============================================================
+   APP SCROLL — sole primary vertical scrollport.
+   Native CSS snap between Pixel FS Screen 1 and Screen 2.
+   ============================================================ */
+.app-scroll {
+  position: absolute;
+  top: var(--shell-pad-top);
+  left: var(--shell-pad-x);
+  right: var(--shell-pad-x);
+  bottom: 0;
+  width: auto;
+  height: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: auto;
+  scroll-snap-type: y mandatory;
+  background-color: transparent;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  /* Screens size to this scrollport (one full application viewport). */
+  container-type: size;
+}
+
+.app-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+/* Boot attribute is an extra pin while exclusive boot owns the stage */
+body[data-boot] .app-scroll {
+  overflow-y: hidden;
+}
+
+/* ============================================================
+   PIXEL FS SCREENS — one full application viewport each.
+   100vh / 100cqh of the scrollport; snap-stop prevents mid rests.
+   ============================================================ */
+.pixel-fs-screen {
+  box-sizing: border-box;
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  height: 100cqh;
+  flex-shrink: 0;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+
+#pixel-fs-screen-1 {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+#pixel-fs-screen-2 {
+  /* Empty shell — content added in a later phase */
+  background-color: #FFFFFF;
 }
 
 /* ============================================================
    STAGE — pixel field clipped to a squircle viewport.
    No border, stroke, or outer shadow — sharp field → white page.
-   Bottom edge stays open.
+   Bottom edge stays open. Lives on Screen 1 only.
    ============================================================ */
 .stage {
   --stage-radius: clamp(36px, 5.2vw, 68px);
@@ -1086,6 +1151,7 @@ body {
   position: relative;
   flex: 1 1 auto;
   width: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 0;
@@ -1271,7 +1337,8 @@ body[data-motion="on"][data-bg-mode="lightning"] .lightning-cursor.is-in-field {
   .settings__btn { width: 36px; height: 36px; }
 
   .page-shell {
-    padding: 25px clamp(4px, 1.35vw, 8px) 0;
+    --shell-pad-top: 25px;
+    --shell-pad-x: clamp(4px, 1.35vw, 8px);
   }
 
   .stage {

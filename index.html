@@ -87,17 +87,38 @@
         </svg>
       </header>
 
-      <!-- Framed display: pixel field lives only inside; bottom edge stays open -->
-      <div class="stage">
-        <div class="stage__field" id="stage">
-          <canvas id="heatmap" class="heatmap" aria-hidden="true"></canvas>
-          <div class="lightning-cursor" id="lightning-cursor" aria-hidden="true"></div>
-        </div><!-- /.stage__field -->
-      </div><!-- /.stage -->
+      <!--
+        Ribbon frame (.page-shell) stays fixed.
+        #app-scroll is the sole vertical scrollport (CSS snap between screens).
+        Screen 1 keeps the existing pixel stage; Screen 2 is an empty shell.
+      -->
+      <div class="app-scroll" id="app-scroll">
+        <section
+          class="pixel-fs-screen"
+          id="pixel-fs-screen-1"
+          aria-label="Pixel FS Screen 1"
+        >
+          <!-- Framed display: pixel field lives only inside; bottom edge stays open -->
+          <div class="stage">
+            <div class="stage__field" id="stage">
+              <canvas id="heatmap" class="heatmap" aria-hidden="true"></canvas>
+              <div class="lightning-cursor" id="lightning-cursor" aria-hidden="true"></div>
+            </div><!-- /.stage__field -->
+          </div><!-- /.stage -->
 
-      <footer class="site-footer">
-        <span>© <span id="year"></span> Canaan Brown</span>
-      </footer>
+          <footer class="site-footer">
+            <span>© <span id="year"></span> Canaan Brown</span>
+          </footer>
+        </section>
+
+        <section
+          class="pixel-fs-screen"
+          id="pixel-fs-screen-2"
+          aria-label="Pixel FS Screen 2"
+        >
+          <!-- Screen 2 content intentionally empty — layout foundation only -->
+        </section>
+      </div><!-- /.app-scroll -->
     </div><!-- /.page-shell -->
   </div><!-- /.site-frame -->
 
