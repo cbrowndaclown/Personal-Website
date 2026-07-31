@@ -2,6 +2,9 @@
    Boot lifecycle is owned by the Boot Controller; this module supplies
    glyph construction, migration, directory assemble, and idle float.
 
+   Directory assemble supports Standard timing, density-rebuild timing, and
+   Space-skip Magnetic Lock (displaced menu pixels snap into alignment).
+
    Lattice geometry (cols / rows / cell) is adopted from the shared GridManager
    or the density-rebuild authority — never invented from pending Settings. */
 
@@ -11,6 +14,7 @@ import {
 } from '../performance-manager.js';
 import { computeGridLayout } from '../grid-manager.js';
 import { CELL as DEFAULT_CELL } from '../constants.js';
+import { clearAppStartup } from '../../app-startup.js';
 
 /**
  * @param {object} deps
@@ -56,6 +60,24 @@ export function createIntroController(deps) {
   const DIR_DRIFT_MIN      = 10;
   const DIR_DRIFT_MAX      = 28;
   const HOLD_SENTINEL      = 1e15;
+
+  /*
+    Magnetic Lock — Space-skip only. Completed menu starts slightly displaced
+    toward the display edges, then accelerates into perfect alignment. A brief
+    lock flash and sub-pixel mechanical shockwave mark synchronization.
+    End-to-end ~250ms. Mechanical snap — not bounce, fade, or drop.
+  */
+  const MAG_LOCK_DISP_MIN_PX     = 2.0;
+  const MAG_LOCK_DISP_MAX_PX     = 5.0;
+  const MAG_LOCK_CONVERGE_MS     = 180;
+  const MAG_LOCK_FLASH_HOLD_MS   = 10;
+  const MAG_LOCK_FLASH_FADE_MS   = 26;
+  const MAG_LOCK_SHOCK_MS        = 85;
+  const MAG_LOCK_SHOCK_PX        = 0.72;
+  const MAG_LOCK_SHOCK_RADIUS    = 4.5;
+  const MAG_LOCK_BRIGHT          = 1.16;
+  const MAG_LOCK_TOTAL_MS        =
+    MAG_LOCK_CONVERGE_MS + MAG_LOCK_SHOCK_MS;
 
   /* Startup directory assemble — deliberate full-length reveal. */
   const DIR_TIMING = Object.freeze({
@@ -185,6 +207,15 @@ export function createIntroController(deps) {
   /* Immutable completed glyph bitmap — idle never writes here */
   let dBitmap = null;
   let idleYCache = null; /* scratch: per-word Y for the current frame */
+
+  /* Space-skip Magnetic Lock — edge-displaced converge + lock flash + shock */
+  let directoryMagLock = false;
+  let magLockMinX = 0;
+  let magLockMaxX = 0;
+  let magLockMinY = 0;
+  let magLockMaxY = 0;
+  let magLockCx = 0;
+  let magLockCy = 0;
 
   function hash01(i, salt) {
     let x = Math.imul(i ^ (salt | 0), 0x27d4eb2d);
@@ -453,9 +484,36 @@ export function createIntroController(deps) {
     ledCell = layout.cell;
   }
 
-  function setBoot(flag) {
-    if (flag) document.body.dataset.boot = flag;
-    else delete document.body.dataset.boot;
+  /**
+   * Rows covering Pixel FS Screen 1 only — intro / directory stay composed in the
+   * landing viewport while the lattice paints the full device shell.
+   */
+  function resolveContentRows() {
+    if (sharedGrid && sharedGrid.contentRows > 0) {
+      return Math.max(1, Math.min(rows, sharedGrid.contentRows | 0));
+    }
+    const host =
+      document.getElementById('pixel-fs-screen-1-bounds')
+      || document.getElementById('pixel-fs-screen-1');
+    if (host && rows > 0) {
+      const cell = getLedCell();
+      const rect = host.getBoundingClientRect();
+      const layout = computeGridLayout(rect.width, rect.height, cell);
+      return Math.max(1, Math.min(rows, layout.rows));
+    }
+    return rows;
+  }
+
+  /** Active sample height for glyph baking (Pixel FS Screen 1 band). */
+  let sampleH = 0;
+
+  /**
+   * Intro must not write data-boot — that attribute is PE exclusive-boot
+   * visuals only. Shell unlock is owned by clearAppStartup().
+   * @param {string|null|undefined} _flag
+   */
+  function setBoot(_flag) {
+    void _flag;
   }
 
   function isActivePhase() {
@@ -577,8 +635,9 @@ export function createIntroController(deps) {
   }
 
   function sampleLineGlyphs(octx, text, cx, cy) {
+    const h = sampleH > 0 ? sampleH : rows;
     octx.fillStyle = '#000';
-    octx.fillRect(0, 0, cols, rows);
+    octx.fillRect(0, 0, cols, h);
     octx.fillStyle = '#fff';
     octx.textAlign = 'center';
     octx.textBaseline = 'middle';
@@ -588,10 +647,10 @@ export function createIntroController(deps) {
        threshold on the coarse grid — stamp a small solid glyph so they read. */
     reinforceTrailingPunct(octx, text, cx, cy);
 
-    const data = octx.getImageData(0, 0, cols, rows).data;
+    const data = octx.getImageData(0, 0, cols, h).data;
     const glyph = [];
-    let minX = cols, maxX = -1, minY = rows, maxY = -1;
-    for (let i = 0, n = cols * rows; i < n; i++) {
+    let minX = cols, maxX = -1, minY = h, maxY = -1;
+    for (let i = 0, n = cols * h; i < n; i++) {
       if (data[i * 4] <= 140) continue;
       glyph.push(i);
       const x = i % cols;
@@ -666,18 +725,21 @@ export function createIntroController(deps) {
 
     if (cols < 16 || rows < 16) return;
 
+    sampleH = resolveContentRows();
+    if (sampleH < 16) return;
+
     const off = document.createElement('canvas');
     off.width = cols;
-    off.height = rows;
+    off.height = sampleH;
     const octx = off.getContext('2d', { alpha: false });
     if (!octx) return;
 
     const lineCount = INTRO_LINES.length;
-    let fontPx = Math.max(5, Math.floor(rows * 0.085));
+    let fontPx = Math.max(5, Math.floor(sampleH * 0.085));
     fontPx = fitIntroFont(octx, INTRO_LINES, cols * 0.90, fontPx);
 
     let lineGap = fontPx * 1.55;
-    while (lineGap * (lineCount - 1) > rows * 0.72 && fontPx > 4) {
+    while (lineGap * (lineCount - 1) > sampleH * 0.72 && fontPx > 4) {
       fontPx -= 1;
       octx.font = `600 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
       lineGap = fontPx * 1.55;
@@ -687,7 +749,7 @@ export function createIntroController(deps) {
     lineGap = fontPx * 1.55;
 
     const blockH = lineGap * (lineCount - 1);
-    const startY = rows * 0.5 - blockH * 0.5;
+    const startY = sampleH * 0.5 - blockH * 0.5;
     const cx = cols * 0.5;
 
     let cursor = 0;
@@ -911,6 +973,7 @@ export function createIntroController(deps) {
 
   function clearDirectoryLeds() {
     /* Drop buffers entirely so scroll text cannot linger in canvas state */
+    directoryMagLock = false;
     dTarget = null;
     dOn = null;
     dLevel = null;
@@ -926,6 +989,194 @@ export function createIntroController(deps) {
     dBitmap = null;
     idleYCache = null;
     assembleMs = 0;
+  }
+
+  /**
+   * Convergence remain (1 → 0). Ease-in accelerates into alignment; the last
+   * fraction snaps hard — mechanical stop, not a soft settle.
+   * @param {number} u 0..1 time progress through MAG_LOCK_CONVERGE_MS
+   */
+  function magLockRemain(u) {
+    if (u >= 1) return 0;
+    if (u <= 0) return 1;
+    /* easeInQuint — slow start, rapidly accelerating lock */
+    const p = u * u * u * u * u;
+    const remain = 1 - p;
+    /* Crush the final ~8% of travel into a crisp snap */
+    if (remain < 0.08) return (remain * remain) / 0.08;
+    return remain;
+  }
+
+  /**
+   * Capture menu AABB + centroid for shockwave focus.
+   * @returns {boolean}
+   */
+  function captureMagLockBounds() {
+    if (!dTarget || !(cols > 0) || !(rows > 0)) return false;
+    const n = cols * rows;
+    let minX = cols;
+    let maxX = -1;
+    let minY = rows;
+    let maxY = -1;
+    let sumX = 0;
+    let sumY = 0;
+    let count = 0;
+    for (let i = 0; i < n; i++) {
+      if (!(dTarget[i] > 0)) continue;
+      const x = i % cols;
+      const y = (i / cols) | 0;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+      sumX += x;
+      sumY += y;
+      count++;
+    }
+    if (count < 1) return false;
+    magLockMinX = minX;
+    magLockMaxX = maxX;
+    magLockMinY = minY;
+    magLockMaxY = maxY;
+    magLockCx = sumX / count;
+    magLockCy = sumY / count;
+    return true;
+  }
+
+  /**
+   * Seed per-menu-pixel start offsets: outward along display axes (left→left,
+   * top→up, …). Magnitude always 2–5px — direction from grid position, not
+   * random scatter.
+   */
+  function seedMagLockDisplacements() {
+    if (!dBitmap || !dDriftX || !dDriftY) return;
+    const n = cols * rows;
+    const invCols = cols > 1 ? 1 / (cols - 1) : 0;
+    const invRows = rows > 1 ? 1 / (rows - 1) : 0;
+    const span = MAG_LOCK_DISP_MAX_PX - MAG_LOCK_DISP_MIN_PX;
+    for (let i = 0; i < n; i++) {
+      dDriftX[i] = 0;
+      dDriftY[i] = 0;
+      if (!(dBitmap[i] > 0)) continue;
+      const x = i % cols;
+      const y = (i / cols) | 0;
+      /* Display-normalized axes: -1 left/top → +1 right/bottom */
+      const nx = x * invCols * 2 - 1;
+      const ny = y * invRows * 2 - 1;
+      let len = Math.hypot(nx, ny);
+      let ux;
+      let uy;
+      if (len >= 0.12) {
+        ux = nx / len;
+        uy = ny / len;
+      } else {
+        /* Near display center — fall back to outward from menu centroid */
+        const vx = x - magLockCx;
+        const vy = y - magLockCy;
+        len = Math.hypot(vx, vy);
+        if (len > 1e-6) {
+          ux = vx / len;
+          uy = vy / len;
+        } else {
+          ux = hash01(i, 0xd02) - 0.5;
+          uy = hash01(i, 0xd03) - 0.5;
+          len = Math.hypot(ux, uy) || 1;
+          ux /= len;
+          uy /= len;
+        }
+      }
+      const mag =
+        MAG_LOCK_DISP_MIN_PX +
+        span * (0.55 + 0.45 * hash01(i, 0xd01));
+      dDriftX[i] = ux * mag;
+      dDriftY[i] = uy * mag;
+    }
+  }
+
+  /**
+   * Space-skip Magnetic Lock frame — converge, lock flash, micro shockwave.
+   * @param {number} t content-clock ms since lock start
+   */
+  function updateMagneticLock(t) {
+    if (!dOn || !dBitmap) return false;
+    const n = cols * rows;
+    dOn.fill(0);
+    if (dOx) dOx.fill(0);
+    if (dOy) dOy.fill(0);
+
+    const convergeMs = MAG_LOCK_CONVERGE_MS;
+    const locked = t >= convergeMs;
+
+    /* Convergence remain: 1 at t=0 → 0 at lock */
+    let remain = 0;
+    if (!locked) {
+      remain = magLockRemain(t / convergeMs);
+    }
+
+    /* Lock flash — brief synchronized brighten at the snap instant */
+    let brightMul = 1;
+    if (locked) {
+      const age = t - convergeMs;
+      if (age < MAG_LOCK_FLASH_HOLD_MS) {
+        brightMul = MAG_LOCK_BRIGHT;
+      } else if (age < MAG_LOCK_FLASH_HOLD_MS + MAG_LOCK_FLASH_FADE_MS) {
+        const u =
+          (age - MAG_LOCK_FLASH_HOLD_MS) / MAG_LOCK_FLASH_FADE_MS;
+        brightMul = MAG_LOCK_BRIGHT + (1 - MAG_LOCK_BRIGHT) * u;
+      }
+    }
+
+    /* Micro shockwave — instantaneous outward nudge, rapid distance falloff */
+    let shockAmp = 0;
+    if (locked && t < convergeMs + MAG_LOCK_SHOCK_MS) {
+      const u = (t - convergeMs) / MAG_LOCK_SHOCK_MS;
+      /* Cubic decay — felt more than seen */
+      const fade = 1 - u;
+      shockAmp = fade * fade * fade;
+    }
+
+    for (let i = 0; i < n; i++) {
+      const isMenu = dBitmap[i] > 0;
+      if (isMenu) {
+        const level = Math.min(1.12, dBitmap[i] * brightMul);
+        dOn[i] = level;
+        if (remain > 0.0001) {
+          if (dOx) dOx[i] = (dDriftX ? dDriftX[i] : 0) * remain;
+          if (dOy) dOy[i] = (dDriftY ? dDriftY[i] : 0) * remain;
+        }
+        continue;
+      }
+
+      if (shockAmp <= 0.001) continue;
+      const x = i % cols;
+      const y = (i / cols) | 0;
+
+      /* Only immediate surroundings of the menu block */
+      if (
+        x < magLockMinX - 2 ||
+        x > magLockMaxX + 2 ||
+        y < magLockMinY - 2 ||
+        y > magLockMaxY + 2
+      ) {
+        continue;
+      }
+
+      const vx = x - magLockCx;
+      const vy = y - magLockCy;
+      const dist = Math.hypot(vx, vy);
+      if (dist >= MAG_LOCK_SHOCK_RADIUS || dist < 1e-6) continue;
+
+      const spatial = 1 - dist / MAG_LOCK_SHOCK_RADIUS;
+      const w = spatial * spatial * shockAmp;
+      if (w <= 0.001) continue;
+
+      const sMag = w * MAG_LOCK_SHOCK_PX;
+      const inv = 1 / dist;
+      if (dOx) dOx[i] = vx * inv * sMag;
+      if (dOy) dOy[i] = vy * inv * sMag;
+    }
+
+    return true;
   }
 
   function arrowSizeFor(fontPx) {
@@ -980,8 +1231,9 @@ export function createIntroController(deps) {
   }
 
   function sampleLineWithArrow(octx, line, cx, cy, fontPx) {
+    const h = sampleH > 0 ? sampleH : rows;
     octx.fillStyle = '#000';
-    octx.fillRect(0, 0, cols, rows);
+    octx.fillRect(0, 0, cols, h);
     octx.fillStyle = '#fff';
     octx.font = `600 ${fontPx}px ${DIR_FONT}`;
     octx.textAlign = 'left';
@@ -1003,10 +1255,10 @@ export function createIntroController(deps) {
       line.arrow
     );
 
-    const data = octx.getImageData(0, 0, cols, rows).data;
+    const data = octx.getImageData(0, 0, cols, h).data;
     const glyph = [];
-    let minX = cols, maxX = -1, minY = rows, maxY = -1;
-    for (let i = 0, n = cols * rows; i < n; i++) {
+    let minX = cols, maxX = -1, minY = h, maxY = -1;
+    for (let i = 0, n = cols * h; i < n; i++) {
       if (data[i * 4] <= 140) continue;
       glyph.push(i);
       const x = i % cols;
@@ -1045,21 +1297,25 @@ export function createIntroController(deps) {
     dIdleWords = [];
     dBitmap = null;
     assembleMs = 0;
+    directoryMagLock = false;
 
     if (cols < 16 || rows < 16) return;
 
+    sampleH = resolveContentRows();
+    if (sampleH < 16) return;
+
     const off = document.createElement('canvas');
     off.width = cols;
-    off.height = rows;
+    off.height = sampleH;
     const octx = off.getContext('2d', { alpha: false });
     if (!octx) return;
 
     const lineCount = DIR_LINES.length;
-    let fontPx = Math.max(5, Math.floor(rows * 0.078));
+    let fontPx = Math.max(5, Math.floor(sampleH * 0.078));
     fontPx = fitDirFont(octx, DIR_LINES, cols * 0.90, fontPx);
 
     let lineGap = fontPx * 1.85;
-    while (lineGap * (lineCount - 1) > rows * 0.46 && fontPx > 4) {
+    while (lineGap * (lineCount - 1) > sampleH * 0.46 && fontPx > 4) {
       fontPx -= 1;
       lineGap = fontPx * 1.85;
     }
@@ -1068,7 +1324,7 @@ export function createIntroController(deps) {
     lineGap = fontPx * 1.85;
 
     const blockH = lineGap * (lineCount - 1);
-    const startY = rows * 0.5 - blockH * 0.5;
+    const startY = sampleH * 0.5 - blockH * 0.5;
     const cx = cols * 0.5;
     let cursor = 0;
 
@@ -1261,7 +1517,7 @@ export function createIntroController(deps) {
     holdingFF = false;
     timeScale = 1;
     resetContentClock();
-    /* Do not touch data-boot — boot controller owns it during exclusive phases */
+    /* Do not touch data-boot — exclusive boot visuals only; intro never owns it */
   }
 
   /**
@@ -1346,6 +1602,7 @@ export function createIntroController(deps) {
       timeScale = 1;
       typographySettled = true;
       setBoot(null);
+      clearAppStartup();
       window.dispatchEvent(new CustomEvent('pixeldirectorystart'));
       window.dispatchEvent(new CustomEvent('pixeldirectoryhold'));
       return;
@@ -1354,6 +1611,7 @@ export function createIntroController(deps) {
     resetContentClock();
     phase = 'directory';
     setBoot('directory');
+    clearAppStartup();
     window.dispatchEvent(new CustomEvent('pixeldirectorystart'));
   }
 
@@ -1414,6 +1672,20 @@ export function createIntroController(deps) {
     directoryAllowed = true;
     clearIntroLeds();
     if (!dOn) bakeDirectory();
+
+    /* Boot is finished — enable intro directory and release the app shell
+       (topnav, Screen 2, scroll, snap) without boot owning layout anymore. */
+    clearAppStartup();
+
+    /* No content to display (grid too small for directory layout).
+       Skip straight to idle so pixeldirectoryhold fires immediately
+       and callers waiting on the directory sequence are never stalled. */
+    if (assembleMs <= 0) {
+      resetContentClock();
+      enterIdle();
+      return;
+    }
+
     resetContentClock();
     phase = 'directory';
     setBoot('directory');
@@ -1421,10 +1693,13 @@ export function createIntroController(deps) {
   }
 
   function enterIdle() {
+    directoryMagLock = false;
     phase = 'idle';
     holdingFF = false;
     timeScale = 1;
     setBoot(null);
+    /* Safety net — shell normally unlocks when intro/directory is enabled. */
+    clearAppStartup();
     paintDirectoryHold();
     window.dispatchEvent(new CustomEvent('pixeldirectoryhold'));
   }
@@ -1472,13 +1747,43 @@ export function createIntroController(deps) {
     enterDirectoryPhase();
   }
 
-  function skipToDirectoryHold() {
+  function skipToDirectoryHold(opts) {
+    opts = opts || {};
     clearDissolveTimer();
+    directoryMagLock = false;
+    killed = false;
     contentLocked = false;
     directoryAllowed = true;
     ensureGrid();
     clearIntroLeds();
-    if (cols >= 12 && rows >= 8 && animConfig.motion && !prefersReduced) {
+    const canPaint =
+      cols >= 12 && rows >= 8 && animConfig.motion && !prefersReduced;
+
+    /*
+      Space-skip only: show the completed menu immediately and play Magnetic
+      Lock (edge-displaced converge + lock flash + micro shockwave). Hold +
+      interaction unlock wait until the lock settles.
+    */
+    if (opts.settle && canPaint) {
+      bakeDirectory({ instant: true });
+      if (dOn && dBitmap && captureMagLockBounds()) {
+        seedMagLockDisplacements();
+        directoryMagLock = true;
+        assembleMs = MAG_LOCK_TOTAL_MS;
+        resetContentClock();
+        phase = 'directory';
+        holdingFF = false;
+        timeScale = 1;
+        typographySettled = true;
+        setBoot('directory');
+        /* Settle/Magnetic Lock keeps shell locked until hold — jumpToReady owns unlock. */
+        window.dispatchEvent(new CustomEvent('pixeldirectorystart'));
+        return;
+      }
+      directoryMagLock = false;
+    }
+
+    if (canPaint) {
       bakeDirectory({ instant: true });
       paintDirectoryHold();
     } else {
@@ -1489,6 +1794,8 @@ export function createIntroController(deps) {
     timeScale = 1;
     typographySettled = true;
     setBoot(null);
+    clearAppStartup();
+
     window.dispatchEvent(new CustomEvent('pixeldirectorystart'));
     window.dispatchEvent(new CustomEvent('pixeldirectoryhold'));
   }
@@ -1509,10 +1816,17 @@ export function createIntroController(deps) {
   }
 
   function skip() {
-    if (phase === 'idle' || phase === 'skipped') return;
+    if (phase === 'idle' || phase === 'skipped') {
+      /* Already holding — ignore */
+      return;
+    }
+    if (directoryMagLock) {
+      /* Magnetic Lock already running — let it finish */
+      return;
+    }
     killed = true;
     clearDissolveTimer();
-    skipToDirectoryHold();
+    skipToDirectoryHold({ settle: true });
   }
 
   function cancel() {
@@ -1520,6 +1834,7 @@ export function createIntroController(deps) {
     contentLocked = false;
     directoryAllowed = false;
     clearDissolveTimer();
+    directoryMagLock = false;
     clearIntroLeds();
     clearDirectoryLeds();
     phase = 'skipped';
@@ -1653,6 +1968,12 @@ export function createIntroController(deps) {
   function updateDirectoryLeds(t) {
     if (!dOn) return false;
     if (!dBitmap) freezeDirectoryBitmap();
+
+    /* Space-skip Magnetic Lock — displaced converge + lock + shockwave */
+    if (directoryMagLock) {
+      return updateMagneticLock(t);
+    }
+
     let anyLit = false;
     const n = cols * rows;
     const yCache = dIdleWords.length
@@ -1667,8 +1988,12 @@ export function createIntroController(deps) {
       if (t < dOnAt[i] || t >= dGoneAt[i]) continue;
       anyLit = true;
 
+      const base = dTarget && dTarget[i]
+        ? (dBitmap ? dBitmap[i] : dLevel[i])
+        : dLevel[i];
+      const level = base;
+
       if (dTarget && dTarget[i]) {
-        const level = dBitmap ? dBitmap[i] : dLevel[i];
         const wid = dWordId ? dWordId[i] : -1;
         const shiftPx =
           yCache && wid >= 0 && wid < yCache.length ? yCache[wid] : 0;
@@ -1676,7 +2001,7 @@ export function createIntroController(deps) {
         const y = (i / cols) | 0;
         scatterIdleLight(dOn, x, y, level, shiftPx);
       } else {
-        dOn[i] = dLevel[i];
+        dOn[i] = level;
       }
     }
     return anyLit;

@@ -16,6 +16,17 @@ export {
 } from './settings.js';
 
 export {
+  definePreset,
+  createSettingsTemplate,
+  BUILTIN_PRESETS,
+  getBuiltinPresetOptions,
+  createPresetManager,
+  resolvePresetSettings,
+  PRESET_CUSTOM_ID,
+  settingsExactlyMatch,
+} from '../presets/index.js';
+
+export {
   PIXEL_UI_SCALE,
   createUiScale,
   scaledSliderSetting,

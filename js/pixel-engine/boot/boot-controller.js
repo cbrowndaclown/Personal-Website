@@ -29,6 +29,7 @@ import {
   snapshotGridAuthority,
   validateGridAuthority,
 } from '../density-rebuild.js';
+import { clearAppStartup } from '../../app-startup.js';
 
 /**
  * @param {object} options
@@ -82,6 +83,21 @@ export function createBootController(options) {
   /** True while menu is rebaking/assembling after density generation. */
   let densityMenuRestoring = false;
   /**
+   * Soft preset refresh — lattice masked via recalibration while settings
+   * apply behind the sync wave (same-density preset loads).
+   */
+  let presetRefreshing = false;
+  /**
+   * Soft preset refresh — procedural menu assemble after recalibration
+   * (same beginDirectorySequence path as startup).
+   */
+  let presetMenuRestoring = false;
+  /**
+   * False until startup menu hold / boot ready. Preset refresh must never
+   * touch the lattice during BOOT → INTRO → MENU_GENERATION.
+   */
+  let presetEffectsAllowed = false;
+  /**
    * Frozen lattice from the density rebuild pipeline — single source of truth
    * for recalibration, simulation remount, and menu bake.
    * @type {ReturnType<typeof snapshotGridAuthority>|null}
@@ -110,6 +126,8 @@ export function createBootController(options) {
   }
 
   function emitReady() {
+    /* Exclusive boot is done — PE releases data-boot. Shell unlock waits until
+       intro/directory is enabled so Screen 2 does not resize the lattice mid-handoff. */
     setBootAttr(null);
     if (events) {
       events.emit(PixelEvents.BootReady, { phase: BootPhase.READY });
@@ -306,6 +324,9 @@ export function createBootController(options) {
   function beginTeardown() {
     /* Cancel any in-flight density sync — teardown owns the transition now. */
     endRecalibration({ force: true, snap: false, restoreMenu: false });
+    /* Density pipeline owns the lock from here — soft preset flag clears. */
+    presetRefreshing = false;
+    presetMenuRestoring = false;
 
     tearingDown = true;
     awaitingDensityRebuild = false;
@@ -377,6 +398,13 @@ export function createBootController(options) {
 
     const fromDensityGen = densityGenerating;
     densityGenerating = false;
+    const wasPresetRefresh = presetRefreshing;
+    /* Density generation / forced cancel hand off ownership; soft preset clears below. */
+    if (fromDensityGen || opts.force) {
+      presetRefreshing = false;
+    } else if (wasPresetRefresh) {
+      presetRefreshing = false;
+    }
 
     if (events) {
       events.emit(PixelEvents.PixelRecalibrationEnd, {
@@ -421,6 +449,31 @@ export function createBootController(options) {
       return;
     }
 
+    /* Soft preset refresh — recalibration done; play startup menu assemble next.
+       Skip when force-cancelled (density teardown takes over). */
+    if (wasPresetRefresh && !opts.force && !fromDensityGen) {
+      if (opts.restoreMenu === false) {
+        presetRefreshing = false;
+        setInteractive(true);
+        window.dispatchEvent(
+          new CustomEvent('pixelpresetrefreshend', {
+            detail: { densityGeneration: false, restoreMenu: false },
+          }),
+        );
+        if (events) {
+          events.emit(PixelEvents.PixelPresetRefreshEnd, {
+            cols: field.cols,
+            rows: field.rows,
+            n: field.size,
+          });
+        }
+        emitDensityLockChange();
+        return;
+      }
+      restoreMenuAfterPresetRefresh({ instant: !!opts.instant });
+      return;
+    }
+
     if (opts.restoreMenu !== false) {
       restoreMenuAfterSync(opts);
     }
@@ -434,8 +487,9 @@ export function createBootController(options) {
     densityMenuRestoring = false;
     awaitingDensityRebuild = false;
     setInteractive(true);
-    emitDensityLockChange();
     const authority = getDensityAuthority();
+    /* Emit PixelDensityTransitionEnd first so the transition engine finishes
+       before emitDensityLockChange triggers syncFromConfig. */
     window.dispatchEvent(new CustomEvent('pixeldensitytransitionend'));
     if (events) {
       events.emit(PixelEvents.PixelDensityTransitionEnd, {
@@ -445,7 +499,77 @@ export function createBootController(options) {
         n: field.size,
       });
     }
+    emitDensityLockChange();
     /* Pipeline markComplete clears authority — no stale grid snapshot left. */
+  }
+
+  /**
+   * Soft preset refresh — menu assemble finished. Unlock + signal transition end.
+   * Recalibration already completed; this is stage 2 of the preset pipeline.
+   */
+  function completePresetMenuRestore() {
+    if (!presetMenuRestoring) return;
+    presetMenuRestoring = false;
+    presetRefreshing = false;
+    setInteractive(true);
+    /* Emit PixelPresetRefreshEnd first so the transition engine finishes
+       (active → false, onComplete fires) before emitDensityLockChange
+       triggers syncFromConfig. This eliminates the timing gap where the
+       settings panel evaluates disabledWhen while the transition is still
+       marked active. */
+    window.dispatchEvent(
+      new CustomEvent('pixelpresetrefreshend', {
+        detail: { menuRestored: true },
+      }),
+    );
+    if (events) {
+      events.emit(PixelEvents.PixelPresetRefreshEnd, {
+        cols: field.cols,
+        rows: field.rows,
+        n: field.size,
+        menuRestored: true,
+      });
+    }
+    emitDensityLockChange();
+  }
+
+  /**
+   * After soft recalibration: play the same procedural directory assemble used
+   * at startup. Interaction stays locked until pixeldirectoryhold.
+   * @param {{ instant?: boolean }} [opts]
+   */
+  function restoreMenuAfterPresetRefresh(opts) {
+    opts = opts || {};
+    presetRefreshing = false;
+    presetMenuRestoring = true;
+    setInteractive(false);
+    emitDensityLockChange();
+
+    if (!intro) {
+      completePresetMenuRestore();
+      return;
+    }
+
+    /* Reduced motion — snap to hold (still goes through hold → unlock). */
+    if (opts.instant || prefersReduced || !animConfig.motion) {
+      if (typeof intro.skipToDirectoryHold === 'function') {
+        intro.skipToDirectoryHold();
+        return;
+      }
+      completePresetMenuRestore();
+      return;
+    }
+
+    /*
+      Exact startup menu path — bake + procedural assemble (DIR_TIMING).
+      Do not use density-rebuild timing; presets reuse the post-boot sequence.
+    */
+    if (typeof intro.beginDirectorySequence === 'function') {
+      intro.beginDirectorySequence();
+      return;
+    }
+
+    completePresetMenuRestore();
   }
 
   /**
@@ -550,6 +674,8 @@ export function createBootController(options) {
     densityAuthority = null;
     recalibrating = false;
     tearingDown = false;
+    presetRefreshing = false;
+    presetMenuRestoring = false;
     recalibLastNow = 0;
     teardownLastNow = 0;
     recalibSeed = 0xc41b;
@@ -627,6 +753,143 @@ export function createBootController(options) {
   }
 
   /**
+   * Allow / deny preset refresh effects. Startup keeps this false until the
+   * menu has fully settled so recalibration cannot fight boot / intro.
+   * @param {boolean} on
+   */
+  function setPresetEffectsAllowed(on) {
+    presetEffectsAllowed = !!on;
+  }
+
+  /**
+   * True when preset refresh is permitted (post-startup).
+   * @returns {boolean}
+   */
+  function arePresetEffectsAllowed() {
+    return presetEffectsAllowed;
+  }
+
+  /**
+   * Startup still owns the display — exclusive boot, typography, stabilizing,
+   * or intro menu assemble (directory / typography phases).
+   * @returns {boolean}
+   */
+  function startupBlocksPresetEffects() {
+    if (!presetEffectsAllowed) return true;
+    if (isExclusiveBootPhase(phase)) return true;
+    if (
+      phase === BootPhase.TYPOGRAPHY_CONSTRUCTION ||
+      phase === BootPhase.STABILIZING ||
+      phase === BootPhase.OFF
+    ) {
+      return true;
+    }
+    if (intro && typeof intro.getPhase === 'function') {
+      const ip = intro.getPhase();
+      if (
+        ip === 'typography' ||
+        ip === 'directory' ||
+        ip === 'dissolving'
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Start the Pixel FS refresh mask for a preset load.
+   * Must run BEFORE settings are published so the new preset never paints
+   * on a live lattice.
+   *
+   * Same density → center-out recalibration owns the transition.
+   * Density change → instant inactive lattice; apply triggers teardown/rebuild
+   * which reuses the existing density refresh pipeline.
+   *
+   * @param {{ densityChanging?: boolean }} [opts]
+   * @returns {{ mode: 'soft'|'density'|'instant'|'blocked' }}
+   */
+  function beginPresetRefresh(opts) {
+    opts = opts || {};
+    const densityChanging = !!opts.densityChanging;
+
+    /* Abort any stale preset refresh (recalibration or menu restore) so the
+       new load starts on a clean boot controller. Without this, an orphaned
+       menu restore leaves the intro in 'directory' phase, causing
+       startupBlocksPresetEffects() to block the new refresh and permanently
+       locking the Preset dropdown. */
+    if (presetRefreshing || presetMenuRestoring) {
+      endRecalibration({ force: true, snap: false, restoreMenu: false });
+      presetRefreshing = false;
+      presetMenuRestoring = false;
+      if (typeof intro.suppressContent === 'function') {
+        intro.suppressContent();
+      }
+    }
+
+    /* Never disturb boot / intro / menu generation. */
+    if (startupBlocksPresetEffects()) {
+      return { mode: 'blocked' };
+    }
+
+    presetRefreshing = true;
+    presetMenuRestoring = false;
+    setInteractive(false);
+    emitDensityLockChange();
+
+    /* Hide menu for the whole refresh — recalibration, then procedural assemble. */
+    if (typeof intro.suppressContent === 'function') {
+      intro.suppressContent();
+    }
+
+    /* Instant mask — gray panel before any settings write. */
+    beginInactiveLattice(field);
+    window.dispatchEvent(
+      new CustomEvent('pixelintrostart', {
+        detail: {
+          recalibration: !densityChanging,
+          presetRefresh: true,
+          densityGeneration: false,
+        },
+      }),
+    );
+
+    /*
+      Density changes always hand off to the density pipeline after apply —
+      including reduced-motion (instant teardown / rebuild). Only same-density
+      soft loads use the local instant finish path.
+    */
+    if (densityChanging) {
+      startLoop();
+      return { mode: 'density' };
+    }
+
+    if (prefersReduced || !animConfig.motion) {
+      /* Caller applies settings, then finishPresetRefreshInstant. */
+      return { mode: 'instant' };
+    }
+
+    /* Soft path — sync wave is the transition; settings apply behind it. */
+    beginRecalibration();
+    return { mode: 'soft' };
+  }
+
+  /**
+   * Reduced-motion / motion-off completion for soft (same-density) preset loads.
+   * Still routes through menu restore → hold so unlock timing matches motion on.
+   */
+  function finishPresetRefreshInstant() {
+    if (!presetRefreshing && !presetMenuRestoring) return;
+    finishSyncLattice(field);
+    if (field.presence) field.presence.fill(RECALIBRATION.TO_ENERGY);
+    if (field.brightness) field.brightness.fill(0);
+    if (typeof intro.suppressContent === 'function') {
+      intro.suppressContent();
+    }
+    restoreMenuAfterPresetRefresh({ instant: true });
+  }
+
+  /**
    * Begin / restart center-out density sync on the current BootField.
    * Procedural path is always derived from field.cols/rows (the rebuilt grid).
    * Never reuses radial references from a previous lattice.
@@ -659,14 +922,15 @@ export function createBootController(options) {
         rows: field.rows,
         cell: authority ? authority.cell : sharedGrid && sharedGrid.cell,
         seed: recalibSeed,
-        densityGeneration,
+        /* Soft sync wave — not a density rebuild. */
+        densityGeneration: false,
         n: field.size,
       });
     }
     /* Wake style paint loops — same channel boot/intro already use */
     window.dispatchEvent(
       new CustomEvent('pixelintrostart', {
-        detail: { recalibration: true, densityGeneration },
+        detail: { recalibration: true, densityGeneration: false },
       }),
     );
     window.dispatchEvent(new CustomEvent('pixelrecalibrationstart'));
@@ -855,6 +1119,8 @@ export function createBootController(options) {
     awaitingDensityRebuild = false;
     densityGenerating = false;
     densityMenuRestoring = false;
+    presetRefreshing = false;
+    presetMenuRestoring = false;
     endRecalibration({ force: true, snap: true, restoreMenu: false });
     stopLoop();
     active = [];
@@ -868,9 +1134,26 @@ export function createBootController(options) {
     setInteractive(true);
     phase = BootPhase.READY;
     primaryPhase = BootPhase.READY;
+    const settleMenu = !!(opts.settle && animConfig.motion && !prefersReduced);
+    /* data-boot never owns shell layout. Instant paths unlock the shell now;
+       Magnetic Lock / directory settle keeps startup locked until hold. */
     setBootAttr(null);
+    if (settleMenu) {
+      /*
+        Intro fires directory hold after Magnetic Lock finishes.
+        Listen first so a failed lock (instant hold) still unlocks the shell.
+      */
+      const onHold = function () {
+        window.removeEventListener('pixeldirectoryhold', onHold);
+        clearAppStartup();
+        window.dispatchEvent(new CustomEvent('pixelbootready'));
+      };
+      window.addEventListener('pixeldirectoryhold', onHold);
+    } else {
+      clearAppStartup();
+    }
     if (opts.instantDirectory !== false) {
-      intro.skipToDirectoryHold();
+      intro.skipToDirectoryHold(settleMenu ? { settle: true } : undefined);
     }
     started = true;
     if (events) {
@@ -878,9 +1161,11 @@ export function createBootController(options) {
       events.emit(PixelEvents.BootReady, { phase: BootPhase.READY });
     }
     window.dispatchEvent(new CustomEvent('pixelintrostart'));
-    window.dispatchEvent(new CustomEvent('pixeldirectorystart'));
-    window.dispatchEvent(new CustomEvent('pixeldirectoryhold'));
-    window.dispatchEvent(new CustomEvent('pixelbootready'));
+    if (!settleMenu) {
+      window.dispatchEvent(new CustomEvent('pixeldirectorystart'));
+      window.dispatchEvent(new CustomEvent('pixeldirectoryhold'));
+      window.dispatchEvent(new CustomEvent('pixelbootready'));
+    }
     startLoop();
   }
 
@@ -890,6 +1175,8 @@ export function createBootController(options) {
     awaitingDensityRebuild = false;
     densityGenerating = false;
     densityMenuRestoring = false;
+    presetRefreshing = false;
+    presetMenuRestoring = false;
     endRecalibration({ force: true, snap: false, restoreMenu: false });
     stopLoop();
     active.forEach((e) => {
@@ -909,6 +1196,7 @@ export function createBootController(options) {
     primaryPhase = BootPhase.SKIPPED;
     started = false;
     setBootAttr(null);
+    clearAppStartup();
   }
 
   function skip() {
@@ -929,7 +1217,7 @@ export function createBootController(options) {
       }
     });
     active = [];
-    jumpToReady({ instantDirectory: true });
+    jumpToReady({ instantDirectory: true, settle: true });
   }
 
   function buildAndStart() {
@@ -943,6 +1231,8 @@ export function createBootController(options) {
     awaitingDensityRebuild = false;
     densityGenerating = false;
     densityMenuRestoring = false;
+    presetRefreshing = false;
+    presetMenuRestoring = false;
     endRecalibration({ force: true, snap: false, restoreMenu: false });
 
     /* Exclusive ownership of the PE canvas — no leftover directory / type LEDs */
@@ -962,12 +1252,9 @@ export function createBootController(options) {
       return false;
     }
 
-    /* Boot sequence currently starts with Heat (landing identity). */
-    if (resolveActiveBgMode() !== 'heat') {
-      phase = BootPhase.SKIPPED;
-      jumpToReady({ instantDirectory: true });
-      return false;
-    }
+    /* Exclusive boot always runs when motion is on. Restored settings
+       (including non-Heat styles from a saved preset) stay on animConfig —
+       they must not skip the startup sequence or trigger refresh. */
 
     started = true;
     phase = BootPhase.OFF;
@@ -988,7 +1275,7 @@ export function createBootController(options) {
       intro.suppressContent();
     }
 
-    if (prefersReduced || !animConfig.motion || resolveActiveBgMode() !== 'heat') {
+    if (prefersReduced || !animConfig.motion) {
       ensureFieldSize();
       phase = BootPhase.SKIPPED;
       jumpToReady({ instantDirectory: true });
@@ -1056,6 +1343,10 @@ export function createBootController(options) {
    * @param {number} [_rows]
    */
   function rebuildForDensity(_cols, _rows) {
+    /* Soft preset mask hands off — density stages own the lock from here. */
+    presetRefreshing = false;
+    presetMenuRestoring = false;
+
     /* Exclusive energy ladder owns presence — still continue into generation
        (generation aborts the boot pipeline and remounts the lattice). */
     if (isExclusiveBootPhase(phase)) {
@@ -1184,6 +1475,7 @@ export function createBootController(options) {
       tearingDown ||
       densityGenerating ||
       densityMenuRestoring ||
+      presetMenuRestoring ||
       (started &&
         phase !== BootPhase.SKIPPED &&
         (phase !== BootPhase.READY || intro.isActive() || running) &&
@@ -1245,14 +1537,12 @@ export function createBootController(options) {
   }
 
   function latticeBootActive() {
-    /* Intro may overwrite data-boot to "typography" during construction */
-    const attr = document.body.dataset.boot;
-    return isLatticeBootPhase(phase) || isLatticeBootPhase(attr);
+    /* Exclusive + lattice phases only — intro never writes data-boot. */
+    return isLatticeBootPhase(phase);
   }
 
   function indicatorAccentActive() {
-    const attr = document.body.dataset.boot;
-    return isIndicatorAccentPhase(phase) || isIndicatorAccentPhase(attr);
+    return isIndicatorAccentPhase(phase);
   }
 
   function recalibrationActive() {
@@ -1268,11 +1558,17 @@ export function createBootController(options) {
    * not during menu restore (theme may return).
    */
   function densityOpsNeutral() {
-    return tearingDown || recalibrating || densityGenerating || awaitingDensityRebuild;
+    return (
+      tearingDown ||
+      recalibrating ||
+      densityGenerating ||
+      awaitingDensityRebuild ||
+      presetRefreshing
+    );
   }
 
   /**
-   * True while any density transition stage is in flight —
+   * True while any density / preset transition stage is in flight —
    * teardown, generation, menu restore, or deferred remount.
    */
   function densityChangeLocked() {
@@ -1281,8 +1577,14 @@ export function createBootController(options) {
       recalibrating ||
       densityGenerating ||
       densityMenuRestoring ||
-      awaitingDensityRebuild
+      awaitingDensityRebuild ||
+      presetRefreshing ||
+      presetMenuRestoring
     );
+  }
+
+  function presetRefreshActive() {
+    return presetRefreshing || presetMenuRestoring || recalibrating;
   }
 
   /** Begin density teardown (menu hide + center-out collapse). */
@@ -1318,8 +1620,9 @@ export function createBootController(options) {
   window.addEventListener('animconfigchange', function (e) {
     if (e.detail && e.detail.motion === false) cancel();
   });
-  /* Density transition completes when the rebuilt menu reaches hold. */
+  /* Density / soft-preset menu assemble completes on directory hold. */
   window.addEventListener('pixeldirectoryhold', completeDensityTransition);
+  window.addEventListener('pixeldirectoryhold', completePresetMenuRestore);
 
   return {
     schedule,
@@ -1339,6 +1642,10 @@ export function createBootController(options) {
     createGridFromAuthority,
     beginRebuildAnimation,
     beginDensityGeneration,
+    beginPresetRefresh,
+    finishPresetRefreshInstant,
+    setPresetEffectsAllowed,
+    arePresetEffectsAllowed,
     bindDensityRebuild,
     setDensityAuthority,
     getDensityAuthority,
@@ -1350,6 +1657,7 @@ export function createBootController(options) {
     teardownActive,
     densityOpsNeutral,
     densityChangeLocked,
+    presetRefreshActive,
     getPhase,
     isControllable,
     exclusiveBootActive,

@@ -23,7 +23,7 @@ const PERSIST_DEBOUNCE_MS = 250;
 const PIXEL_BEHAVIOR_RANGES = Object.freeze({
   reactionStrength: { min: 0, max: 0.8 },
   movementSpeed: { min: 0.005, max: 0.2 },
-  returnSpeed: { min: 0.002, max: 0.1 },
+  decaySpeed: { min: 0.001, max: 0.1 },
   trailLifetime: { min: 0.85, max: 0.995 },
 });
 
@@ -152,14 +152,6 @@ export function validateSettings(saved, defaults) {
   if ('heatRadius' in saved) {
     out.heatRadius = clampNum(saved.heatRadius, 1, 30, out.heatRadius);
   }
-  if ('heatDecaySpeed' in saved) {
-    out.heatDecaySpeed = clampNum(
-      saved.heatDecaySpeed,
-      0.001,
-      0.1,
-      out.heatDecaySpeed
-    );
-  }
 
   if (saved.pixelBehavior && typeof saved.pixelBehavior === 'object') {
     const pb = saved.pixelBehavior;
@@ -175,6 +167,21 @@ export function validateSettings(saved, defaults) {
         out.pixelBehavior[key]
       );
     }
+  }
+
+  /* Migrate legacy Heat-only decay into shared Pixel Behavior.decaySpeed. */
+  const savedPb =
+    saved.pixelBehavior && typeof saved.pixelBehavior === 'object'
+      ? saved.pixelBehavior
+      : null;
+  if (!(savedPb && 'decaySpeed' in savedPb) && 'heatDecaySpeed' in saved) {
+    const range = PIXEL_BEHAVIOR_RANGES.decaySpeed;
+    out.pixelBehavior.decaySpeed = clampNum(
+      saved.heatDecaySpeed,
+      range.min,
+      range.max,
+      out.pixelBehavior.decaySpeed
+    );
   }
 
   if ('cursorMode' in saved) {
@@ -201,6 +208,18 @@ export function validateSettings(saved, defaults) {
     }
   }
 
+  /* Active preset id — opaque string (future presets need no format change).
+     null / empty / "__custom__" → Custom. Unknown ids are kept; the Preset
+     Manager reconciles against registered presets after restore. */
+  if ('activePresetId' in saved) {
+    const id = saved.activePresetId;
+    if (typeof id === 'string' && id && id !== '__custom__') {
+      out.activePresetId = id;
+    } else {
+      out.activePresetId = null;
+    }
+  }
+
   return out;
 }
 
@@ -222,7 +241,6 @@ export function applySettings(animConfig, validated) {
   animConfig.heatEnabled = !!validated.heatEnabled;
   animConfig.heatIntensity = validated.heatIntensity;
   animConfig.heatRadius = validated.heatRadius;
-  animConfig.heatDecaySpeed = validated.heatDecaySpeed;
   animConfig.cursorMode = validated.cursorMode;
 
   if (validated.effectColor && animConfig.effectColor) {
@@ -248,6 +266,12 @@ export function applySettings(animConfig, validated) {
       validated.performance.frameRateTarget;
     animConfig.performance.adaptivePerformance =
       !!validated.performance.adaptivePerformance;
+  }
+
+  if ('activePresetId' in validated) {
+    const id = validated.activePresetId;
+    animConfig.activePresetId =
+      typeof id === 'string' && id ? id : null;
   }
 
   return true;

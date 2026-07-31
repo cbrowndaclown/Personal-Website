@@ -1,16 +1,20 @@
 /* Interaction Manager — pointer / hover / future gesture + keyboard entry point.
-   V1 preserves current field hover behavior via MouseMoved / PointerLeft events. */
+   V1 preserves current field hover behavior via MouseMoved / PointerLeft events.
+   Hit-testing is clamped to hitBounds (Pixel FS Screen 1) while the painted lattice
+   may span the full device shell. */
 
 import { PixelEvents } from './constants.js';
 
 /**
  * @param {object} options
  * @param {HTMLElement} options.stage
+ * @param {HTMLElement} [options.hitBounds]
  * @param {ReturnType<import('./grid-manager.js').createGridManager>} options.grid
  * @param {import('./events.js').EventSystem} options.events
  */
 export function createInteractionManager(options) {
   const stage = options.stage;
+  const hitBounds = options.hitBounds || stage;
   const grid = options.grid;
   const events = options.events;
 
@@ -23,10 +27,13 @@ export function createInteractionManager(options) {
 
   function pointInField(cx, cy) {
     grid.syncStageRect();
+    if (typeof grid.syncHitBounds === 'function') grid.syncHitBounds();
     const x = cx - grid.stageLeft;
     const y = cy - grid.stageTop;
-    const w = grid.viewW;
-    const h = grid.viewH;
+    const w = grid.hitW > 0 ? grid.hitW : grid.viewW;
+    const h = grid.hitH > 0 ? grid.hitH : grid.viewH;
+    /* Interactive band is Pixel FS Screen 1 — clamp to hitBounds size in
+       stage-local coordinates (hitBounds shares the stage's top-left). */
     return x >= 0 && y >= 0 && x <= w && y <= h
       ? { inside: true, x, y }
       : { inside: false, x, y };
@@ -54,6 +61,8 @@ export function createInteractionManager(options) {
       inside: hit.inside,
       viewW: grid.viewW,
       viewH: grid.viewH,
+      hitW: grid.hitW,
+      hitH: grid.hitH,
     });
 
     if (hit.inside || wasInside) {
@@ -138,5 +147,6 @@ export function createInteractionManager(options) {
     reevaluate,
     pointInField,
     get stage() { return stage; },
+    get hitBounds() { return hitBounds; },
   };
 }

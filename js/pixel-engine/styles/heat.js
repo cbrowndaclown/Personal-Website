@@ -1,7 +1,9 @@
-/* Pixel FS — Magnetic (heat). V1 simulation preserved. */
+/* Pixel FS — Magnetic (heat). V1 simulation preserved.
+   Thermal energy model: Decay Speed → how quickly heat cools + springs settle. */
 
 import { PixelEvents } from '../constants.js';
 import { computeGridLayout } from '../grid-manager.js';
+import { applyDecayRate } from '../pixel-behavior.js';
 
 /**
  * @param {object} deps
@@ -28,7 +30,8 @@ export function createHeatStyle(deps) {
     : 5;
   /* MAX_DISP default 0.40 — live via shared Pixel Behavior (reactionStrength) */
   const HEAT_IN  = 0.09;   /* color lags motion — keep snappy under cursor */
-  /* HEAT_OUT default 0.018 — live via animConfig.heatDecaySpeed */
+  /* Thermal cool-down baseline — live via shared Decay Speed (scales.decay) */
+  const BASE_HEAT_OUT = 0.018;
   const MOUSE_NEAR = 0.11; /* soft when cursor is close to sample */
   const MOUSE_FAR  = 0.26; /* catches up when pointer leaps */
   let DOT = Math.max(1, CELL - 2);
@@ -142,10 +145,11 @@ export function createHeatStyle(deps) {
   /* ── Spring (silicone / fabric) ─────────────────────────────────────────
      Overdamped mass-spring: force pulls dots, then they ease home.
      Return is softer than engagement; nonlinear drag kills bounce.
-     STIFF_PULL / STIFF_RETURN live via shared Pixel Behavior. */
-  const DRAG         = 0.29;  /* base velocity drag */
-  const DRAG_QUAD    = 0.42;  /* extra drag at speed — settles clean */
-  const V_MAX        = 0.20;  /* soft ceiling, no hard pops */
+     STIFF_PULL ← Movement Speed; return ← Decay Speed (energy settle). */
+  const DRAG              = 0.29;  /* base velocity drag */
+  const DRAG_QUAD         = 0.42;  /* extra drag at speed — settles clean */
+  const V_MAX             = 0.20;  /* soft ceiling, no hard pops */
+  const BASE_STIFF_RETURN = 0.026; /* spring home at default Decay Speed */
 
   /* ── Trail / pressure-wave (all configurable) ─────────────────────────── */
   const TRAIL_LENGTH   = 12;   /* short wake — one continuous lobe */
@@ -161,28 +165,37 @@ export function createHeatStyle(deps) {
     Object.freeze({
       reactionStrength: 0.4,
       movementSpeed: 0.078,
-      returnSpeed: 0.026,
+      decaySpeed: 0.018,
       trailLifetime: 0.965,
     });
   let MAX_DISP = BEHAVIOR_DEFAULTS.reactionStrength;
+  /* Menu Impact — one-shot lattice flex (Space-skip only; not cursor heat) */
+  let menuImpact = null;
   let STIFF_PULL = BEHAVIOR_DEFAULTS.movementSpeed;
-  let STIFF_RETURN = BEHAVIOR_DEFAULTS.returnSpeed;
+  let HEAT_OUT = BASE_HEAT_OUT;
+  let STIFF_RETURN = BASE_STIFF_RETURN;
   let TRAIL_FADE = BEHAVIOR_DEFAULTS.trailLifetime;
   let _behaviorRev = -1;
   let _cursorModeRev = -1;
   let activeCursorMode = 'standard';
   const _cursorOut = { targetX: 0, targetY: 0, motion: true, heatHold: 1 };
 
-  /** Pull cached behavior only when the shared layer revision advances. */
+  /**
+   * Map shared Pixel Behavior → live Heat physics.
+   * Decay Speed scales thermal cool-down + spring return (energy dissipates).
+   */
   function syncBehaviorFromConfig() {
     if (!pixelBehavior) return false;
     const rev = pixelBehavior.getRevision();
     if (rev === _behaviorRev) return false;
     _behaviorRev = rev;
     const bh = pixelBehavior.values;
+    const sc = pixelBehavior.scales || { decay: 1 };
     MAX_DISP = bh.reactionStrength;
     STIFF_PULL = bh.movementSpeed;
-    STIFF_RETURN = bh.returnSpeed;
+    /* Decay Speed — thermal energy cools; displacement energy settles home */
+    HEAT_OUT = applyDecayRate(BASE_HEAT_OUT, sc.decay);
+    STIFF_RETURN = applyDecayRate(BASE_STIFF_RETURN, sc.decay);
     TRAIL_FADE = bh.trailLifetime;
     return true;
   }
@@ -523,12 +536,8 @@ export function createHeatStyle(deps) {
       }
       rebuildTrailWeights();
     } else if (trail.length) {
-      /* Softly age the wake out — pressure wave dissipates, no hard cut.
-         Paint mode leans on Trail Lifetime for longer persistence. */
-      let fade = TRAIL_FADE;
-      if (activeCursorMode === 'paint') {
-        fade = Math.min(0.995, TRAIL_FADE + (1 - TRAIL_FADE) * 0.55);
-      }
+      /* Softly age the wake out — pressure wave dissipates, no hard cut. */
+      const fade = TRAIL_FADE;
       for (let t = 0; t < trail.length; t++) {
         trail[t].w *= fade;
       }
@@ -578,14 +587,6 @@ export function createHeatStyle(deps) {
     const COLOR_INTENSITY = Number.isFinite(Number(animConfig.heatIntensity))
       ? Number(animConfig.heatIntensity)
       : 0.92;
-    let HEAT_OUT =
-      Number(animConfig.heatDecaySpeed) > 0
-        ? Number(animConfig.heatDecaySpeed)
-        : 0.018;
-    /* Paint: linger via Trail Lifetime — slow color decay without permanent marks */
-    if (activeCursorMode === 'paint') {
-      HEAT_OUT *= 0.22 + (1 - TRAIL_FADE) * 2.5;
-    }
     /* Effect Quality — soften intensity + slightly faster cool-down when reduced */
     const q = effectQuality;
     const qualityIntensity = COLOR_INTENSITY * (0.55 + 0.45 * q);
@@ -670,6 +671,26 @@ export function createHeatStyle(deps) {
     const allowHeat = !exclusiveBoot;
     const freezeMode = activeCursorMode === 'freeze';
 
+    /* Menu Impact phase — resolve once per frame (Space-skip lattice flex) */
+    let impactAge = -1;
+    let impactPhase = null;
+    if (menuImpact && allowHeat) {
+      impactAge = nowMs - menuImpact.born;
+      const life = menuImpact.compressMs + menuImpact.shockMs;
+      if (impactAge < 0) {
+        impactPhase = null;
+      } else if (impactAge < menuImpact.compressMs) {
+        impactPhase = 'compress';
+        alive = true;
+      } else if (impactAge < life) {
+        impactPhase = 'shock';
+        alive = true;
+      } else {
+        menuImpact = null;
+        impactPhase = null;
+      }
+    }
+
     for (let i = 0; i < nCells; i++) {
       const x = i % cols;
       const y = (i / cols) | 0;
@@ -745,6 +766,41 @@ export function createHeatStyle(deps) {
         } else if (freezeMode && blend > 0.02) {
           targetX = 0;
           targetY = 0;
+        }
+      }
+
+      /* Menu Impact — compress then outward shock through the spring field */
+      if (impactPhase && menuImpact) {
+        const dx = x - menuImpact.cx;
+        const dy = y - menuImpact.cy;
+        const dist = Math.hypot(dx, dy);
+        const radius = menuImpact.radius;
+        if (dist < radius) {
+          const inv = dist > 1e-6 ? 1 / dist : 0;
+          const nx = dx * inv;
+          const ny = dy * inv;
+          let w = 1 - dist / radius;
+          w *= w;
+          if (y < menuImpact.minY) w *= 0.35;
+          else if (y > menuImpact.maxY) w *= 1.2;
+          if (impactPhase === 'compress') {
+            const u = impactAge / menuImpact.compressMs;
+            const c = (1 - u) * (1 - u) * w * menuImpact.compressCell;
+            targetX += -nx * c;
+            targetY += -ny * c;
+            if (y >= menuImpact.maxY) targetY += c * 0.4;
+          } else {
+            const shockAge = impactAge - menuImpact.compressMs;
+            const u = shockAge / menuImpact.shockMs;
+            const front = u * radius;
+            const ring = 1 - Math.min(1, Math.abs(dist - front) / 1.8);
+            if (ring > 0) {
+              const fade = (1 - u) * (1 - u);
+              const s = ring * ring * fade * w * menuImpact.shockCell;
+              targetX += nx * s;
+              targetY += ny * s;
+            }
+          }
         }
       }
 
@@ -865,8 +921,14 @@ export function createHeatStyle(deps) {
         ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
       }
 
-      /* While a glyph LED drifts away, restore the idle resting dot at home */
-      if (introDrift && heat[i] < EPS && presence > 0.001) {
+      /* While a glyph LED drifts away, restore the idle resting dot at home.
+         Sub-pixel lattice nudges (Menu Impact compress/reverb) move in place. */
+      if (
+        introDrift &&
+        Math.hypot(introDX, introDY) > 2.5 &&
+        heat[i] < EPS &&
+        presence > 0.001
+      ) {
         const pr = (FIELD[0] + (COOL[0] - FIELD[0]) * presence) | 0;
         const pg = (FIELD[1] + (COOL[1] - FIELD[1]) * presence) | 0;
         const pb = (FIELD[2] + (COOL[2] - FIELD[2]) * presence) | 0;
@@ -950,6 +1012,7 @@ export function createHeatStyle(deps) {
       ptrX = ptrY = -1;
       smX = smY = -1;
       trail.length = 0;
+      menuImpact = null;
       if (heat) {
         heat.fill(0);
         ox.fill(0);
@@ -994,6 +1057,26 @@ export function createHeatStyle(deps) {
     if (enabled) start();
   });
 
+  window.addEventListener('pixelmenuimpact', (e) => {
+    if (!enabled || !ox) return;
+    const d = e.detail || {};
+    const cell = CELL > 0 ? CELL : 1;
+    menuImpact = {
+      cx: d.cx || 0,
+      cy: d.cy || 0,
+      minY: d.minY || 0,
+      maxY: d.maxY || 0,
+      radius: d.radius > 0 ? d.radius : 5.5,
+      compressMs: d.compressMs > 0 ? d.compressMs : 36,
+      shockMs: d.shockMs > 0 ? d.shockMs : 150,
+      /* Convert CSS-px intent into Heat cell-fraction targets */
+      compressCell: Math.min(MAX_DISP * 0.95, (d.compressPx || 1.85) / cell),
+      shockCell: Math.min(MAX_DISP * 1.05, (d.shockPx || 2.1) / cell),
+      born: performance.now(),
+    };
+    start();
+  });
+
   window.addEventListener('pixelbootready', () => {
     if (enabled) start();
   });
@@ -1005,6 +1088,8 @@ export function createHeatStyle(deps) {
       syncBehaviorFromConfig();
       syncCursorModeFromConfig();
       syncPerformanceFromConfig({ applyDensity: false });
+      /* Keep the field painting while preset morphs (color / heat knobs). */
+      if (enabled) start();
       return;
     }
     syncPerformanceFromConfig({ applyDensity: false });
@@ -1054,7 +1139,9 @@ export function createHeatStyle(deps) {
       syncStageRect();
       const x = e.clientX - stageLeft;
       const y = e.clientY - stageTop;
-      const inside = x >= 0 && y >= 0 && x <= viewW && y <= viewH;
+      const inside = x >= 0 && y >= 0
+        && x <= ((grid && grid.hitW > 0) ? grid.hitW : viewW)
+        && y <= ((grid && grid.hitH > 0) ? grid.hitH : viewH);
       applyPointerSample(x, y, inside);
     }, { passive: true });
 
@@ -1073,7 +1160,7 @@ export function createHeatStyle(deps) {
     getPixelBehavior: () => ({
       reactionStrength: MAX_DISP,
       movementSpeed: STIFF_PULL,
-      returnSpeed: STIFF_RETURN,
+      decaySpeed: HEAT_OUT,
       trailLifetime: TRAIL_FADE,
     }),
     mount() {},

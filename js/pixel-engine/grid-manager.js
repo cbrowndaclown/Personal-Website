@@ -13,6 +13,9 @@ import { CELL, PixelEvents } from './constants.js';
  * @property {number} dpr
  * @property {number} stageLeft
  * @property {number} stageTop
+ * @property {number} hitW — interactive band width (Pixel FS Screen 1)
+ * @property {number} hitH — interactive band height (Pixel FS Screen 1)
+ * @property {number} contentRows — lattice rows covering the interactive band
  * @property {DOMRect} rect
  * @property {boolean} changed — true when cols/rows changed this update
  */
@@ -70,12 +73,14 @@ export function gridCoversViewport(layout, box) {
 /**
  * @param {object} options
  * @param {HTMLElement} options.stage
+ * @param {HTMLElement} [options.hitBounds] — interactive / content band (defaults to stage)
  * @param {import('./events.js').EventSystem} options.events
  * @param {number} [options.cell]
  * @returns {object}
  */
 export function createGridManager(options) {
   const stage = options.stage;
+  const hitBounds = options.hitBounds || stage;
   const events = options.events;
   let cell = options.cell != null ? options.cell : CELL;
 
@@ -83,6 +88,9 @@ export function createGridManager(options) {
   let rows = 0;
   let viewW = 0;
   let viewH = 0;
+  let hitW = 0;
+  let hitH = 0;
+  let contentRows = 0;
   let dpr = 1;
   let stageLeft = 0;
   let stageTop = 0;
@@ -97,6 +105,15 @@ export function createGridManager(options) {
     return rect;
   }
 
+  function syncHitBounds() {
+    const hit = hitBounds.getBoundingClientRect();
+    hitW = Math.max(1, Math.ceil(hit.width - 1e-9));
+    hitH = Math.max(1, Math.ceil(hit.height - 1e-9));
+    const layout = computeGridLayout(hit.width, hit.height, cell);
+    contentRows = layout.rows;
+    return hit;
+  }
+
   /**
    * Recompute grid from the stage box. Emits GridResized when dimensions change.
    * @param {{ silent?: boolean, reason?: string }} [opts]
@@ -106,6 +123,7 @@ export function createGridManager(options) {
     const silent = !!(opts && opts.silent);
     const reason = (opts && opts.reason) || null;
     const rect = syncStageRect();
+    syncHitBounds();
     dpr = Math.min(window.devicePixelRatio || 1, 2);
 
     const layout = computeGridLayout(rect.width, rect.height, cell);
@@ -125,6 +143,9 @@ export function createGridManager(options) {
       cell,
       viewW,
       viewH,
+      hitW,
+      hitH,
+      contentRows,
       dpr,
       stageLeft,
       stageTop,
@@ -166,6 +187,7 @@ export function createGridManager(options) {
       rows = layout.rows;
       viewW = layout.viewW;
       viewH = layout.viewH;
+      syncHitBounds();
       info = {
         ...info,
         cols,
@@ -173,6 +195,9 @@ export function createGridManager(options) {
         cell,
         viewW,
         viewH,
+        hitW,
+        hitH,
+        contentRows,
         changed: true,
         covers: gridCoversViewport(
           { cols, rows, cell, viewW, viewH },
@@ -208,12 +233,16 @@ export function createGridManager(options) {
   }
 
   function getInfo() {
+    syncHitBounds();
     return {
       cols,
       rows,
       cell,
       viewW,
       viewH,
+      hitW,
+      hitH,
+      contentRows,
       dpr,
       stageLeft,
       stageTop,
@@ -227,23 +256,27 @@ export function createGridManager(options) {
   }
 
   function start() {
-    if (started) return getInfo();
+    if (started) return;
     started = true;
-
-    const info = measure();
-    events.emit(PixelEvents.GridInitialized, info);
-
-    window.addEventListener('resize', measure, { passive: true });
+    measure({ reason: 'init' });
+    events.emit(PixelEvents.GridInitialized, getInfo());
+    window.addEventListener('resize', onWindowResize, { passive: true });
     if (typeof ResizeObserver !== 'undefined') {
-      ro = new ResizeObserver(() => measure());
+      ro = new ResizeObserver(() => {
+        measure({ reason: 'observer' });
+      });
       ro.observe(stage);
+      if (hitBounds !== stage) ro.observe(hitBounds);
     }
+  }
 
-    return info;
+  function onWindowResize() {
+    measure({ reason: 'resize' });
   }
 
   function destroy() {
-    window.removeEventListener('resize', measure);
+    if (!started) return;
+    window.removeEventListener('resize', onWindowResize);
     if (ro) {
       ro.disconnect();
       ro = null;
@@ -256,14 +289,20 @@ export function createGridManager(options) {
     destroy,
     measure,
     ensureCoverage,
-    syncStageRect,
     setCellSize,
     getInfo,
+    syncStageRect,
+    syncHitBounds,
+    get stage() { return stage; },
+    get hitBounds() { return hitBounds; },
     get cols() { return cols; },
     get rows() { return rows; },
     get cell() { return cell; },
     get viewW() { return viewW; },
     get viewH() { return viewH; },
+    get hitW() { return hitW; },
+    get hitH() { return hitH; },
+    get contentRows() { return contentRows; },
     get dpr() { return dpr; },
     get stageLeft() { return stageLeft; },
     get stageTop() { return stageTop; },

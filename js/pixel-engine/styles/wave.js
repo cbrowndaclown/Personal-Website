@@ -1,7 +1,9 @@
-/* Pixel FS — Wave. V1 simulation preserved. */
+/* Pixel FS — Wave. V1 simulation preserved.
+   Wave energy model: Decay Speed → how quickly wave motion settles. */
 
 import { PixelEvents } from '../constants.js';
 import { computeGridLayout } from '../grid-manager.js';
+import { applyDecayRate } from '../pixel-behavior.js';
 
 /**
  * @param {object} deps
@@ -39,7 +41,7 @@ export function createWaveStyle(deps) {
     Object.freeze({
       reactionStrength: 0.4,
       movementSpeed: 0.078,
-      returnSpeed: 0.026,
+      decaySpeed: 0.018,
       trailLifetime: 0.965,
     });
   const BEHAVIOR_TRAIL_RANGE = Object.freeze({ min: 0.85, max: 0.995 });
@@ -48,7 +50,7 @@ export function createWaveStyle(deps) {
     {
       reactionStrength: BEHAVIOR_DEFAULTS.reactionStrength,
       movementSpeed: BEHAVIOR_DEFAULTS.movementSpeed,
-      returnSpeed: BEHAVIOR_DEFAULTS.returnSpeed,
+      decaySpeed: BEHAVIOR_DEFAULTS.decaySpeed,
       trailLifetime: BEHAVIOR_DEFAULTS.trailLifetime,
     };
 
@@ -113,7 +115,8 @@ export function createWaveStyle(deps) {
 
   /**
    * Map shared Pixel Behavior → live Wave physics.
-   * Uses cached scales from the shared layer; trail remap stays Wave-local.
+   * Uses cached scales; Decay Speed settles wave energy via REST_K.
+   * Trail Lifetime remap stays Wave-local (residual trail persistence).
    * @returns {boolean} true when lattice constants changed
    */
   function applyBehaviorToWave() {
@@ -124,12 +127,13 @@ export function createWaveStyle(deps) {
     const sc = (pixelBehavior && pixelBehavior.scales) || {
       reaction: 1,
       movement: 1,
-      return: 1,
+      decay: 1,
     };
     ENERGY_INJECT = BASE_ENERGY_INJECT * sc.reaction;
     DISP_PX = BASE_DISP_PX * sc.reaction;
     TENSION = BASE_TENSION * sc.movement;
-    REST_K = BASE_REST_K * sc.return;
+    /* Decay Speed — wave motion settles as energy dissipates */
+    REST_K = applyDecayRate(BASE_REST_K, sc.decay);
     DAMPING = remapTrailToDamping(behavior.trailLifetime);
     return true;
   }
@@ -804,7 +808,13 @@ export function createWaveStyle(deps) {
       const cx = homeX + introDX;
       const cy = homeY + introDY;
 
-      if (introDrift && Math.abs(disp) < EPS && Math.abs(vel) < EPS && presence > 0.001) {
+      if (
+        introDrift &&
+        Math.hypot(introDX, introDY) > 2.5 &&
+        Math.abs(disp) < EPS &&
+        Math.abs(vel) < EPS &&
+        presence > 0.001
+      ) {
         const pr = (FIELD[0] + (COOL[0] - FIELD[0]) * presence) | 0;
         const pg = (FIELD[1] + (COOL[1] - FIELD[1]) * presence) | 0;
         const pb = (FIELD[2] + (COOL[2] - FIELD[2]) * presence) | 0;
@@ -913,10 +923,11 @@ export function createWaveStyle(deps) {
     /* Soft Pixel Behavior / Cursor Mode / quality — density via PixelDensityChanged.
        Never apply a new CELL here without remounting cols/rows. */
     if (e.detail && e.detail.soft) {
-      const bh = syncBehaviorFromConfig();
-      const cm = syncCursorModeFromConfig();
+      syncBehaviorFromConfig();
+      syncCursorModeFromConfig();
       syncPerformanceFromConfig({ applyDensity: false });
-      if ((bh || cm) && enabled) start();
+      /* Keep painting during preset morphs (color / behavior ease). */
+      if (enabled) start();
       return;
     }
     syncPerformanceFromConfig({ applyDensity: false });
@@ -940,7 +951,9 @@ export function createWaveStyle(deps) {
     syncStageRect();
     const x = e.clientX - stageLeft;
     const y = e.clientY - stageTop;
-    if (x < 0 || y < 0 || x > viewW || y > viewH) {
+    const maxW = (grid && grid.hitW > 0) ? grid.hitW : viewW;
+    const maxH = (grid && grid.hitH > 0) ? grid.hitH : viewH;
+    if (x < 0 || y < 0 || x > maxW || y > maxH) {
       lastPtrX = lastPtrY = -1;
       return;
     }

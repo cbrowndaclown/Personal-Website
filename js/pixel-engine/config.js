@@ -28,7 +28,8 @@ export function createAnimConfig(options) {
   const events = options.events;
   const prefersReduced = !!options.prefersReduced;
 
-  /* Shared Pixel Behavior physics — defaults match pre-settings Heat V1.
+  /* Shared Pixel Behavior physics — physical properties of the Pixel FS.
+     Decay Speed = how quickly introduced energy dissipates (all modes).
      Future knobs (gravity, friction, turbulence, …) land on this object. */
   const PIXEL_BEHAVIOR_RANGES = Object.freeze({
     reactionStrength: {
@@ -41,10 +42,10 @@ export function createAnimConfig(options) {
       max: 0.2,
       default: PIXEL_BEHAVIOR_DEFAULTS.movementSpeed,
     },
-    returnSpeed: {
-      min: 0.002,
+    decaySpeed: {
+      min: 0.001,
       max: 0.1,
-      default: PIXEL_BEHAVIOR_DEFAULTS.returnSpeed,
+      default: PIXEL_BEHAVIOR_DEFAULTS.decaySpeed,
     },
     trailLifetime: {
       min: 0.85,
@@ -62,12 +63,11 @@ export function createAnimConfig(options) {
     heatEnabled: true,
     heatIntensity: 0.92,
     heatRadius: 11.8,
-    heatDecaySpeed: 0.018,
     /* Shared pixel physics (category-root Pixel Behavior settings) */
     pixelBehavior: {
       reactionStrength: PIXEL_BEHAVIOR_DEFAULTS.reactionStrength,
       movementSpeed: PIXEL_BEHAVIOR_DEFAULTS.movementSpeed,
-      returnSpeed: PIXEL_BEHAVIOR_DEFAULTS.returnSpeed,
+      decaySpeed: PIXEL_BEHAVIOR_DEFAULTS.decaySpeed,
       trailLifetime: PIXEL_BEHAVIOR_DEFAULTS.trailLifetime,
     },
     /* Cursor Interaction — modifiers layered on active Pixel FS style */
@@ -79,6 +79,9 @@ export function createAnimConfig(options) {
       frameRateTarget: PERFORMANCE_DEFAULTS.frameRateTarget,
       adaptivePerformance: PERFORMANCE_DEFAULTS.adaptivePerformance,
     },
+    /* Preset Manager — null = Custom; string id = active named preset.
+       Persisted with the rest of animConfig (no separate save path). */
+    activePresetId: null,
   };
 
   function resolveActiveBgMode() {
@@ -215,13 +218,6 @@ export function createAnimConfig(options) {
     publishAnimConfig();
   }
 
-  function setHeatDecaySpeed(value) {
-    const next = clampNum(value, 0.001, 0.1);
-    if (animConfig.heatDecaySpeed === next) return;
-    animConfig.heatDecaySpeed = next;
-    publishAnimConfig();
-  }
-
   /**
    * Update one shared Pixel Behavior knob. Soft-publishes so the Pixel Behavior
    * system (and modes that sync from it) pick up the change — no mode churn.
@@ -324,7 +320,6 @@ export function createAnimConfig(options) {
     setHeatEnabled,
     setHeatIntensity,
     setHeatRadius,
-    setHeatDecaySpeed,
     setPixelBehavior,
     getPixelBehavior,
     setCursorMode,
@@ -339,7 +334,7 @@ export function createAnimConfig(options) {
     getAdaptivePerformance,
     setPixelReactionStrength: (v) => setPixelBehavior('reactionStrength', v),
     setPixelMovementSpeed: (v) => setPixelBehavior('movementSpeed', v),
-    setPixelReturnSpeed: (v) => setPixelBehavior('returnSpeed', v),
+    setPixelDecaySpeed: (v) => setPixelBehavior('decaySpeed', v),
     setPixelTrailLifetime: (v) => setPixelBehavior('trailLifetime', v),
     getMotion: () => animConfig.motion,
     getBgMode: () => animConfig.bgMode,
@@ -348,10 +343,9 @@ export function createAnimConfig(options) {
     getHeatEnabled: () => !!animConfig.heatEnabled,
     getHeatIntensity: () => animConfig.heatIntensity,
     getHeatRadius: () => animConfig.heatRadius,
-    getHeatDecaySpeed: () => animConfig.heatDecaySpeed,
     getPixelReactionStrength: () => getPixelBehavior('reactionStrength'),
     getPixelMovementSpeed: () => getPixelBehavior('movementSpeed'),
-    getPixelReturnSpeed: () => getPixelBehavior('returnSpeed'),
+    getPixelDecaySpeed: () => getPixelBehavior('decaySpeed'),
     getPixelTrailLifetime: () => getPixelBehavior('trailLifetime'),
     PIXEL_BEHAVIOR_RANGES,
   };

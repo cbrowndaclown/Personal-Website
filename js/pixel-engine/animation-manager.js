@@ -99,6 +99,26 @@ export function createAnimationManager(options) {
         ? bootController.densityChangeLocked()
         : false;
     },
+    beginPresetRefresh: function (opts) {
+      return typeof bootController.beginPresetRefresh === 'function'
+        ? bootController.beginPresetRefresh(opts)
+        : { mode: 'instant' };
+    },
+    finishPresetRefreshInstant: function () {
+      if (typeof bootController.finishPresetRefreshInstant === 'function') {
+        bootController.finishPresetRefreshInstant();
+      }
+    },
+    setPresetEffectsAllowed: function (on) {
+      if (typeof bootController.setPresetEffectsAllowed === 'function') {
+        bootController.setPresetEffectsAllowed(on);
+      }
+    },
+    presetRefreshActive: function () {
+      return typeof bootController.presetRefreshActive === 'function'
+        ? bootController.presetRefreshActive()
+        : false;
+    },
     /** Authoritative lattice during / after a density rebuild. */
     getDensityAuthority: function () {
       if (densityRebuild && typeof densityRebuild.getAuthority === 'function') {

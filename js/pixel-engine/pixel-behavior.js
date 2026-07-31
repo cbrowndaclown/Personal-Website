@@ -1,7 +1,17 @@
-/* Shared Pixel Behavior layer — sits between Settings (animConfig) and
-   Pixel FS modes (Heat / Wave / Lightning). Soft config updates refresh the
-   cache once; modes read cached values/scales and skip work when revision
-   is unchanged. */
+/* Shared Pixel Behavior — physical properties of the Pixel FS.
+
+   Pixel Behavior describes how the field behaves under energy:
+     - reactionStrength — how strongly pixels react to disturbances
+     - movementSpeed    — how quickly pixels move when reacting
+     - decaySpeed       — how quickly introduced energy dissipates
+     - trailLifetime    — how long residual motion trails persist
+
+   Visual Effects choose the disturbance type (Heat / Wave / Lightning).
+   Modes interpret the same physical knobs through their own energy model
+   (thermal cool-down, wave settle, electrical dissipate, …) via scales.
+
+   Soft config updates refresh the cache once; modes read values/scales and
+   skip work when revision is unchanged. */
 
 import { PixelEvents } from './constants.js';
 
@@ -9,16 +19,41 @@ import { PixelEvents } from './constants.js';
 export const PIXEL_BEHAVIOR_DEFAULTS = Object.freeze({
   reactionStrength: 0.4,
   movementSpeed: 0.078,
-  returnSpeed: 0.026,
+  decaySpeed: 0.018,
   trailLifetime: 0.965,
 });
 
 const BEHAVIOR_KEYS = Object.freeze([
   'reactionStrength',
   'movementSpeed',
-  'returnSpeed',
+  'decaySpeed',
   'trailLifetime',
 ]);
+
+/**
+ * Map Decay Speed onto a baseline dissipation rate.
+ * Higher decay → energy leaves the field faster (Heat cool-down, Wave rest).
+ * @param {number} baseRate — mode baseline at scale 1 (default settings)
+ * @param {number} decayScale — scales.decay (1.0 at PIXEL_BEHAVIOR_DEFAULTS)
+ * @returns {number}
+ */
+export function applyDecayRate(baseRate, decayScale) {
+  const s = Number(decayScale);
+  return baseRate * (Number.isFinite(s) && s > 0 ? s : 1);
+}
+
+/**
+ * Map Decay Speed onto a baseline energy-hold duration.
+ * Higher decay → shorter hold (Lightning strike / weather dissipate).
+ * @param {number} baseMs — mode baseline duration at scale 1
+ * @param {number} decayScale — scales.decay (1.0 at PIXEL_BEHAVIOR_DEFAULTS)
+ * @returns {number}
+ */
+export function applyDecayDuration(baseMs, decayScale) {
+  const s = Number(decayScale);
+  const div = Number.isFinite(s) && s > 0 ? Math.max(s, 1e-6) : 1;
+  return baseMs / div;
+}
 
 /**
  * @param {object} options
@@ -33,20 +68,23 @@ export function createPixelBehaviorSystem(options) {
   const values = {
     reactionStrength: PIXEL_BEHAVIOR_DEFAULTS.reactionStrength,
     movementSpeed: PIXEL_BEHAVIOR_DEFAULTS.movementSpeed,
-    returnSpeed: PIXEL_BEHAVIOR_DEFAULTS.returnSpeed,
+    decaySpeed: PIXEL_BEHAVIOR_DEFAULTS.decaySpeed,
     trailLifetime: PIXEL_BEHAVIOR_DEFAULTS.trailLifetime,
   };
 
-  /** Processed ratios vs defaults (1.0 at default settings). */
+  /**
+   * Processed ratios vs defaults (1.0 at default settings).
+   * Modes multiply/divide baselines by these — never own Decay Speed.
+   */
   const scales = {
     reaction: 1,
     movement: 1,
-    return: 1,
+    decay: 1,
   };
 
   let _reaction = NaN;
   let _move = NaN;
-  let _return = NaN;
+  let _decay = NaN;
   let _trail = NaN;
   let revision = 0;
   let lastChanged = false;
@@ -63,9 +101,9 @@ export function createPixelBehaviorSystem(options) {
       PIXEL_BEHAVIOR_DEFAULTS.movementSpeed > 0
         ? values.movementSpeed / PIXEL_BEHAVIOR_DEFAULTS.movementSpeed
         : 1;
-    scales.return =
-      PIXEL_BEHAVIOR_DEFAULTS.returnSpeed > 0
-        ? values.returnSpeed / PIXEL_BEHAVIOR_DEFAULTS.returnSpeed
+    scales.decay =
+      PIXEL_BEHAVIOR_DEFAULTS.decaySpeed > 0
+        ? values.decaySpeed / PIXEL_BEHAVIOR_DEFAULTS.decaySpeed
         : 1;
   }
 
@@ -89,7 +127,7 @@ export function createPixelBehaviorSystem(options) {
     const pb = (animConfig && animConfig.pixelBehavior) || PIXEL_BEHAVIOR_DEFAULTS;
     const reaction = Number(pb.reactionStrength);
     const move = Number(pb.movementSpeed);
-    const ret = Number(pb.returnSpeed);
+    const decay = Number(pb.decaySpeed);
     const trail = Number(pb.trailLifetime);
     let dirty = false;
 
@@ -107,11 +145,11 @@ export function createPixelBehaviorSystem(options) {
         : PIXEL_BEHAVIOR_DEFAULTS.movementSpeed;
       dirty = true;
     }
-    if (ret !== _return) {
-      _return = ret;
-      values.returnSpeed = Number.isFinite(ret)
-        ? ret
-        : PIXEL_BEHAVIOR_DEFAULTS.returnSpeed;
+    if (decay !== _decay) {
+      _decay = decay;
+      values.decaySpeed = Number.isFinite(decay)
+        ? decay
+        : PIXEL_BEHAVIOR_DEFAULTS.decaySpeed;
       dirty = true;
     }
     if (trail !== _trail) {
@@ -143,7 +181,7 @@ export function createPixelBehaviorSystem(options) {
     return {
       reactionStrength: values.reactionStrength,
       movementSpeed: values.movementSpeed,
-      returnSpeed: values.returnSpeed,
+      decaySpeed: values.decaySpeed,
       trailLifetime: values.trailLifetime,
     };
   }
@@ -190,7 +228,7 @@ export function createPixelBehaviorSystem(options) {
   return {
     /** Live cache — modes keep a reference; do not mutate. */
     values,
-    /** Live scales vs defaults (reaction / movement / return). */
+    /** Live scales vs defaults (reaction / movement / decay). */
     scales,
     defaults: PIXEL_BEHAVIOR_DEFAULTS,
     keys: BEHAVIOR_KEYS,

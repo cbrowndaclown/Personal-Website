@@ -24,13 +24,19 @@ function resolveUiStyleId(api) {
  * grow a section — no hand-built UI required.
  *
  * @param {object} api
- * @param {{ suppressSync?: () => void, allowSync?: () => void, requestSync?: () => void }} [syncGate]
+ * @param {{
+ *   suppressSync?: () => void,
+ *   allowSync?: () => void,
+ *   requestSync?: () => void,
+ *   requestSoftSync?: () => void,
+ * }} [syncGate]
  * @returns {Array<{
  *   id: string,
  *   title: string,
  *   defaultOpen?: boolean,
  *   build: (body: HTMLElement) => {
  *     sync: () => void,
+ *     softSync?: () => void,
  *     sections?: Array<{
  *       id: string,
  *       root: HTMLElement,
