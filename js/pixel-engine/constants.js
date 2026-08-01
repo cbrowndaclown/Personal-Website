@@ -39,6 +39,8 @@ export const PixelEvents = Object.freeze({
   /** Density recalibration sync started / finished (center-out presence wave). */
   PixelRecalibrationStart: 'PixelRecalibrationStart',
   PixelRecalibrationEnd: 'PixelRecalibrationEnd',
+  /** Soft same-density preset refresh finished (settings applied behind sync). */
+  PixelPresetRefreshEnd: 'PixelPresetRefreshEnd',
   PixelFSChanged: 'PixelFSChanged',
   SettingsUpdated: 'SettingsUpdated',
   InteractionDetected: 'InteractionDetected',

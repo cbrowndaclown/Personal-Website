@@ -5,7 +5,7 @@
 
 import { PixelEvents } from './constants.js';
 
-/** @typedef {'standard'|'attract'|'repel'|'disturb'|'freeze'|'paint'} CursorModeId */
+/** @typedef {'standard'|'attract'|'repel'|'disturb'|'freeze'} CursorModeId */
 
 export const CURSOR_MODE = Object.freeze({
   STANDARD: 'standard',
@@ -13,7 +13,6 @@ export const CURSOR_MODE = Object.freeze({
   REPEL: 'repel',
   DISTURB: 'disturb',
   FREEZE: 'freeze',
-  PAINT: 'paint',
 });
 
 export const CURSOR_MODE_DEFAULT = CURSOR_MODE.STANDARD;
@@ -24,7 +23,6 @@ export const CURSOR_MODE_OPTIONS = Object.freeze([
   { value: CURSOR_MODE.REPEL, label: 'Repel' },
   { value: CURSOR_MODE.DISTURB, label: 'Disturb' },
   { value: CURSOR_MODE.FREEZE, label: 'Freeze' },
-  { value: CURSOR_MODE.PAINT, label: 'Paint' },
 ]);
 
 const MODE_SET = new Set(Object.values(CURSOR_MODE));
@@ -73,7 +71,6 @@ export function applyHeatCursorMode(mode, input, out) {
   out.heatHold = 1;
 
   if (blend < 0.001 || push < 0.0001) {
-    if (mode === CURSOR_MODE.PAINT) out.heatHold = 0.28;
     return out;
   }
 
@@ -106,17 +103,10 @@ export function applyHeatCursorMode(mode, input, out) {
       break;
     }
     case CURSOR_MODE.FREEZE: {
-      /* Hold at rest while under influence — springs return via Return Speed */
+      /* Hold at rest while under influence — springs ease home via Decay Speed */
       out.targetX = 0;
       out.targetY = 0;
       out.motion = true;
-      break;
-    }
-    case CURSOR_MODE.PAINT: {
-      /* Soft persistent tint trail; light motion so color reads as the mark */
-      out.targetX = ux * push * 0.22;
-      out.targetY = uy * push * 0.22;
-      out.heatHold = 0.22;
       break;
     }
     case CURSOR_MODE.STANDARD:
@@ -196,18 +186,6 @@ export function waveCursorInject(mode) {
         dampScale: 1.2,
         freezeHold: true,
         paintTrail: false,
-      };
-    case CURSOR_MODE.PAINT:
-      return {
-        sign: 0.7,
-        radial: 0,
-        radialAmp: 0,
-        jitter: 0,
-        turbulence: 0,
-        skip: false,
-        dampScale: 0.55,
-        freezeHold: false,
-        paintTrail: true,
       };
     case CURSOR_MODE.STANDARD:
     default:
@@ -289,18 +267,6 @@ export function lightningCursorBias(mode) {
         spark: 0,
         paintTrail: false,
         freezeField: true,
-      };
-    case CURSOR_MODE.PAINT:
-      return {
-        pull: 1.15,
-        scatter: 0.65,
-        freeze: false,
-        rainPush: -0.25,
-        fieldGlow: 0.35,
-        fieldIllum: 0.85,
-        spark: 0.15,
-        paintTrail: true,
-        freezeField: false,
       };
     case CURSOR_MODE.STANDARD:
     default:

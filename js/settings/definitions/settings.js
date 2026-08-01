@@ -13,6 +13,10 @@ import {
   PIXEL_DENSITY_MIN,
   PIXEL_DENSITY_MAX,
 } from '../../pixel-engine/performance-manager.js';
+import {
+  getBuiltinPresetOptions,
+  PRESET_CUSTOM_ID,
+} from '../presets/index.js';
 
 /**
  * @typedef {'segment' | 'rgb' | 'slider' | 'dropdown' | 'toggle' | 'color' | 'number' | 'button'} SettingType
@@ -28,6 +32,7 @@ import {
  * @property {*} [defaultValue]
  * @property {Array<{ value: string, label: string, disabled?: boolean }>} [options]
  * @property {() => Array<{ value: string, label: string, disabled?: boolean }>} [optionsFrom]
+ *   — optional; may receive the settings api when used by render.js
  * @property {{ min: number, max: number, step?: number, unit?: string }} [range]
  * @property {object} [scale] — optional UI↔engine conversion from createUiScale / scaledSliderSetting
  * @property {boolean} [metaRow] — e.g. RGB swatch beside the label
@@ -35,6 +40,7 @@ import {
  * @property {(api: object, value: *, extra?: *) => void} set
  * @property {(api: object) => boolean} [disabledWhen]
  * @property {(api: object, selectable: string[]) => *} [resolveValue] — sync-time value coercion
+ * @property {boolean} [syncOnSoft] — also refresh on soft AnimConfigChange (e.g. Preset → Custom)
  *
  * @typedef {object} SettingsSectionDef
  * @property {string} id — matched by SettingDef.sectionId within the parent category
@@ -58,13 +64,19 @@ export const EMPTY_SETTINGS_MESSAGE = 'No settings available yet';
  * Ordered inspector categories. Future Pixel FS features land here by id;
  * leave settings arrays empty until controls exist.
  *
- * Pixel Behavior holds how pixels move/react (physics, trails, etc.).
- * Style-specific knobs nest under `sections` (e.g. Heat). Appearance and
- * mode selection stay in Visual Effects.
+ * Pixel Behavior = physical properties of the Pixel FS (how pixels react,
+ * move, how disturbances spread, how energy dissipates). Style-specific
+ * brush knobs nest under `sections` (e.g. Heat). Visual Effects only choose
+ * the disturbance type and shared appearance.
  *
  * @type {SettingsCategoryDef[]}
  */
 export const SETTINGS_CATEGORIES = [
+  {
+    id: 'presets',
+    title: 'Preset',
+    defaultOpen: true,
+  },
   {
     id: 'pixel-behavior',
     title: 'Pixel Behavior',
@@ -98,11 +110,6 @@ export const SETTINGS_CATEGORIES = [
     title: 'Performance',
     defaultOpen: false,
   },
-  {
-    id: 'experimental',
-    title: 'Experimental',
-    defaultOpen: false,
-  },
 ];
 
 /**
@@ -115,13 +122,68 @@ export const SETTINGS_CATEGORIES = [
  * @type {SettingDef[]}
  */
 export const SETTINGS = [
+  /* Preset — top of the inspector. Every named preset (including Default)
+     loads through the same transition pipeline. Custom is not selectable as a
+     target: it appears when live settings no longer match a loaded built-in.
+     Soft edits must refresh this row (syncOnSoft). */
+  {
+    id: 'pixel-preset',
+    label: 'Preset',
+    desc: 'Complete Pixel FS experience — refresh transition applies the load',
+    categoryId: 'presets',
+    type: 'dropdown',
+    defaultValue: 'default',
+    syncOnSoft: true,
+    disabledWhen: (api) =>
+      (typeof api.isPresetSystemActive === 'function' &&
+        !api.isPresetSystemActive()) ||
+      (typeof api.isPresetTransitionActive === 'function' &&
+        api.isPresetTransitionActive()) ||
+      (typeof api.isPixelDensityLocked === 'function' &&
+        api.isPixelDensityLocked()),
+    optionsFrom: (api) => {
+      const opts =
+        api && typeof api.getPresetOptions === 'function'
+          ? api.getPresetOptions()
+          : getBuiltinPresetOptions();
+      /* Built-ins first (Default included), Custom last for display only —
+         set() ignores Custom so it never overwrites a built-in definition. */
+      return [
+        ...opts,
+        { value: PRESET_CUSTOM_ID, label: 'Custom' },
+      ];
+    },
+    get: (api) => {
+      if (typeof api.getActivePresetId === 'function') {
+        return api.getActivePresetId() || PRESET_CUSTOM_ID;
+      }
+      return PRESET_CUSTOM_ID;
+    },
+    set: (api, value) => {
+      if (!value || value === PRESET_CUSTOM_ID) return;
+      if (
+        typeof api.isPresetSystemActive === 'function' &&
+        !api.isPresetSystemActive()
+      ) {
+        return;
+      }
+      if (
+        typeof api.isPresetTransitionActive === 'function' &&
+        api.isPresetTransitionActive()
+      ) {
+        return;
+      }
+      if (typeof api.loadPreset === 'function') api.loadPreset(value);
+    },
+  },
   /* Shared Pixel Behavior — category root; UI 0–10, engine native ranges.
-     Future physics knobs (gravity, friction, turbulence, …) join this group. */
+     Physical properties of the Pixel FS. Future knobs (gravity, friction,
+     turbulence, …) join this group; modes interpret them per energy model. */
   scaledSliderSetting(
     {
       id: 'pixel-reaction-strength',
       label: 'Pixel Reaction Strength',
-      desc: 'How strongly pixels respond to interactions and effects',
+      desc: 'How strongly pixels react to disturbances in the field',
       categoryId: 'pixel-behavior',
     },
     {
@@ -134,7 +196,7 @@ export const SETTINGS = [
     {
       id: 'pixel-movement-speed',
       label: 'Pixel Movement Speed',
-      desc: 'How quickly pixels move when reacting',
+      desc: 'How quickly pixels move when reacting to a disturbance',
       categoryId: 'pixel-behavior',
     },
     {
@@ -145,22 +207,22 @@ export const SETTINGS = [
   ),
   scaledSliderSetting(
     {
-      id: 'pixel-return-speed',
-      label: 'Pixel Return Speed',
-      desc: 'How quickly displaced pixels return to their original positions',
+      id: 'pixel-decay-speed',
+      label: 'Decay Speed',
+      desc: 'How quickly energy introduced into the Pixel FS dissipates',
       categoryId: 'pixel-behavior',
     },
     {
-      get: (api) => api.getPixelReturnSpeed(),
-      set: (api, value) => api.setPixelReturnSpeed(value),
-      internal: { min: 0.002, max: 0.1, default: 0.026 },
+      get: (api) => api.getPixelDecaySpeed(),
+      set: (api, value) => api.setPixelDecaySpeed(value),
+      internal: { min: 0.001, max: 0.1, default: 0.018 },
     },
   ),
   scaledSliderSetting(
     {
       id: 'pixel-trail-lifetime',
       label: 'Pixel Trail Lifetime',
-      desc: 'How long pixel trails remain visible after movement',
+      desc: 'How long residual motion trails persist after a disturbance',
       categoryId: 'pixel-behavior',
     },
     {
@@ -198,21 +260,6 @@ export const SETTINGS = [
       get: (api) => api.getHeatRadius(),
       set: (api, value) => api.setHeatRadius(value),
       internal: { min: 1, max: 30, default: 11.8 },
-    },
-  ),
-  scaledSliderSetting(
-    {
-      id: 'heat-decay-speed',
-      label: 'Heat Decay Speed',
-      desc: 'How quickly pixels return to normal after heat',
-      categoryId: 'pixel-behavior',
-      sectionId: 'heat',
-      styleId: 'heat',
-    },
-    {
-      get: (api) => api.getHeatDecaySpeed(),
-      set: (api, value) => api.setHeatDecaySpeed(value),
-      internal: { min: 0.001, max: 0.1, default: 0.018 },
     },
   ),
   {
@@ -347,45 +394,16 @@ export function getSettingsForCategory(categoryId, activeStyleId, opts) {
 }
 
 /**
- * Deep-ish clone of a SettingDef defaultValue (objects / arrays only).
- * @param {*} value
- * @returns {*}
- */
-function cloneDefaultValue(value) {
-  if (value == null || typeof value !== 'object') return value;
-  if (Array.isArray(value)) return value.slice();
-  return { ...value };
-}
-
-/**
- * Reset every setting that declares `defaultValue` via its `set` handler.
- * Batches publishes when the api supports beginBatch/endBatch so Pixel FS
- * and the inspector update once. Future settings inherit reset automatically.
- *
- * Motion is applied first so dependent setters (e.g. Style while Motion was
- * off) can succeed during the same reset pass.
+ * Restore the complete factory-default Pixel FS configuration by loading the
+ * Default preset through the Preset Manager — the single authoritative source
+ * of truth for the default experience. No manual per-setting fallback; every
+ * configurable field (color, mode, behavior, cursor, performance) is covered
+ * by the preset snapshot.
  *
  * @param {object} api
  */
 export function resetSettingsToDefaults(api) {
-  const canBatch =
-    typeof api.beginBatch === 'function' && typeof api.endBatch === 'function';
-  if (canBatch) api.beginBatch();
-  try {
-    const defs = SETTINGS.filter((def) => def.defaultValue !== undefined);
-    const ordered = defs.slice().sort((a, b) => {
-      const rank = (def) => (def.id === 'motion' ? 0 : 1);
-      return rank(a) - rank(b);
-    });
-    ordered.forEach((def) => {
-      const value = cloneDefaultValue(def.defaultValue);
-      if (def.type === 'rgb') def.set(api, value, false);
-      else def.set(api, value);
-    });
-  } finally {
-    if (canBatch) api.endBatch();
-    else if (typeof api.publishAnimConfig === 'function') {
-      api.publishAnimConfig();
-    }
+  if (typeof api.loadPreset === 'function') {
+    api.loadPreset('default');
   }
 }

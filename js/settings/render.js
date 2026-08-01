@@ -19,9 +19,12 @@ import {
 /**
  * Resolve option list for a setting definition.
  * @param {import('./definitions/settings.js').SettingDef} def
+ * @param {object} [api]
  */
-function resolveOptions(def) {
-  if (typeof def.optionsFrom === 'function') return def.optionsFrom();
+function resolveOptions(def, api) {
+  if (typeof def.optionsFrom === 'function') {
+    return def.optionsFrom.length > 0 ? def.optionsFrom(api) : def.optionsFrom();
+  }
   return def.options ? def.options.slice() : [];
 }
 
@@ -47,7 +50,12 @@ function syncDisabled(row, control, def, api) {
  * @param {import('./definitions/settings.js').SettingDef} def
  */
 function needsInspectorSync(def) {
-  return def.type === 'segment' || def.id === 'style' || def.id === 'motion';
+  return (
+    def.type === 'segment' ||
+    def.id === 'style' ||
+    def.id === 'motion' ||
+    def.id === 'pixel-preset'
+  );
 }
 
 /**
@@ -55,8 +63,8 @@ function needsInspectorSync(def) {
  * @param {HTMLElement} body
  * @param {import('./definitions/settings.js').SettingDef} def
  * @param {object} api
- * @param {{ suppressSync?: () => void, allowSync?: () => void, requestSync?: () => void }} [syncGate]
- * @returns {{ root: HTMLElement, sync: () => void }}
+ * @param {{ suppressSync?: () => void, allowSync?: () => void, requestSync?: () => void, requestSoftSync?: () => void }} [syncGate]
+ * @returns {{ root: HTMLElement, sync: () => void, syncOnSoft?: boolean }}
  */
 export function renderSetting(body, def, api, syncGate) {
   const row = createRow({
@@ -84,7 +92,7 @@ export function renderSetting(body, def, api, syncGate) {
   }
 
   if (def.type === 'segment') {
-    const allOptions = resolveOptions(def);
+    const allOptions = resolveOptions(def, api);
     const activeOptions = allOptions.filter((o) => !o.disabled);
     const selectable = activeOptions.map((o) => o.value);
     const initial = def.resolveValue
@@ -171,7 +179,7 @@ export function renderSetting(body, def, api, syncGate) {
       syncDisabled(row, slider, def, api);
     };
   } else if (def.type === 'dropdown') {
-    const options = resolveOptions(def);
+    const options = resolveOptions(def, api);
     const dropdown = createDropdown({
       id: `settings-${def.id}`,
       labelledBy: row.labelId,
@@ -237,6 +245,7 @@ export function renderSetting(body, def, api, syncGate) {
 
   return {
     root: row.root,
+    syncOnSoft: !!def.syncOnSoft,
     sync() {
       if (syncControl) syncControl();
     },
@@ -292,6 +301,7 @@ function syncSettingHandles(handles, styleId) {
  * @param {{ suppressSync?: () => void, allowSync?: () => void, requestSync?: () => void }} [opts.syncGate]
  * @returns {{
  *   sync: () => void,
+ *   softSync: () => void,
  *   sections: Array<{
  *     id: string,
  *     root: HTMLElement,
@@ -394,8 +404,21 @@ export function bindCategorySettings(body, opts) {
     }
   }
 
+  /** Soft publishes skip full inspector sync — refresh syncOnSoft rows only. */
+  function softSync() {
+    nested.forEach((entry) => {
+      entry.handles.forEach((handle) => {
+        if (handle.syncOnSoft && !handle.root.hidden) handle.sync();
+      });
+    });
+    rootHandles.forEach((handle) => {
+      if (handle.syncOnSoft && !handle.root.hidden) handle.sync();
+    });
+  }
+
   return {
     sync,
+    softSync,
     sections: nested.map((entry) => entry.section),
   };
 }

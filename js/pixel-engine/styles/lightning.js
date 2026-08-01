@@ -1,8 +1,10 @@
-/* Pixel FS — Lightning (weather field + strike timing). V1 preserved. */
+/* Pixel FS — Lightning (weather field + strike timing). V1 preserved.
+   Electrical energy model: Decay Speed → how quickly charge dissipates. */
 
 import { createLightningStrikeController } from './lightning-strike.js';
 import { PixelEvents } from '../constants.js';
 import { computeGridLayout } from '../grid-manager.js';
+import { applyDecayDuration } from '../pixel-behavior.js';
 
 /**
  * @param {object} deps
@@ -32,7 +34,7 @@ export function createLightningStyle(deps) {
     Object.freeze({
       reactionStrength: 0.4,
       movementSpeed: 0.078,
-      returnSpeed: 0.026,
+      decaySpeed: 0.018,
       trailLifetime: 0.965,
     });
   const BEHAVIOR_TRAIL_RANGE = Object.freeze({ min: 0.85, max: 0.995 });
@@ -41,7 +43,7 @@ export function createLightningStyle(deps) {
     {
       reactionStrength: BEHAVIOR_DEFAULTS.reactionStrength,
       movementSpeed: BEHAVIOR_DEFAULTS.movementSpeed,
-      returnSpeed: BEHAVIOR_DEFAULTS.returnSpeed,
+      decaySpeed: BEHAVIOR_DEFAULTS.decaySpeed,
       trailLifetime: BEHAVIOR_DEFAULTS.trailLifetime,
     };
 
@@ -61,7 +63,7 @@ export function createLightningStyle(deps) {
 
   let reactionScale = 1;
   let moveScale = 1;
-  let returnScale = 1;
+  let decayScale = 1;
   let riseMin = BASE_RISE_MIN;
   let riseMax = BASE_RISE_MAX;
   let activeMin = BASE_ACTIVE_MIN;
@@ -161,7 +163,8 @@ export function createLightningStyle(deps) {
 
   /**
    * Map shared Pixel Behavior → live Lightning strike params.
-   * Uses cached scales from the shared layer; afterglow remap stays local.
+   * Decay Speed shortens charge hold (active duration); weather dissipate
+   * uses the same scale. Afterglow remap stays Trail Lifetime–local.
    * @returns {boolean} true when strike params changed
    */
   function applyBehaviorToLightning() {
@@ -172,18 +175,18 @@ export function createLightningStyle(deps) {
     const sc = (pixelBehavior && pixelBehavior.scales) || {
       reaction: 1,
       movement: 1,
-      return: 1,
+      decay: 1,
     };
     reactionScale = sc.reaction;
     moveScale = sc.movement;
-    returnScale = sc.return;
+    decayScale = sc.decay;
 
     const moveDiv = Math.max(moveScale, 1e-6);
-    const returnDiv = Math.max(returnScale, 1e-6);
     riseMin = BASE_RISE_MIN / moveDiv;
     riseMax = BASE_RISE_MAX / moveDiv;
-    activeMin = BASE_ACTIVE_MIN / returnDiv;
-    activeMax = BASE_ACTIVE_MAX / returnDiv;
+    /* Decay Speed — electrical charge dissipates (shorter active hold) */
+    activeMin = applyDecayDuration(BASE_ACTIVE_MIN, decayScale);
+    activeMax = applyDecayDuration(BASE_ACTIVE_MAX, decayScale);
 
     const ag = remapTrailToAfterglow(behavior.trailLifetime);
     afterglowMin = ag.min;
@@ -271,6 +274,15 @@ export function createLightningStyle(deps) {
 
     function lightningModeSelected() {
       return !!animConfig.motion && resolveActiveBgMode() === 'lightning';
+    }
+
+    function pointInField(clientX, clientY) {
+      syncStageRect();
+      const x = clientX - stageLeft;
+      const y = clientY - stageTop;
+      const maxW = (grid && grid.hitW > 0) ? grid.hitW : stageW;
+      const maxH = (grid && grid.hitH > 0) ? grid.hitH : stageH;
+      return x >= 0 && y >= 0 && x <= maxW && y <= maxH;
     }
 
     function syncMode() {
@@ -737,7 +749,11 @@ export function createLightningStyle(deps) {
         c.rainStart = now + rand(RAIN_DELAY_MIN, RAIN_DELAY_MAX);
         const rainDur = rand(RAIN_DUR_MIN, RAIN_DUR_MAX);
         c.rainEnd = c.rainStart + rainDur;
-        c.dissipateMs = rand(DISSIPATE_MS_MIN, DISSIPATE_MS_MAX);
+        /* Decay Speed — weather charge dissipates with shared energy fade */
+        c.dissipateMs = applyDecayDuration(
+          rand(DISSIPATE_MS_MIN, DISSIPATE_MS_MAX),
+          decayScale
+        );
         c.dissipateAt = c.rainEnd - c.dissipateMs * rand(0.45, 0.7);
         c.emitAcc = 0;
         c.seed = seed;
@@ -2340,7 +2356,8 @@ export function createLightningStyle(deps) {
         const cy = homeY + introDY;
         const size = DOT;
 
-        if (introDrift) {
+        /* Glyph migration leaves a resting lattice ghost; sub-pixel nudges do not. */
+        if (introDrift && Math.hypot(introDX, introDY) > 2.5) {
           ctx.fillStyle = `rgb(${COOL[0]},${COOL[1]},${COOL[2]})`;
           ctx.fillRect(homeX - DOT * 0.5, homeY - DOT * 0.5, DOT, DOT);
         }
@@ -2519,10 +2536,12 @@ export function createLightningStyle(deps) {
       /* Soft behavior / quality — density rebuild is PixelDensityChanged.
          Never applyPerformanceDensity on soft paths (would desync CELL from cols/rows). */
       if (e.detail && e.detail.soft) {
-        const bh = syncBehaviorFromConfig();
-        const cm = syncCursorModeFromConfig();
+        syncBehaviorFromConfig();
+        syncCursorModeFromConfig();
         syncPerformanceFromConfig();
-        if ((bh || cm) && enabled) start();
+        lightningTheme.sync();
+        /* Keep weather painting while preset color / behavior morphs. */
+        if (enabled) start();
         return;
       }
       syncPerformanceFromConfig();
@@ -2582,6 +2601,26 @@ export function createLightningStyle(deps) {
       ro.observe(stage);
     }
 
+    document.addEventListener('mousemove', (e) => {
+      if (!enabled) return;
+      syncStageRect();
+      const x = e.clientX - stageLeft;
+      const y = e.clientY - stageTop;
+      const maxW = (grid && grid.hitW > 0) ? grid.hitW : viewW;
+      const maxH = (grid && grid.hitH > 0) ? grid.hitH : viewH;
+      if (x < 0 || y < 0 || x > maxW || y > maxH) {
+        ptrX = ptrY = -1;
+        hideCursorDot();
+        return;
+      }
+      ptrX = x;
+      ptrY = y;
+      syncCursorModeFromConfig();
+      if (cursorBias.paintTrail) pushCursorPaint(x, y);
+      showCursorDot(x, y);
+      start();
+    }, { passive: true });
+
     /* Click the field to seed a local storm cell (cloud + rain) */
     function onStageClick(e) {
       if (!enabled) return;
@@ -2599,6 +2638,12 @@ export function createLightningStyle(deps) {
       if (!hit || !hit.inside) return;
       const x = hit.x;
       const y = hit.y;
+      syncStageRect();
+      const x = e.clientX - stageLeft;
+      const y = e.clientY - stageTop;
+      const maxW = (grid && grid.hitW > 0) ? grid.hitW : viewW;
+      const maxH = (grid && grid.hitH > 0) ? grid.hitH : viewH;
+      if (x < 0 || y < 0 || x > maxW || y > maxH) return;
       if (typeof pixelField.cellInteractive === 'function' && CELL > 0) {
         const cx = Math.min(cols - 1, Math.max(0, (x / CELL) | 0));
         const cy = Math.min(rows - 1, Math.max(0, (y / CELL) | 0));

@@ -27,6 +27,7 @@ import { createExperimentalStyle } from './styles/experimental.js';
  * @param {HTMLCanvasElement} [options.canvas]
  * @param {HTMLElement} [options.stage]
  * @param {{ canvas: HTMLCanvasElement, stage: HTMLElement }[]} [options.surfaces]
+ * @param {HTMLElement} [options.hitBounds] — interactive band (Pixel FS Screen 1); defaults to stage
  * @param {boolean} [options.prefersReduced]
  * @returns {object|null}
  */
@@ -40,6 +41,13 @@ export function createPixelEngine(options = {}) {
         }];
   const canvas = surfaces[0] && surfaces[0].canvas;
   const stage = surfaces[0] && surfaces[0].stage;
+  const canvas = options.canvas || document.getElementById('heatmap');
+  const stage = options.stage || document.getElementById('stage');
+  const hitBounds =
+    options.hitBounds
+    || document.getElementById('pixel-fs-screen-1-bounds')
+    || document.getElementById('pixel-fs-screen-1')
+    || stage;
   if (!canvas || !stage) return null;
   const canvases = surfaces.map((surface) => surface.canvas);
   const stages = surfaces.map((surface) => surface.stage);
@@ -57,7 +65,9 @@ export function createPixelEngine(options = {}) {
     config.syncAnimDom();
   }
 
-  /* Shared behavior layer: Settings → pixelBehavior → all Pixel FS modes */
+  /* Shared behavior layer: Settings → pixelBehavior scales → all Pixel FS modes.
+     Modes interpret physical knobs (reaction / movement / decay / trail) through
+     their own energy model — never own a separate Decay Speed. */
   const pixelBehavior = createPixelBehaviorSystem({
     animConfig: config.animConfig,
     events,
@@ -67,10 +77,12 @@ export function createPixelEngine(options = {}) {
     animConfig: config.animConfig,
     events,
   });
-  const grid = createGridManager({ stage, events, cell: CELL });
+  const grid = createGridManager({ stage, hitBounds, events, cell: CELL });
   const state = createPixelStateManager({ grid, events });
   const renderer = createRenderer({ canvas, canvases, grid });
   const interaction = createInteractionManager({ stage, stages, grid, events });
+  const renderer = createRenderer({ canvas, grid });
+  const interaction = createInteractionManager({ stage, hitBounds, grid, events });
   const performance = createPerformanceManager({
     animConfig: config.animConfig,
     events,
@@ -93,6 +105,7 @@ export function createPixelEngine(options = {}) {
     stage,
     surfaces,
     stages,
+    hitBounds,
     animConfig: config.animConfig,
     resolveActiveBgMode: config.resolveActiveBgMode,
     pixelBehavior,
@@ -146,14 +159,12 @@ export function createPixelEngine(options = {}) {
     setHeatIntensity: config.setHeatIntensity,
     getHeatRadius: config.getHeatRadius,
     setHeatRadius: config.setHeatRadius,
-    getHeatDecaySpeed: config.getHeatDecaySpeed,
-    setHeatDecaySpeed: config.setHeatDecaySpeed,
     getPixelReactionStrength: config.getPixelReactionStrength,
     setPixelReactionStrength: config.setPixelReactionStrength,
     getPixelMovementSpeed: config.getPixelMovementSpeed,
     setPixelMovementSpeed: config.setPixelMovementSpeed,
-    getPixelReturnSpeed: config.getPixelReturnSpeed,
-    setPixelReturnSpeed: config.setPixelReturnSpeed,
+    getPixelDecaySpeed: config.getPixelDecaySpeed,
+    setPixelDecaySpeed: config.setPixelDecaySpeed,
     getPixelTrailLifetime: config.getPixelTrailLifetime,
     setPixelTrailLifetime: config.setPixelTrailLifetime,
     getCursorMode: config.getCursorMode,
@@ -208,6 +219,8 @@ export { createEventSystem } from './events.js';
 export {
   createPixelBehaviorSystem,
   PIXEL_BEHAVIOR_DEFAULTS,
+  applyDecayRate,
+  applyDecayDuration,
 } from './pixel-behavior.js';
 export {
   createCursorModeSystem,

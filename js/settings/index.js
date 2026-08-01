@@ -4,6 +4,7 @@ import { createSection } from './section.js';
 import { bindAccordion } from './accordion.js';
 import { getSettingsCatalog } from './catalog.js';
 import { resetSettingsToDefaults } from './definitions/index.js';
+import { isAppStartup } from '../app-startup.js';
 
 /**
  * @param {object} api
@@ -35,6 +36,7 @@ export function initSettings(api) {
   const GEAR_MAX_ANGLE = 75;
 
   function nudgeGear(deltaY) {
+    if (isAppStartup()) return;
     if (!deltaY) return;
     pendingGearDelta += deltaY;
     if (gearRaf) return;
@@ -52,6 +54,7 @@ export function initSettings(api) {
   }
 
   function setOpen(next) {
+    if (next && isAppStartup()) return;
     open = next;
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
     btn.setAttribute('aria-label', open ? 'Close settings' : 'Open settings');
@@ -67,12 +70,25 @@ export function initSettings(api) {
 
   /* Skip inspector DOM rewrites while the user is driving a continuous control */
   let suppressSyncDepth = 0;
+  let pendingSoftSync = false;
   const syncFns = [];
+  const softSyncFns = [];
   const sectionHandles = [];
 
   function syncFromConfig() {
     if (suppressSyncDepth > 0) return;
+    pendingSoftSync = false;
     syncFns.forEach((fn) => fn());
+  }
+
+  /** Soft AnimConfigChange — refresh Preset → Custom without full inspector churn. */
+  function syncSoftFromConfig() {
+    if (suppressSyncDepth > 0) {
+      pendingSoftSync = true;
+      return;
+    }
+    pendingSoftSync = false;
+    softSyncFns.forEach((fn) => fn());
   }
 
   const syncGate = {
@@ -81,9 +97,15 @@ export function initSettings(api) {
     },
     allowSync() {
       suppressSyncDepth = Math.max(0, suppressSyncDepth - 1);
+      if (suppressSyncDepth === 0 && pendingSoftSync) {
+        syncSoftFromConfig();
+      }
     },
     requestSync() {
       syncFromConfig();
+    },
+    requestSoftSync() {
+      syncSoftFromConfig();
     },
   };
 
@@ -96,6 +118,9 @@ export function initSettings(api) {
         const handle = entry.build(sectionBody);
         if (handle && typeof handle.sync === 'function') {
           syncFns.push(handle.sync);
+        }
+        if (handle && typeof handle.softSync === 'function') {
+          softSyncFns.push(handle.softSync);
         }
         if (handle && Array.isArray(handle.sections)) {
           sectionHandles.push(...handle.sections);
@@ -129,12 +154,19 @@ export function initSettings(api) {
 
   window.addEventListener('animconfigchange', (e) => {
     /* Soft Pixel Behavior updates paint the active slider themselves —
-       skip full inspector rewrites (no React/UI churn). */
-    if (e.detail && e.detail.soft) return;
+       skip full inspector rewrites, but still flip Preset → Custom. */
+    if (e.detail && e.detail.soft) {
+      syncSoftFromConfig();
+      return;
+    }
     syncFromConfig();
   });
   /* Density teardown / rebuild locks the Pixel Density slider mid-transition. */
   window.addEventListener('pixeldensitylockchange', () => {
+    syncFromConfig();
+  });
+  /* Preset system unlocks after startup menu hold — refresh the Preset row. */
+  window.addEventListener('pixelpresetsready', () => {
     syncFromConfig();
   });
   syncFromConfig();
@@ -169,6 +201,7 @@ export function initSettings(api) {
 
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
+    if (isAppStartup()) return;
     setOpen(!open);
   });
 
