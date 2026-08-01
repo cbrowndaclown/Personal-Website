@@ -8,12 +8,17 @@ import { PixelEvents } from './constants.js';
 /**
  * @param {object} options
  * @param {HTMLElement} options.stage
+ * @param {HTMLElement[]} [options.stages]
  * @param {HTMLElement} [options.hitBounds]
  * @param {ReturnType<import('./grid-manager.js').createGridManager>} options.grid
  * @param {import('./events.js').EventSystem} options.events
  */
 export function createInteractionManager(options) {
   const stage = options.stage;
+  const stages =
+    options.stages && options.stages.length
+      ? options.stages.filter(Boolean)
+      : [stage];
   const hitBounds = options.hitBounds || stage;
   const grid = options.grid;
   const events = options.events;
@@ -23,9 +28,32 @@ export function createInteractionManager(options) {
   let localX = -1;
   let localY = -1;
   let inside = false;
+  let stageIndex = -1;
   let started = false;
 
   function pointInField(cx, cy) {
+    for (let i = 0; i < stages.length; i++) {
+      const rect = stages[i].getBoundingClientRect();
+      const rectX = cx - rect.left;
+      const rectY = cy - rect.top;
+      if (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rectX >= 0 &&
+        rectY >= 0 &&
+        rectX <= rect.width &&
+        rectY <= rect.height
+      ) {
+        return {
+          inside: true,
+          x: rectX * (grid.viewW / rect.width),
+          y: rectY * (grid.viewH / rect.height),
+          stageIndex: i,
+          stage: stages[i],
+        };
+      }
+    }
+    return { inside: false, x: -1, y: -1, stageIndex: -1, stage: null };
     grid.syncStageRect();
     if (typeof grid.syncHitBounds === 'function') grid.syncHitBounds();
     const x = cx - grid.stageLeft;
@@ -45,6 +73,7 @@ export function createInteractionManager(options) {
     const hit = pointInField(cx, cy);
     const wasInside = inside;
     inside = hit.inside;
+    stageIndex = hit.stageIndex;
     if (inside) {
       localX = hit.x;
       localY = hit.y;
@@ -59,6 +88,8 @@ export function createInteractionManager(options) {
       x: hit.x,
       y: hit.y,
       inside: hit.inside,
+      stageIndex: hit.stageIndex,
+      stage: hit.stage,
       viewW: grid.viewW,
       viewH: grid.viewH,
       hitW: grid.hitW,
@@ -87,6 +118,7 @@ export function createInteractionManager(options) {
   function onMouseLeave() {
     const wasInside = inside;
     inside = false;
+    stageIndex = -1;
     localX = localY = -1;
     events.emit(PixelEvents.PointerLeft, {
       clientX,
@@ -127,6 +159,7 @@ export function createInteractionManager(options) {
       x: localX,
       y: localY,
       inside,
+      stageIndex,
     };
   }
 
@@ -147,6 +180,7 @@ export function createInteractionManager(options) {
     reevaluate,
     pointInField,
     get stage() { return stage; },
+    get stages() { return stages.slice(); },
     get hitBounds() { return hitBounds; },
   };
 }

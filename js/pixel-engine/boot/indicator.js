@@ -4,7 +4,7 @@
    holds briefly, then dissolves. Built entirely from lattice cells. */
 
 import { bootEnergyDurationMs, BOOT_TIMING } from './constants.js';
-import { clamp01, smoothstep, easeInOutCubic } from './math.js';
+import { clamp01, smoothstep } from './math.js';
 
 const TWO_PI = Math.PI * 2;
 const ARC_SPAN = Math.PI * 0.72;
@@ -91,6 +91,9 @@ export function createBootIndicator() {
   }
 
   /**
+   * Begin the final closing revolution. Rotation continues forward at the
+   * same rate for a full 360°. Span grows linearly with that forward travel
+   * so the open gap seals without reversing or snapping.
    * Begin the final closing revolution. Always takes one full forward
    * turn from the current angle. The trailing edge keeps rotating at
    * omega; the leading edge extends forward until the gap seals.
@@ -106,6 +109,10 @@ export function createBootIndicator() {
     ) {
       return;
     }
+    const a = angleAt(now);
+    /* Always a full forward revolution — never the short backward path */
+    let target = Math.floor(a / TWO_PI) * TWO_PI + TWO_PI;
+    if (target <= a + 0.02) target += TWO_PI;
     const a = spinAngleAt(now);
     closeStartAngle = a;
     closeTargetAngle = a + TWO_PI;
@@ -133,12 +140,14 @@ export function createBootIndicator() {
 
   /**
    * Arc span — grows from chase-tail to a sealed ring during the close.
+   * Linear with forward head travel so the trailing tip never reverses
+   * (eased span growth outran omega and drove the gap the wrong way).
    * Growth is applied at the leading edge only (see angleAt).
    * @param {number} now
    */
   function spanAt(now) {
     if (mode === 'closing') {
-      const u = easeInOutCubic(closeProgress(now));
+      const u = closeProgress(now);
       return ARC_SPAN + (TWO_PI - ARC_SPAN) * u;
     }
     if (mode === 'circle_hold' || mode === 'dissolve') return TWO_PI;

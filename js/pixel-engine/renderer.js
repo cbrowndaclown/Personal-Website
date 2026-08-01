@@ -7,13 +7,74 @@ import { CELL, DOT, FIELD, COOL } from './constants.js';
 
 /**
  * @param {object} options
- * @param {HTMLCanvasElement} options.canvas
+ * @param {HTMLCanvasElement} options.canvas — authoritative simulation surface
+ * @param {HTMLCanvasElement[]} [options.canvases] — display surfaces sharing it
  * @param {ReturnType<import('./grid-manager.js').createGridManager>} options.grid
  */
 export function createRenderer(options) {
   const canvas = options.canvas;
+  const requestedCanvases =
+    options.canvases && options.canvases.length
+      ? options.canvases.filter(Boolean)
+      : [canvas];
+  const canvases = [
+    canvas,
+    ...requestedCanvases.filter((surface) => surface !== canvas),
+  ];
   const grid = options.grid;
   const ctx = canvas.getContext('2d', { alpha: false });
+  const displayContexts = canvases.map((surface, index) =>
+    index === 0 ? ctx : surface.getContext('2d', { alpha: false })
+  );
+  let activeSurfaceIndex = 0;
+  /* While screens cross the viewport, every surface must show the live frame
+     — otherwise the inactive canvas slides in holding a stale/blank image. */
+  let presentAllSurfaces = false;
+
+  /**
+   * Copy the authoritative frame to the active secondary display surface.
+   * Simulation and paint still happen once on the primary canvas.
+   */
+  function presentTo(index) {
+    if (index === 0) return;
+    const target = canvases[index];
+    const targetCtx = displayContexts[index];
+    if (!target || !targetCtx || !canvas.width || !canvas.height) return;
+
+    if (target.width !== canvas.width) target.width = canvas.width;
+    if (target.height !== canvas.height) target.height = canvas.height;
+    target.style.width = canvas.style.width;
+    target.style.height = canvas.style.height;
+    targetCtx.setTransform(1, 0, 0, 1, 0, 0);
+    targetCtx.drawImage(canvas, 0, 0);
+  }
+
+  function present() {
+    if (presentAllSurfaces) {
+      for (let i = 1; i < canvases.length; i++) presentTo(i);
+      return;
+    }
+    presentTo(activeSurfaceIndex);
+  }
+
+  function syncSurfaces() {
+    for (let i = 1; i < canvases.length; i++) presentTo(i);
+  }
+
+  /**
+   * Keep every display surface live (screen transition in flight).
+   * @param {boolean} on
+   */
+  function setPresentAllSurfaces(on) {
+    presentAllSurfaces = !!on;
+    if (presentAllSurfaces) syncSurfaces();
+  }
+
+  function setActiveSurface(index) {
+    const next = Math.max(0, Math.min(canvases.length - 1, Number(index) | 0));
+    activeSurfaceIndex = next;
+    present();
+  }
 
   /**
    * Size the backing store to the current grid view + DPR.
@@ -55,6 +116,7 @@ export function createRenderer(options) {
         ctx.fillRect(x * cell + half, y * cell + half, dot, dot);
       }
     }
+    present();
   }
 
   function clear(color) {
@@ -89,15 +151,22 @@ export function createRenderer(options) {
       ctx.fillStyle = a < 1 ? `rgba(${r},${g},${b},${a})` : `rgb(${r},${g},${b})`;
       ctx.fillRect(cx - size * 0.5, cy - size * 0.5, size, size);
     }
+    present();
   }
 
   return {
     canvas,
+    canvases,
     ctx,
     applySurface,
     paintRest,
     paintFromState,
     clear,
+    present,
+    syncSurfaces,
+    setActiveSurface,
+    setPresentAllSurfaces,
+    get activeSurfaceIndex() { return activeSurfaceIndex; },
     get CELL() { return CELL; },
     get DOT() { return DOT; },
     get FIELD() { return FIELD; },

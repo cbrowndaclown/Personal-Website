@@ -7,6 +7,7 @@ import { initSettingsPersistence } from './settings/persist.js';
 import { createPresetManager } from './settings/presets/index.js';
 import { createPixelEngine } from './pixel-engine/index.js';
 import { initAppScroll } from './app-scroll/index.js';
+import { initPage2Menu } from './page-2-menu/index.js';
 
 (function () {
   'use strict';
@@ -38,6 +39,76 @@ import { initAppScroll } from './app-scroll/index.js';
   }
 
   /* ─────────────────────────────────────────────────────────────────────────
+     1. App scroll — (screen × nav) state machine
+         Down:  S1 Open → S1 Closed → S2 Closed
+         Up:    S2 Closed → S2 Open → S1 Open
+         One deliberate gesture → one edge. Nav uses existing site-frame
+         transform; screen changes are programmatic on #app-scroll.
+         Unlocks on pixeldirectory* / pixelbootready (same as prior topnav).
+  ───────────────────────────────────────────────────────────────────────── */
+  const appScroll = initAppScroll({
+    frame: document.getElementById('site-frame'),
+    nav: document.getElementById('topnav'),
+    shell: document.getElementById('app-scroll'),
+    screenIds: ['pixel-fs-screen-1', 'pixel-fs-screen-2'],
+  });
+
+  /* Debug / compatibility */
+  if (appScroll) window.appScroll = appScroll;
+
+  /* ─────────────────────────────────────────────────────────────────────────
+     Pixel Engine — grid, state, render, interaction, animation, Pixel FS
+  ───────────────────────────────────────────────────────────────────────── */
+  const engine = createPixelEngine({
+    surfaces: [
+      {
+        canvas: document.getElementById('heatmap'),
+        stage: document.getElementById('stage'),
+      },
+      {
+        canvas: document.getElementById('heatmap-2'),
+        stage: document.getElementById('stage-2'),
+      },
+    ],
+  });
+
+  /* Page 2 Menu — Screen 2 visibility; typography via shared intro LED pipeline. */
+  const page2Menu = initPage2Menu({
+    root: document.getElementById('page-2-menu'),
+    frame: document.getElementById('site-frame'),
+    intro: engine && engine.animation ? engine.animation.introController : null,
+  });
+  if (page2Menu) window.page2Menu = page2Menu;
+
+  if (engine) {
+    /* One simulation surface, displayed through the active screen's canvas. */
+    const pixelSurfaceFrame = document.getElementById('site-frame');
+    const syncPixelSurface = (event) => {
+      const screen =
+        event && event.detail && event.detail.screen != null
+          ? event.detail.screen
+          : Number(pixelSurfaceFrame?.dataset.appScreen) || 0;
+      engine.renderer.setActiveSurface(screen);
+      engine.interaction.reevaluate();
+    };
+    /* Both screens are on-screen while they cross the viewport, so every
+       surface must stay live for the whole transition. data-app-screen flips
+       at transition start; appscrollchange fires once the screen has settled. */
+    window.addEventListener('appscrollchange', (event) => {
+      engine.renderer.setPresentAllSurfaces(false);
+      syncPixelSurface(event);
+    });
+    if (pixelSurfaceFrame && typeof MutationObserver !== 'undefined') {
+      const pixelSurfaceObserver = new MutationObserver(() => {
+        engine.renderer.setPresentAllSurfaces(true);
+      });
+      pixelSurfaceObserver.observe(pixelSurfaceFrame, {
+        attributes: true,
+        attributeFilter: ['data-app-screen'],
+      });
+    }
+    engine.renderer.syncSurfaces();
+    syncPixelSurface();
      Pixel Engine — grid, state, render, interaction, animation, Pixel FS
   ───────────────────────────────────────────────────────────────────────── */
   const engine = createPixelEngine({
@@ -165,6 +236,18 @@ import { initAppScroll } from './app-scroll/index.js';
   }
 
   /* ─────────────────────────────────────────────────────────────────────────
+     1c. Nameplate ribbon — Benz Grotesk textPath along the active frame
+         Screen 1: up the left, across the top, down the right (open bottom).
+         Screen 2: down the left, across the bottom, up the right (open top).
+         Same continuous display — active edges follow the current screen.
+         Clockwise travel keeps glyphs outward. Smooth linear loop preserved.
+  ───────────────────────────────────────────────────────────────────────── */
+  (function initNameplate() {
+    const stage    = document.getElementById('stage');
+    const shell    = document.getElementById('home');
+    const aperture = document.getElementById('app-scroll');
+    const frame    = document.getElementById('site-frame');
+    const plate    = document.querySelector('.nameplate');
      1c. Nameplate ribbon — Benz Grotesk textPath around the visible device
          window (the #app-scroll scrollport inside the ribbon frame).
          Closed path: up left → TL → top → TR → down right → BR → bottom → BL.
@@ -207,6 +290,15 @@ import { initAppScroll } from './app-scroll/index.js';
       return Math.max(a, Math.min(b, n));
     }
 
+    /* Active Pixel FS screen index from the scroll state machine. */
+    function activeScreenIndex() {
+      const raw = frame && frame.dataset.appScreen;
+      const n = raw == null ? 0 : parseInt(raw, 10);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    }
+
+    function cornerPoint(cx, cy, R, startAng, t, sweep) {
+      const ang = startAng + t * (Math.PI / 2) * (sweep < 0 ? -1 : 1);
     function wrapUnit(x, period) {
       if (!(period > 0)) return 0;
       return x - Math.floor(x / period) * period;
@@ -240,14 +332,15 @@ import { initAppScroll } from './app-scroll/index.js';
       return { x: ty / len, y: -tx / len };
     }
 
-    function appendCorner(pts, cx, cy, R, startAng, gap) {
+    function appendCorner(pts, cx, cy, R, startAng, gap, sweep) {
       if (R < 0.5) return;
+      const dir = sweep < 0 ? -1 : 1;
       for (let i = 0; i <= CORNER_SAMPLES; i++) {
         const t = i / CORNER_SAMPLES;
-        const p0 = cornerPoint(cx, cy, R, startAng, Math.max(0, t - 0.5 / CORNER_SAMPLES));
-        const p1 = cornerPoint(cx, cy, R, startAng, Math.min(1, t + 0.5 / CORNER_SAMPLES));
+        const p0 = cornerPoint(cx, cy, R, startAng, Math.max(0, t - 0.5 / CORNER_SAMPLES), dir);
+        const p1 = cornerPoint(cx, cy, R, startAng, Math.min(1, t + 0.5 / CORNER_SAMPLES), dir);
         const n = outwardNormal(p1.x - p0.x, p1.y - p0.y);
-        const p = cornerPoint(cx, cy, R, startAng, t);
+        const p = cornerPoint(cx, cy, R, startAng, t, dir);
         const x = p.x + n.x * gap;
         const y = p.y + n.y * gap;
         const last = pts[pts.length - 1];
@@ -276,11 +369,14 @@ import { initAppScroll } from './app-scroll/index.js';
     }
 
     /*
+      Screen 1 — top/left/right (open bottom):
+      Bottom-left → up left → TL squircle → across top → TR squircle →
+      down right → bottom-right. Clockwise so glyphs face out.
       Closed clockwise rim around the visible device window:
       left ↑ → TL squircle → top → TR → right ↓ → BR → bottom ← → BL → close.
       Clockwise travel keeps glyphs facing outward into the white chrome.
     */
-    function buildRimPoints(W, H, R, gap) {
+    function buildRimPointsTop(W, H, R, gap) {
       const pts = [];
       const step = 8;
       const r = Math.min(R, W * 0.5, H * 0.5);
@@ -292,13 +388,13 @@ import { initAppScroll } from './app-scroll/index.js';
       appendLine(pts, -gap, r, step);
 
       /* TL: west → north (startAng = π) */
-      appendCorner(pts, r, r, r, Math.PI, gap);
+      appendCorner(pts, r, r, r, Math.PI, gap, 1);
 
       /* Top edge, left → right */
       appendLine(pts, W - r, -gap, step);
 
       /* TR: north → east (startAng = 3π/2) */
-      appendCorner(pts, W - r, r, r, Math.PI * 1.5, gap);
+      appendCorner(pts, W - r, r, r, Math.PI * 1.5, gap, 1);
 
       /* Down the right edge to the BR corner */
       appendLine(pts, W + gap, H - r, step);
@@ -314,6 +410,38 @@ import { initAppScroll } from './app-scroll/index.js';
 
       /* Close back to the left-edge start */
       appendLine(pts, -gap, H - r, step);
+
+      return pts;
+    }
+
+    /*
+      Screen 2 — bottom/left/right (open top):
+      Top-right → down right → BR squircle → across bottom (R→L) →
+      BL squircle → up left → top-left.
+      Same clockwise framing as Screen 1 so glyphs stay outward.
+    */
+    function buildRimPointsBottom(W, H, R, gap) {
+      const pts = [];
+      const step = 8;
+      const r = Math.min(R, W * 0.5, H * 0.5);
+
+      /* Start top-right */
+      pts.push({ x: W + gap, y: -gap * 0.35 });
+
+      /* Down the right edge to the BR corner */
+      appendLine(pts, W + gap, H - r, step);
+
+      /* BR: east → south (startAng = 0) */
+      appendCorner(pts, W - r, H - r, r, 0, gap, 1);
+
+      /* Bottom edge, right → left */
+      appendLine(pts, r, H + gap, step);
+
+      /* BL: south → west (startAng = π/2) */
+      appendCorner(pts, r, H - r, r, Math.PI * 0.5, gap, 1);
+
+      /* Up the left edge to top-left */
+      appendLine(pts, -gap, -gap * 0.35, step);
 
       return pts;
     }
@@ -361,7 +489,36 @@ import { initAppScroll } from './app-scroll/index.js';
       return { unit, copies };
     }
 
+    /**
+     * Aperture box relative to the page shell, ignoring the ribbon flip
+     * transform — the nameplate carries that same transform, so measuring the
+     * transformed rect mid-flip would double-apply the shift.
+     */
+    function apertureBox() {
+      if (aperture && aperture.offsetWidth > 1) {
+        return {
+          left: aperture.offsetLeft,
+          top: aperture.offsetTop,
+          width: aperture.offsetWidth,
+          height: aperture.offsetHeight,
+        };
+      }
+      const r = stage.getBoundingClientRect();
+      const o = shell
+        ? shell.getBoundingClientRect()
+        : { left: 0, top: 0 };
+      return {
+        left: r.left - o.left,
+        top: r.top - o.top,
+        width: r.width,
+        height: r.height,
+      };
+    }
+
     function layout() {
+      /* Fixed application aperture — not the scrolled stage — so the ribbon
+         frames the live Pixel FS window on every screen. */
+      const rect = apertureBox();
       /* Size to the fixed scrollport — never the tall scrolling stage. */
       const rect = rimHost.getBoundingClientRect();
       if (rect.width < 2 || rect.height < 2) return;
@@ -371,6 +528,15 @@ import { initAppScroll } from './app-scroll/index.js';
       const rRaw = parseFloat(cs.borderTopLeftRadius);
       const R = Number.isFinite(rRaw) && rRaw > 0 ? rRaw : 36;
 
+      const shellCs = shell ? getComputedStyle(shell) : null;
+      const chromeY = shellCs
+        ? Math.max(
+            parseFloat(shellCs.paddingTop) || 0,
+            parseFloat(shellCs.paddingBottom) || 0
+          )
+        : 0;
+      const chromeX = shellCs ? parseFloat(shellCs.paddingLeft) || 0 : 0;
+      const band = Math.min(chromeY || chromeX || 36, chromeX || 36, 36);
       /* Chrome band from ribbon padding — stable; ribbon never scrolls */
       const frameCs = getComputedStyle(frame);
       const padY = Math.min(
@@ -384,7 +550,11 @@ import { initAppScroll } from './app-scroll/index.js';
 
       const W = rect.width;
       const H = rect.height;
-      const pts = buildRimPoints(W, H, R, gap);
+      const screen = activeScreenIndex();
+      const pts =
+        screen > 0
+          ? buildRimPointsBottom(W, H, R, gap)
+          : buildRimPointsTop(W, H, R, gap);
       rimPath.setAttribute('d', pointsToPath(pts));
 
       pathLen = rimPath.getTotalLength();
@@ -410,6 +580,9 @@ import { initAppScroll } from './app-scroll/index.js';
       svg.setAttribute('viewBox', `${-pad} ${-pad} ${W + pad * 2} ${H + pad * 2}`);
       svg.setAttribute('width', String(Math.ceil(W + pad * 2)));
       svg.setAttribute('height', String(Math.ceil(H + pad * 2)));
+      /* Position relative to page-shell so the ribbon rides the shell transform */
+      svg.style.left = `${Math.round(rect.left - pad)}px`;
+      svg.style.top  = `${Math.round(rect.top - pad)}px`;
       /*
         Ribbon frame does not scroll — pin the rim to the visible device
         window inside .page-shell. No scroll listener; geometry is constant
@@ -427,6 +600,37 @@ import { initAppScroll } from './app-scroll/index.js';
         layoutRaf = 0;
         layout();
       });
+    }
+
+    function flipFadeMs() {
+      const raw = getComputedStyle(shell || document.body).getPropertyValue(
+        '--shell-flip-fade-ms'
+      );
+      const n = parseFloat(raw);
+      return Number.isFinite(n) && n > 0 ? n : 140;
+    }
+
+    /*
+      The rim traces different edges on each screen, so the path cannot morph
+      between them. Rebuild it at the midpoint of the aperture glide, hidden
+      behind a short fade, so the swap never reads as a jump.
+    */
+    let flipTimer = 0;
+    function flipRim() {
+      const reduce =
+        typeof window.matchMedia === 'function' &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (!plate || reduce) {
+        layout();
+        return;
+      }
+      plate.classList.add('is-flipping');
+      if (flipTimer) clearTimeout(flipTimer);
+      flipTimer = window.setTimeout(() => {
+        flipTimer = 0;
+        layout();
+        plate.classList.remove('is-flipping');
+      }, flipFadeMs());
     }
 
     function tick(ts) {
@@ -469,6 +673,20 @@ import { initAppScroll } from './app-scroll/index.js';
     layout();
     start();
 
+    window.addEventListener('resize', layout, { passive: true });
+    /* Boundary flips with the active screen; keep scroll offset continuous. */
+    window.addEventListener('appscrollchange', layout, { passive: true });
+    if (frame && typeof MutationObserver !== 'undefined') {
+      new MutationObserver(flipRim).observe(frame, {
+        attributes: true,
+        attributeFilter: ['data-app-screen'],
+      });
+    }
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(layout);
+      if (aperture) ro.observe(aperture);
+      ro.observe(stage);
+      ro.observe(document.body);
     window.addEventListener('resize', scheduleLayout, { passive: true });
     /* Relayout when nav open/close changes the scrollport height — not on scroll. */
     window.addEventListener('appscrollchange', scheduleLayout, { passive: true });

@@ -1,6 +1,7 @@
-/* Intro content service — typography + directory LED sequences.
+/* Intro content service — Pixel FS typography LED sequences.
    Boot lifecycle is owned by the Boot Controller; this module supplies
-   glyph construction, migration, directory assemble, and idle float.
+   glyph construction, migration, Screen 1 directory assemble, Screen 2 menu
+   assemble, and idle float — one shared PE LED typography pipeline.
 
    Directory assemble supports Standard timing, density-rebuild timing, and
    Space-skip Magnetic Lock (displaced menu pixels snap into alignment).
@@ -163,6 +164,16 @@ export function createIntroController(deps) {
     { text: 'Scroll down for more', arrow: 'down', pace: 1.25 },
   ];
 
+  /* Screen 2 menu — same PE LED typography + directory assemble language.
+     Only content and dual-region positions differ.
+     Arrows are intentionally smaller than Screen 1 directory chevrons. */
+  const S2_ARROW_SCALE = 0.78;
+  const S2_LINES = [
+    { text: 'Scroll up for header / top grid', region: 'top',    align: 'center', arrow: 'up',   pace: 1.20 },
+    { text: '/ for options',                   region: 'bottom', align: 'left',   pace: 1.00 },
+    { text: 'Scroll down for more',            region: 'bottom', align: 'left',   arrow: 'down', pace: 1.15 },
+  ];
+
   const DIR_FONT =
     '"Josefin Sans", "Apple Symbols", "Segoe UI Symbol", "Noto Sans Symbols", system-ui, sans-serif';
 
@@ -174,6 +185,20 @@ export function createIntroController(deps) {
   let contentLocked = false; /* exclusive boot owns the PE canvas */
   /* Directory LEDs ("Scroll up/down") must not exist until post-boot reveal */
   let directoryAllowed = false;
+  /* Which menu content occupies the shared directory LED buffers: 1 | 2 */
+  let menuSurface = 1;
+  /* Screen 2 menu assemble plays at most once per page load */
+  let screen2MenuPlayed = false;
+  /*
+    Menu content opacity (0..1). Both screens display the same shared frame,
+    so menu text must clear while a screen transition crosses the viewport —
+    otherwise the same lines read twice, once per visible surface.
+  */
+  let menuFade = 1;
+  let menuFadeFrom = 1;
+  let menuFadeTo = 1;
+  let menuFadeStartWall = 0;
+  let menuFadeMs = 0;
   let phaseStartTime = 0; /* content clock ms origin */
   let contentElapsed = 0;
   let lastWallNow = 0;
@@ -991,6 +1016,11 @@ export function createIntroController(deps) {
     assembleMs = 0;
   }
 
+  function arrowSizeFor(fontPx, scale) {
+    const s = scale != null ? scale : 1.15;
+    /* Screen 1 keeps the larger chevron; Screen 2 passes a sub-1 scale. */
+    if (s >= 1) return Math.max(fontPx * s, fontPx + 2);
+    return Math.max(2, fontPx * s);
   /**
    * Convergence remain (1 → 0). Ease-in accelerates into alignment; the last
    * fraction snaps hard — mechanical stop, not a soft settle.
@@ -1183,20 +1213,24 @@ export function createIntroController(deps) {
     return Math.max(fontPx * 1.15, fontPx + 2);
   }
 
-  function lineLayoutWidth(octx, line, fontPx) {
+  function lineLayoutWidth(octx, line, fontPx, arrowScale) {
     octx.font = `600 ${fontPx}px ${DIR_FONT}`;
     const textW = octx.measureText(line.text).width;
-    const arrowW = arrowSizeFor(fontPx) * 1.05;
-    const gap = Math.max(3, Math.round(fontPx * 0.35));
+    if (!line.arrow) return textW;
+    const arrowW = arrowSizeFor(fontPx, arrowScale) * 1.05;
+    const gap = Math.max(2, Math.round(fontPx * (arrowScale != null && arrowScale < 1 ? 0.28 : 0.35)));
     return textW + gap + arrowW;
   }
 
-  function fitDirFont(octx, lines, maxWidth, startPx) {
+  function fitDirFont(octx, lines, maxWidth, startPx, arrowScale) {
     let fontPx = startPx;
     for (let attempt = 0; attempt < 14; attempt++) {
       let widest = 0;
       for (let L = 0; L < lines.length; L++) {
-        widest = Math.max(widest, lineLayoutWidth(octx, lines[L], fontPx));
+        widest = Math.max(
+          widest,
+          lineLayoutWidth(octx, lines[L], fontPx, arrowScale)
+        );
       }
       if (widest <= maxWidth) break;
       fontPx = Math.max(4, fontPx - 1);
@@ -1230,6 +1264,18 @@ export function createIntroController(deps) {
     octx.restore();
   }
 
+  /**
+   * @param {CanvasRenderingContext2D} octx
+   * @param {{ text: string, arrow?: string }} line
+   * @param {number} x  Anchor x (center of line when align=center, left edge when left)
+   * @param {number} y
+   * @param {number} fontPx
+   * @param {{ align?: 'left' | 'center', arrowScale?: number }} [opts]
+   */
+  function sampleLineWithArrow(octx, line, x, y, fontPx, opts) {
+    const align = (opts && opts.align) || 'center';
+    const arrowScale = opts && opts.arrowScale;
+
   function sampleLineWithArrow(octx, line, cx, cy, fontPx) {
     const h = sampleH > 0 ? sampleH : rows;
     octx.fillStyle = '#000';
@@ -1239,21 +1285,32 @@ export function createIntroController(deps) {
     octx.textAlign = 'left';
     octx.textBaseline = 'middle';
 
-    const arrowSize = arrowSizeFor(fontPx);
-    const gap = Math.max(3, Math.round(fontPx * 0.35));
     const textW = octx.measureText(line.text).width;
-    const arrowW = arrowSize * 1.05;
-    const totalW = textW + gap + arrowW;
-    const startX = cx - totalW * 0.5;
+    let totalW = textW;
+    let gap = 0;
+    let arrowSize = 0;
+    let arrowW = 0;
+    if (line.arrow) {
+      arrowSize = arrowSizeFor(fontPx, arrowScale);
+      gap = Math.max(
+        2,
+        Math.round(fontPx * (arrowScale != null && arrowScale < 1 ? 0.28 : 0.35))
+      );
+      arrowW = arrowSize * 1.05;
+      totalW = textW + gap + arrowW;
+    }
+    const startX = align === 'left' ? x : x - totalW * 0.5;
 
-    octx.fillText(line.text, startX, cy);
-    drawPixelArrow(
-      octx,
-      startX + textW + gap + arrowW * 0.5,
-      cy,
-      arrowSize,
-      line.arrow
-    );
+    octx.fillText(line.text, startX, y);
+    if (line.arrow) {
+      drawPixelArrow(
+        octx,
+        startX + textW + gap + arrowW * 0.5,
+        y,
+        arrowSize,
+        line.arrow
+      );
+    }
 
     const data = octx.getImageData(0, 0, cols, h).data;
     const glyph = [];
@@ -1261,14 +1318,25 @@ export function createIntroController(deps) {
     for (let i = 0, n = cols * h; i < n; i++) {
       if (data[i * 4] <= 140) continue;
       glyph.push(i);
-      const x = i % cols;
-      const y = (i / cols) | 0;
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
+      const gx = i % cols;
+      const gy = (i / cols) | 0;
+      if (gx < minX) minX = gx;
+      if (gx > maxX) maxX = gx;
+      if (gy < minY) minY = gy;
+      if (gy > maxY) maxY = gy;
     }
-    return { glyph, minX, maxX, minY, maxY };
+    return {
+      glyph,
+      minX,
+      maxX,
+      minY,
+      maxY,
+      startX,
+      textW,
+      gap,
+      arrowW,
+      totalW,
+    };
   }
 
   function bakeDirectory(opts) {
@@ -1277,6 +1345,8 @@ export function createIntroController(deps) {
       clearDirectoryLeds();
       return;
     }
+    menuSurface = 1;
+    setMenuFade(1, 0);
     const instant = !!(opts && opts.instant);
     /* Density rebuild uses a tighter timing profile; startup stays DIR_TIMING. */
     const timing =
@@ -1499,12 +1569,334 @@ export function createIntroController(deps) {
     renderDirectoryFromBitmap(null);
   }
 
+  /**
+   * Bake Screen 2 menu into the shared directory LED buffers.
+   * Same assemble language as Screen 1 directory (DIR_TIMING, L→R wave).
+   * Only content and dual-region positions differ.
+   * @param {{ instant?: boolean, densityRebuild?: boolean }} [opts]
+   */
+  function bakeScreen2Menu(opts) {
+    if (!directoryAllowed) {
+      clearDirectoryLeds();
+      return;
+    }
+    setMenuFade(1, 0);
+    const instant = !!(opts && opts.instant);
+    const timing =
+      opts && opts.densityRebuild ? DIR_TIMING_DENSITY : DIR_TIMING;
+    const n = cols * rows;
+    dTarget = new Float32Array(n);
+    dOn = new Float32Array(n);
+    dLevel = new Float32Array(n);
+    dOnAt = new Float32Array(n);
+    dDetachAt = new Float32Array(n);
+    dGoneAt = new Float32Array(n);
+    dDriftX = new Float32Array(n);
+    dDriftY = new Float32Array(n);
+    dOx = new Float32Array(n);
+    dOy = new Float32Array(n);
+    dWordId = new Int16Array(n);
+    dWordId.fill(-1);
+    dIdleWords = [];
+    dBitmap = null;
+    assembleMs = 0;
+
+    if (cols < 16 || rows < 16) return;
+
+    const off = document.createElement('canvas');
+    off.width = cols;
+    off.height = rows;
+    const octx = off.getContext('2d', { alpha: false });
+    if (!octx) return;
+
+    /* Same scaling language as Screen 1 directory (rows × 0.078 + fit),
+       with smaller arrow chevrons reserved in the layout width. */
+    let fontPx = Math.max(5, Math.floor(rows * 0.078));
+    fontPx = fitDirFont(octx, S2_LINES, cols * 0.92, fontPx, S2_ARROW_SCALE);
+    octx.font = `600 ${fontPx}px ${DIR_FONT}`;
+
+    const lineGap = fontPx * 1.85;
+    const insetY = Math.max(fontPx * 1.15, Math.round(rows * 0.07));
+    const insetX = Math.max(fontPx * 0.75, Math.round(cols * 0.055));
+    const cx = cols * 0.5;
+
+    const topLines = S2_LINES.filter((l) => l.region === 'top');
+    const bottomLines = S2_LINES.filter((l) => l.region === 'bottom');
+
+    /** @type {{ line: typeof S2_LINES[0], cx: number, cy: number }[]} */
+    const jobs = [];
+    for (let t = 0; t < topLines.length; t++) {
+      jobs.push({
+        line: topLines[t],
+        cx,
+        cy: insetY + t * lineGap,
+      });
+    }
+    const bottomBlock = Math.max(0, bottomLines.length - 1) * lineGap;
+    const bottomBase = rows - insetY - bottomBlock;
+    for (let b = 0; b < bottomLines.length; b++) {
+      jobs.push({
+        line: bottomLines[b],
+        cx: insetX,
+        cy: bottomBase + b * lineGap,
+      });
+    }
+
+    let cursor = 0;
+
+    for (let L = 0; L < jobs.length; L++) {
+      const { line, cx: lx, cy: ly } = jobs[L];
+
+      const sampled = sampleLineWithArrow(octx, line, lx, ly, fontPx, {
+        align: line.align,
+        arrowScale: S2_ARROW_SCALE,
+      });
+      if (!sampled.glyph.length) {
+        if (!instant) cursor += timing.linePause;
+        continue;
+      }
+
+      const spanX = Math.max(1, sampled.maxX - sampled.minX);
+      const spanY = Math.max(1, sampled.maxY - sampled.minY);
+      const revealMs = instant
+        ? 0
+        : Math.min(
+            timing.revealMax,
+            Math.max(
+              timing.revealMin,
+              spanX * timing.msPerCol * line.pace
+            )
+          );
+      const lineStart = cursor;
+      const lineCx = (sampled.minX + sampled.maxX) * 0.5;
+      const lineCy = (sampled.minY + sampled.maxY) * 0.5;
+
+      const startX = sampled.startX;
+      const bands = wordBandsAt(octx, line.text, startX);
+      if (line.arrow) {
+        /* Arrow glyphs ride as their own idle word */
+        bands.push({
+          x0: startX + sampled.textW + sampled.gap * 0.35,
+          x1: startX + sampled.totalW + 1,
+        });
+      }
+      const bandCount = Math.max(1, bands.length);
+      const baseWid = dIdleWords.length;
+      const wordReady = new Float32Array(bandCount);
+      for (let b = 0; b < bandCount; b++) {
+        wordReady[b] = lineStart;
+        dIdleWords.push(createIdleWord(lineStart));
+      }
+
+      for (let g = 0; g < sampled.glyph.length; g++) {
+        const i = sampled.glyph[g];
+        const x = i % cols;
+        const y = (i / cols) | 0;
+        const xNorm = (x - sampled.minX) / spanX;
+        const yRipple = ((y - sampled.minY) / spanY - 0.5) * 22;
+        const clusterX = (x / 2) | 0;
+        const clusterY = (y / 2) | 0;
+        const clusterId = clusterX + clusterY * 4099 + L * 9176;
+        const clusterOff =
+          (hash01(clusterId, 0xc01) - 0.5) * timing.clusterMs;
+        const jitter = (hash01(i, 0xc11 + L) - 0.5) * timing.jitterMs;
+        const n1 = hash01(i, 0xc22 + L);
+
+        /* Same L→R wave as Screen 1 directory assemble */
+        let litAt = instant
+          ? 0
+          : lineStart + xNorm * revealMs + yRipple + clusterOff + jitter;
+        if (!instant) {
+          litAt = Math.max(
+            lineStart,
+            Math.min(lineStart + revealMs - 8, litAt)
+          );
+        }
+
+        const bi = bandIndexForX(x, bands);
+        if (litAt > wordReady[bi]) wordReady[bi] = litAt;
+
+        dTarget[i] = 1;
+        dOnAt[i] = litAt;
+        dDetachAt[i] = HOLD_SENTINEL;
+        dGoneAt[i] = HOLD_SENTINEL;
+        dLevel[i] = 0.9 + n1 * 0.1;
+        dWordId[i] = baseWid + bi;
+
+        const nAng = hash01(clusterId, 0xc31);
+        const nDist = hash01(i, 0xc32 + L);
+        const nSpin = (hash01(i, 0xc33) - 0.5) * 0.85;
+        let baseAng = Math.atan2(y - lineCy, x - lineCx);
+        if (!isFinite(baseAng) || (x === lineCx && y === lineCy)) {
+          baseAng = nAng * Math.PI * 2;
+        }
+        const ang = baseAng + nSpin + (nAng - 0.5) * 0.55;
+        const dist = DIR_DRIFT_MIN + nDist * (DIR_DRIFT_MAX - DIR_DRIFT_MIN);
+        dDriftX[i] = Math.cos(ang) * dist;
+        dDriftY[i] = Math.sin(ang) * dist;
+      }
+
+      for (let b = 0; b < bandCount; b++) {
+        dIdleWords[baseWid + b].readyAt = instant ? 0 : wordReady[b];
+      }
+
+      if (!instant) {
+        const pad = Math.max(2, Math.round(fontPx * 0.35));
+        const bx0 = Math.max(0, sampled.minX - pad);
+        const bx1 = Math.min(cols - 1, sampled.maxX + pad);
+        const by0 = Math.max(0, sampled.minY - pad);
+        const by1 = Math.min(rows - 1, sampled.maxY + pad);
+        const lineEnd = lineStart + revealMs;
+
+        for (let y = by0; y <= by1; y++) {
+          for (let x = bx0; x <= bx1; x++) {
+            const i = y * cols + x;
+            if (dTarget[i]) continue;
+            if (hash01(i, 0xc44 + L * 17) > DIR_SPARK_RATIO) continue;
+            const xNorm = (x - sampled.minX) / spanX;
+            const n1 = hash01(i, 0xc55 + L);
+            const n2 = hash01(i, 0xc66 + L);
+            const waveT =
+              lineStart + Math.max(0, Math.min(revealMs, xNorm * revealMs));
+            const sparkOn = Math.max(
+              lineStart,
+              waveT -
+                timing.sparkLeadMs +
+                (n1 - 0.5) * timing.sparkSpreadMs
+            );
+            const life = timing.sparkLifeMin + n2 * timing.sparkLifeSpan;
+            const sparkGone = Math.min(lineEnd - 16, sparkOn + life);
+            if (sparkGone <= sparkOn) continue;
+            dOnAt[i] = sparkOn;
+            dDetachAt[i] = sparkGone;
+            dGoneAt[i] = sparkGone;
+            dLevel[i] = 0.48 + n1 * 0.28;
+          }
+        }
+      }
+
+      cursor = lineStart + revealMs;
+      if (!instant && L < jobs.length - 1) cursor += timing.linePause;
+    }
+
+    assembleMs = cursor;
+    freezeDirectoryBitmap();
+  }
+
+  /**
+   * Activate Screen 2 menu on the shared PE typography buffers.
+   * First visit plays assemble once; later visits idle-hold without replay.
+   * @param {{ instant?: boolean, fromDensityRebuild?: boolean }} [opts]
+   */
+  function beginScreen2MenuSequence(opts) {
+    opts = opts || {};
+    if (killed || contentLocked) return;
+    ensureGrid();
+    clearDissolveTimer();
+    clearIntroLeds();
+    directoryAllowed = true;
+    menuSurface = 2;
+
+    /* Return visits snap; Pixel Density rebuilds always replay assemble. */
+    const instant =
+      !!opts.instant ||
+      (!opts.fromDensityRebuild && screen2MenuPlayed) ||
+      !animConfig.motion ||
+      prefersReduced;
+
+    bakeScreen2Menu(
+      instant
+        ? { instant: true }
+        : opts.fromDensityRebuild
+          ? { densityRebuild: true }
+          : undefined
+    );
+
+    screen2MenuPlayed = true;
+
+    if (instant || !(assembleMs > 0)) {
+      paintDirectoryHold();
+      phase = 'idle';
+      holdingFF = false;
+      timeScale = 1;
+      typographySettled = true;
+      setBoot(null);
+      /* Return visit — no replay, so ease the settled text back in. */
+      setMenuFade(0, 0);
+      fadeMenuIn();
+      /* Density rebuild unlock listens for hold — must fire on snap path too. */
+      window.dispatchEvent(new CustomEvent('pixeldirectorystart'));
+      window.dispatchEvent(new CustomEvent('pixeldirectoryhold'));
+      return;
+    }
+
+    resetContentClock();
+    phase = 'directory';
+    holdingFF = false;
+    timeScale = 1;
+    typographySettled = true;
+    setBoot('directory');
+    window.dispatchEvent(new CustomEvent('pixeldirectorystart'));
+  }
+
+  /** Settle Screen 2 menu to idle hold (mid-assemble leave / skip). */
+  function settleScreen2Menu() {
+    if (killed) return;
+    ensureGrid();
+    clearDissolveTimer();
+    clearIntroLeds();
+    directoryAllowed = true;
+    menuSurface = 2;
+    screen2MenuPlayed = true;
+    bakeScreen2Menu({ instant: true });
+    paintDirectoryHold();
+    phase = 'idle';
+    holdingFF = false;
+    timeScale = 1;
+    typographySettled = true;
+    setBoot(null);
+    window.dispatchEvent(new CustomEvent('pixeldirectoryhold'));
+  }
+
+  /** Restore Screen 1 directory menu into the shared PE typography buffers. */
+  function restoreScreen1Menu() {
+    if (killed || contentLocked) return;
+    ensureGrid();
+    clearDissolveTimer();
+    clearIntroLeds();
+    directoryAllowed = true;
+    menuSurface = 1;
+    if (cols >= 12 && rows >= 8 && animConfig.motion && !prefersReduced) {
+      bakeDirectory({ instant: true });
+      paintDirectoryHold();
+    } else {
+      clearDirectoryLeds();
+    }
+    phase = 'idle';
+    holdingFF = false;
+    timeScale = 1;
+    typographySettled = true;
+    setBoot(null);
+    setMenuFade(0, 0);
+    fadeMenuIn();
+  }
+
+  function getMenuSurface() {
+    return menuSurface;
+  }
+
+  function hasPlayedScreen2Menu() {
+    return screen2MenuPlayed;
+  }
+
   /* ── content phase API (driven by Boot Controller) ─────────────────────── */
 
   /**
    * Clear all content LEDs and lock the intro out of the PE canvas
    * until typography construction is explicitly started.
    * Directory pixels are destroyed — not hidden — until post-boot reveal.
+   * Preserves menuSurface so a Pixel Density rebuild on Screen 2 rebakes /
+   * replays Screen 2 menu instead of falling back to Screen 1 directory.
    */
   function suppressContent() {
     clearDissolveTimer();
@@ -1558,13 +1950,13 @@ export function createIntroController(deps) {
     /* Allow bake buffers; keep locked so brightness()/update stay silent. */
     directoryAllowed = true;
     contentLocked = true;
-    bakeDirectory(
-      opts.instant
-        ? { instant: true }
-        : opts.densityRebuild !== false
-          ? { densityRebuild: true }
-          : undefined,
-    );
+    const bakeOpts = opts.instant
+      ? { instant: true }
+      : opts.densityRebuild !== false
+        ? { densityRebuild: true }
+        : undefined;
+    if (menuSurface === 2) bakeScreen2Menu(bakeOpts);
+    else bakeDirectory(bakeOpts);
     phase = 'idle';
     typographySettled = true;
     holdingFF = false;
@@ -1588,12 +1980,15 @@ export function createIntroController(deps) {
     clearIntroLeds();
 
     if (!dOn || !dBitmap) {
-      bakeDirectory(
-        opts.instant
-          ? { instant: true }
-          : { densityRebuild: true },
-      );
+      const bakeOpts = opts.instant
+        ? { instant: true }
+        : { densityRebuild: true };
+      if (menuSurface === 2) bakeScreen2Menu(bakeOpts);
+      else bakeDirectory(bakeOpts);
     }
+
+    /* Keep Screen 2 session latch in sync when density rebuilds on Screen 2. */
+    if (menuSurface === 2) screen2MenuPlayed = true;
 
     if (opts.instant) {
       paintDirectoryHold();
@@ -1710,6 +2105,7 @@ export function createIntroController(deps) {
     killed = false;
     contentLocked = false;
     directoryAllowed = true;
+    menuSurface = 1;
 
     if (opts.fromMotionReenable || opts.fromDensityRebuild) {
       /* Density rebuild must use the authority grid — never recompute independently. */
@@ -1816,6 +2212,15 @@ export function createIntroController(deps) {
   }
 
   function skip() {
+    if (phase === 'idle' || phase === 'skipped') return;
+    clearDissolveTimer();
+    /* Screen 2 assemble skip — settle Screen 2 menu, not Screen 1 directory. */
+    if (menuSurface === 2) {
+      settleScreen2Menu();
+      return;
+    }
+    killed = true;
+    skipToDirectoryHold();
     if (phase === 'idle' || phase === 'skipped') {
       /* Already holding — ignore */
       return;
@@ -1833,6 +2238,7 @@ export function createIntroController(deps) {
     killed = true;
     contentLocked = false;
     directoryAllowed = false;
+    menuSurface = 1;
     clearDissolveTimer();
     directoryMagLock = false;
     clearIntroLeds();
@@ -2007,10 +2413,52 @@ export function createIntroController(deps) {
     return anyLit;
   }
 
+  /**
+   * @param {number} to
+   * @param {number} ms
+   */
+  function setMenuFade(to, ms) {
+    const next = Math.max(0, Math.min(1, to));
+    const dur = Math.max(0, ms | 0);
+    if (dur === 0) {
+      menuFade = next;
+      menuFadeFrom = next;
+      menuFadeTo = next;
+      menuFadeMs = 0;
+      return;
+    }
+    if (menuFadeTo === next && menuFadeMs > 0) return;
+    menuFadeFrom = menuFade;
+    menuFadeTo = next;
+    menuFadeMs = dur;
+    menuFadeStartWall = performance.now();
+  }
+
+  function tickMenuFade(wall) {
+    if (menuFadeMs <= 0 || menuFade === menuFadeTo) return;
+    const u = Math.max(0, Math.min(1, (wall - menuFadeStartWall) / menuFadeMs));
+    menuFade = menuFadeFrom + (menuFadeTo - menuFadeFrom) * easeInOutSine(u);
+    if (u >= 1) {
+      menuFade = menuFadeTo;
+      menuFadeMs = 0;
+    }
+  }
+
+  /** Clear menu text while a screen transition crosses the viewport. */
+  function fadeMenuOut(ms) {
+    setMenuFade(0, ms != null ? ms : 150);
+  }
+
+  /** Bring settled menu text back after arrival. */
+  function fadeMenuIn(ms) {
+    setMenuFade(1, ms != null ? ms : 260);
+  }
+
   function update(now) {
     if (contentLocked) return false;
 
     const wall = now || performance.now();
+    tickMenuFade(wall);
     tickContentClock(wall);
     const t = phaseElapsedMs();
 
@@ -2028,12 +2476,14 @@ export function createIntroController(deps) {
     }
     if (phase === 'directory') {
       if (!directoryAllowed) return false;
-      const lit = updateDirectoryLeds(t);
-      if (t >= assembleMs && assembleMs > 0) {
+      updateDirectoryLeds(t);
+      /* Stay alive for the whole assemble — returning only "any LED lit"
+         let style rAF loops die before the first glyph, so pixeldirectoryhold
+         never fired and Pixel Density stayed locked after one use. */
+      if (assembleMs <= 0 || t >= assembleMs) {
         enterIdle();
-        return true;
       }
-      return lit;
+      return true;
     }
     return false;
   }
@@ -2042,7 +2492,7 @@ export function createIntroController(deps) {
     if (contentLocked) return 0;
     const a = iOn ? iOn[i] : 0;
     /* Directory contribution only after explicit post-boot reveal */
-    const b = directoryAllowed && dOn ? dOn[i] : 0;
+    const b = directoryAllowed && dOn ? dOn[i] * menuFade : 0;
     return a > b ? a : b;
   }
 
@@ -2110,6 +2560,13 @@ export function createIntroController(deps) {
       clearDissolveTimer();
       clearIntroLeds();
       clearDirectoryLeds();
+      if (menuSurface === 2) {
+        screen2MenuPlayed = false;
+        beginScreen2MenuSequence({
+          fromDensityRebuild: true,
+        });
+        return;
+      }
       beginDirectorySequence({
         fromDensityRebuild: true,
         grid: gridSnap,
@@ -2120,7 +2577,11 @@ export function createIntroController(deps) {
     /* Menu complete — regenerate pixel text without replaying intro */
     if (phase === 'idle' && directoryAllowed) {
       clearIntroLeds();
-      bakeDirectory({ instant: true });
+      if (menuSurface === 2) {
+        bakeScreen2Menu({ instant: true });
+      } else {
+        bakeDirectory({ instant: true });
+      }
       paintDirectoryHold();
       return;
     }
@@ -2156,9 +2617,11 @@ export function createIntroController(deps) {
       clearDirectoryLeds();
       bakeIntro();
     } else if (phase === 'directory' && directoryAllowed) {
-      bakeDirectory();
+      if (menuSurface === 2) bakeScreen2Menu();
+      else bakeDirectory();
     } else if (phase === 'idle' && directoryAllowed && dBitmap) {
-      bakeDirectory({ instant: true });
+      if (menuSurface === 2) bakeScreen2Menu({ instant: true });
+      else bakeDirectory({ instant: true });
       paintDirectoryHold();
     } else {
       clearDirectoryLeds();
@@ -2230,6 +2693,15 @@ export function createIntroController(deps) {
     holdTypography: holdTypography,
     beginDirectorySequence: beginDirectorySequence,
     skipToDirectoryHold: skipToDirectoryHold,
+
+    /* Screen 2 menu — same PE typography buffers as Screen 1 directory */
+    beginScreen2MenuSequence: beginScreen2MenuSequence,
+    settleScreen2Menu: settleScreen2Menu,
+    restoreScreen1Menu: restoreScreen1Menu,
+    getMenuSurface: getMenuSurface,
+    hasPlayedScreen2Menu: hasPlayedScreen2Menu,
+    fadeMenuOut: fadeMenuOut,
+    fadeMenuIn: fadeMenuIn,
   };
 
 }

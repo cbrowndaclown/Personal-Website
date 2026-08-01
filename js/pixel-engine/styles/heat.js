@@ -20,6 +20,7 @@ export function createHeatStyle(deps) {
   const pixelIntro = deps.pixelIntro;
   const events = deps.events;
   const grid = deps.grid;
+  const renderer = deps.renderer;
   if (!canvas || !stage) {
     return { id: 'heat', implemented: true, mount() {}, destroy() {} };
   }
@@ -470,6 +471,7 @@ export function createHeatStyle(deps) {
         size
       );
     }
+    if (renderer && typeof renderer.present === 'function') renderer.present();
   }
 
   /* Soft Gaussian × smootherstep rim — pressure blooms, never stamps. */
@@ -654,8 +656,14 @@ export function createHeatStyle(deps) {
     }
 
     let alive = hasTrail || active || introAlive;
-    /* Keep painting while boot / density sync / teardown owns the lattice */
+    /* Keep painting while boot / density sync / teardown / menu restore owns the lattice */
     if (materialize || tearingDown) alive = true;
+    if (
+      typeof pixelField.densityChangeLocked === 'function' &&
+      pixelField.densityChangeLocked()
+    ) {
+      alive = true;
+    }
 
     /* Boot materialize clears black; density sync / ops keep the gray panel lit. */
     if (bootMaterializeActive()) {
@@ -979,6 +987,7 @@ export function createHeatStyle(deps) {
       ctx.fillRect(cx - size * 0.5, cy - size * 0.5, size, size);
     }
 
+    if (renderer && typeof renderer.present === 'function') renderer.present();
     if (perfMgr && typeof perfMgr.endFrame === 'function') {
       perfMgr.endFrame(performance.now());
     }

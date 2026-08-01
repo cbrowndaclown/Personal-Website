@@ -26,11 +26,21 @@ import { createExperimentalStyle } from './styles/experimental.js';
  * @param {object} [options]
  * @param {HTMLCanvasElement} [options.canvas]
  * @param {HTMLElement} [options.stage]
+ * @param {{ canvas: HTMLCanvasElement, stage: HTMLElement }[]} [options.surfaces]
  * @param {HTMLElement} [options.hitBounds] — interactive band (Pixel FS Screen 1); defaults to stage
  * @param {boolean} [options.prefersReduced]
  * @returns {object|null}
  */
 export function createPixelEngine(options = {}) {
+  const surfaces =
+    options.surfaces && options.surfaces.length
+      ? options.surfaces.filter((surface) => surface && surface.canvas && surface.stage)
+      : [{
+          canvas: options.canvas || document.getElementById('heatmap'),
+          stage: options.stage || document.getElementById('stage'),
+        }];
+  const canvas = surfaces[0] && surfaces[0].canvas;
+  const stage = surfaces[0] && surfaces[0].stage;
   const canvas = options.canvas || document.getElementById('heatmap');
   const stage = options.stage || document.getElementById('stage');
   const hitBounds =
@@ -39,6 +49,8 @@ export function createPixelEngine(options = {}) {
     || document.getElementById('pixel-fs-screen-1')
     || stage;
   if (!canvas || !stage) return null;
+  const canvases = surfaces.map((surface) => surface.canvas);
+  const stages = surfaces.map((surface) => surface.stage);
 
   const prefersReduced =
     options.prefersReduced != null
@@ -67,6 +79,8 @@ export function createPixelEngine(options = {}) {
   });
   const grid = createGridManager({ stage, hitBounds, events, cell: CELL });
   const state = createPixelStateManager({ grid, events });
+  const renderer = createRenderer({ canvas, canvases, grid });
+  const interaction = createInteractionManager({ stage, stages, grid, events });
   const renderer = createRenderer({ canvas, grid });
   const interaction = createInteractionManager({ stage, hitBounds, grid, events });
   const performance = createPerformanceManager({
@@ -89,6 +103,8 @@ export function createPixelEngine(options = {}) {
   const styleDeps = {
     canvas,
     stage,
+    surfaces,
+    stages,
     hitBounds,
     animConfig: config.animConfig,
     resolveActiveBgMode: config.resolveActiveBgMode,

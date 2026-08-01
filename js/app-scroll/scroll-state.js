@@ -3,6 +3,7 @@
 
    Canonical two-screen cycle (never skip):
 
+     Screen1 + Open
      Screen1 + Open          ← application start
          ↓ scroll down
      Screen1 + Closed
@@ -13,6 +14,7 @@
          ↑ scroll up
      Screen1 + Open
 
+   Rules:
    General rules (N screens):
 
      DOWN  (i, open)   → (i, closed)
@@ -46,6 +48,9 @@ export function stepsEqual(a, b) {
 }
 
 /**
+ * Canonical top of the down-ladder / end of the up-ladder: Screen 1 + Open.
+ * Load/unlock remain Screen 1 + Closed (parked) so the pixel field stays flush
+ * through boot — matching prior topnav. Open is reached by one up-gesture.
  * Enumerate every (screen, nav) pair for debugging / tooling.
  * @param {number} screenCount
  * @returns {ScrollStep[]}

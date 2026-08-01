@@ -624,7 +624,19 @@ export function createBootController(options) {
       return;
     }
 
-    /* Reduced motion — snap menu to hold without assemble replay. */
+    const surface =
+      typeof intro.getMenuSurface === 'function' ? intro.getMenuSurface() : 1;
+    if (
+      surface === 2 &&
+      typeof intro.beginScreen2MenuSequence === 'function'
+    ) {
+      intro.beginScreen2MenuSequence({
+        fromDensityRebuild: true,
+        instant: !!opts.instant,
+      });
+      return;
+    }
+    /* Reduced motion — snap Screen 1 menu to hold without assemble replay. */
     if (opts.instant && typeof intro.skipToDirectoryHold === 'function') {
       if (typeof intro.adoptGrid === 'function') intro.adoptGrid(authority);
       intro.skipToDirectoryHold();

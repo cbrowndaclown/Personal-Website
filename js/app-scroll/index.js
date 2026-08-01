@@ -1,10 +1,17 @@
 /* ==========================================================================
+   App scroll controller — (screen × nav) stepping
    App scroll controller — light (screen × nav) stepping
 
    Single authority for Top Navigation + screen step:
 
      • `step` is the only source of truth for (screen × nav)
      • `requestStep()` is the only path that mutates step / nav DOM
+     • One deliberate gesture → exactly one edge (never skip)
+     • Nav open/close uses existing site-frame transform animation
+     • Screen changes are programmatic on #app-scroll (CSS snap still
+       defines resting points; free scroll is prevented)
+
+   Unlock mirrors prior topnav: pixeldirectory* / pixelbootready.
      • Open, close, animation completion, and scroll sync never race:
          - busy transitions reject all other step requests
          - scroll listeners never change nav, and are paused while busy
@@ -42,6 +49,10 @@ export function initAppScroll(options) {
   const shell = options.shell;
   if (!frame || !nav || !shell) return null;
 
+  const screenIds =
+    options.screenIds && options.screenIds.length
+      ? options.screenIds.slice()
+      : ['pixel-fs-screen-1', 'pixel-fs-screen-2'];
   const screenIds = options.screenIds && options.screenIds.length
     ? options.screenIds.slice()
     : ['pixel-fs-screen-1', 'pixel-fs-screen-2'];
@@ -52,10 +63,19 @@ export function initAppScroll(options) {
     options.prefersReduced ??
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+  if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+
   /** @type {import('./scroll-state.js').ScrollStep} */
   let step = defaultScrollStep(screenCount);
   let interactive = false;
 
+  let transitionGen = 0;
+  let gestureLocked = false;
+  let shellMoving = false;
+
+  let gestureIdleTimer = 0;
+  let navWaitFallback = 0;
+  let shellSettleTimer = 0;
   /**
    * Transition generation — sole owner of open/close/settle.
    * Non-zero while a requestStep run owns the DOM; stale completions ignore.
@@ -109,6 +129,10 @@ export function initAppScroll(options) {
     return best;
   }
 
+  /* Existing nav motion is site-frame transform (0.58s), not nav margin. */
+  function navTransitionMs() {
+    if (prefersReduced) return 0;
+    const style = getComputedStyle(frame);
   function navTransitionMs() {
     if (prefersReduced) return 0;
     const style = getComputedStyle(nav);
@@ -116,6 +140,7 @@ export function initAppScroll(options) {
     const durs = (style.transitionDuration || '0.58s').split(',');
     for (let i = 0; i < props.length; i++) {
       const prop = props[i].trim();
+      if (prop !== 'transform' && prop !== 'all') continue;
       if (prop !== 'margin-top' && prop !== 'margin' && prop !== 'all') continue;
       const d = (durs[i] || durs[durs.length - 1] || '0.58s').trim();
       if (d.endsWith('ms')) return Math.max(0, parseFloat(d) || 0);
@@ -162,6 +187,7 @@ export function initAppScroll(options) {
   }
 
   /**
+   * Sole DOM writer for Top Navigation visibility — preserves is-nav-revealed.
    * Sole DOM writer for Top Navigation visibility.
    * @param {boolean} navOpen
    * @param {boolean} wasOpen
@@ -190,6 +216,7 @@ export function initAppScroll(options) {
       const finish = () => {
         if (settled) return;
         settled = true;
+        frame.removeEventListener('transitionend', onEnd);
         nav.removeEventListener('transitionend', onEnd);
         if (navWaitFallback) {
           clearTimeout(navWaitFallback);
@@ -202,6 +229,11 @@ export function initAppScroll(options) {
           finish();
           return;
         }
+        if (e.target !== frame) return;
+        if (e.propertyName && e.propertyName !== 'transform') return;
+        finish();
+      };
+      frame.addEventListener('transitionend', onEnd);
         if (e.target !== nav) return;
         if (e.propertyName && e.propertyName !== 'margin-top') return;
         finish();
@@ -246,6 +278,9 @@ export function initAppScroll(options) {
   }
 
   /**
+   * @param {import('./scroll-state.js').ScrollStep} next
+   * @param {{ animate?: boolean }} [opts]
+   * @returns {Promise<boolean>}
    * Authoritative step transition. Rejects if another transition is in flight
    * so open/close animations are never interrupted.
    * @param {import('./scroll-state.js').ScrollStep} next
@@ -313,6 +348,7 @@ export function initAppScroll(options) {
     if (!interactive || isBusy() || gestureLocked) return;
     const screen = nearestScreenIndex();
     if (screen === step.screen) return;
+    /* Native snap may only change screen; nav is unchanged (no skipped edges). */
     step = { screen, nav: step.nav };
     frame.dataset.appScreen = String(screen);
     publish();
@@ -345,6 +381,10 @@ export function initAppScroll(options) {
   }
 
   function unlock() {
+    if (interactive) return;
+    interactive = true;
+    /* Stay on Screen 1 + Closed (parked) so the field stays flush through
+       intro/directory — same as prior topnav. S1+Open is one up-gesture away. */
     /* Stay inert until exclusive boot releases the application shell. */
     if (isAppStartup()) return;
     interactive = true;
@@ -353,6 +393,25 @@ export function initAppScroll(options) {
     });
   }
 
+  /* Same unlock gates as the previous topnav controller */
+  window.addEventListener('pixeldirectorystart', unlock);
+  window.addEventListener('pixeldirectoryhold', unlock);
+  window.addEventListener('pixelbootready', unlock);
+
+  /**
+   * Every deliberate gesture commits exactly one state edge.
+   * @param {number} direction  Negative = up; positive = down
+   * @returns {'step' | 'block' | 'noop'}
+   */
+  function classifyGesture(direction) {
+    if (!interactive || !direction) return 'noop';
+    if (isBusy() || gestureLocked || shellMoving) return 'block';
+    const next = transitionScrollStep(step, direction, screenCount);
+    if (stepsEqual(next, step)) return 'block';
+    return 'step';
+  }
+
+  /**
   /* Shell unlocks only after exclusive boot releases data-app-startup. */
   window.addEventListener('pixelstartupdone', unlock);
   window.addEventListener('pixeldirectoryhold', unlock);
@@ -401,6 +460,46 @@ export function initAppScroll(options) {
   }
 
   function ignoredTarget(target) {
+    return !!(
+      target &&
+      target.closest &&
+      (target.closest('.settings') ||
+        target.closest('input') ||
+        target.closest('textarea') ||
+        target.closest('select') ||
+        target.closest('[contenteditable="true"]'))
+    );
+  }
+
+  /* ── Wheel — one state edge per trackpad/mouse series (not per delta) ───
+     Trackpad momentum fires many wheel events. Without a series latch,
+     blocked ticks kept re-arming the idle timer so the swipe ended before
+     unlock — first swipes failed while keyboard (one event) worked. */
+  let wheelLatched = false;
+  let wheelAccum = 0;
+  let wheelIdleTimer = 0;
+  let wheelSeriesDir = 0;
+  const WHEEL_THRESHOLD = 48;
+
+  function endWheelSeries() {
+    if (wheelIdleTimer) {
+      clearTimeout(wheelIdleTimer);
+      wheelIdleTimer = 0;
+    }
+    wheelLatched = false;
+    wheelAccum = 0;
+    wheelSeriesDir = 0;
+    unlockGestureWhenIdle();
+  }
+
+  function armWheelSeriesIdle() {
+    if (wheelIdleTimer) clearTimeout(wheelIdleTimer);
+    wheelIdleTimer = window.setTimeout(() => {
+      wheelIdleTimer = 0;
+      endWheelSeries();
+    }, GESTURE_IDLE_MS);
+  }
+
     return !!(target && target.closest && (
       target.closest('.settings') ||
       target.closest('input') ||
@@ -420,6 +519,45 @@ export function initAppScroll(options) {
       const direction = Math.sign(e.deltaY);
       if (!direction) return;
 
+      /* New series after idle — parity with touchstart / keydown unlock.
+         Must run before classifyGesture so a fresh swipe is not stuck
+         behind the post-transition soft lock. */
+      const seriesStart = !wheelLatched && wheelAccum === 0 && !wheelSeriesDir;
+      if (seriesStart && !isBusy()) {
+        gestureLocked = false;
+        clearGestureIdleTimer();
+      }
+
+      const kind = classifyGesture(direction);
+      if (kind === 'noop') return;
+
+      /* Consume so native snap cannot free-scroll / skip states. */
+      e.preventDefault();
+      armWheelSeriesIdle();
+
+      /* Already stepped this swipe — eat momentum only. */
+      if (wheelLatched) return;
+
+      /* Direction flip within residual momentum starts a fresh accum. */
+      if (wheelSeriesDir && wheelSeriesDir !== direction) {
+        wheelAccum = 0;
+      }
+      wheelSeriesDir = direction;
+
+      if (kind === 'block') {
+        /* Do not re-arm unlockGestureWhenIdle on every momentum tick. */
+        return;
+      }
+
+      /* Re-check after soft unlock — classify may have run while busy. */
+      if (isBusy() || gestureLocked || shellMoving) return;
+
+      wheelAccum += Math.abs(e.deltaY);
+      if (wheelAccum < WHEEL_THRESHOLD) return;
+
+      wheelLatched = true;
+      wheelAccum = 0;
+      commitStep(direction);
       const kind = classifyGesture(direction);
 
       if (kind === 'noop') return;
@@ -442,6 +580,7 @@ export function initAppScroll(options) {
     { passive: false }
   );
 
+  /* ── Touch — same one-edge rule ───────────────────────────────────────── */
   /* ── Touch — same edge rule; otherwise let the shell scroll natively ─── */
   let touchActive = false;
   let touchStartX = 0;
@@ -449,6 +588,7 @@ export function initAppScroll(options) {
   let touchLastY = 0;
   let touchAxisLocked = false;
   let touchIsVertical = false;
+  let touchStepArmed = false;
   let touchNavArmed = false;
 
   window.addEventListener(
@@ -465,6 +605,7 @@ export function initAppScroll(options) {
       touchLastY = t.clientY;
       touchAxisLocked = false;
       touchIsVertical = false;
+      touchStepArmed = false;
       touchNavArmed = false;
       if (!isBusy()) {
         gestureLocked = false;
@@ -502,6 +643,16 @@ export function initAppScroll(options) {
       if (!direction) return;
 
       const kind = classifyGesture(direction);
+      if (kind === 'noop') return;
+
+      e.preventDefault();
+      if (kind === 'block') {
+        unlockGestureWhenIdle();
+        return;
+      }
+      if (touchStepArmed) return;
+      touchStepArmed = true;
+      commitStep(direction);
 
       if (kind === 'block' || kind === 'nav') {
         e.preventDefault();
@@ -524,6 +675,7 @@ export function initAppScroll(options) {
     touchActive = false;
     touchAxisLocked = false;
     touchIsVertical = false;
+    touchStepArmed = false;
     touchNavArmed = false;
     unlockGestureWhenIdle();
   }
@@ -531,6 +683,7 @@ export function initAppScroll(options) {
   window.addEventListener('touchend', endTouchGesture, { passive: true });
   window.addEventListener('touchcancel', endTouchGesture, { passive: true });
 
+  /* ── Keyboard — one step per key press ────────────────────────────────── */
   /* ── Keyboard ─────────────────────────────────────────────────────────── */
   window.addEventListener(
     'keydown',
@@ -576,6 +729,7 @@ export function initAppScroll(options) {
     if (isBusy()) return Promise.resolve(false);
     return requestStep(
       clampScrollStep(
+        { screen, nav: navState != null ? navState : NavState.OPEN },
         { screen, nav: navState || NavState.OPEN },
         screenCount
       ),
@@ -584,6 +738,17 @@ export function initAppScroll(options) {
   }
 
   function goHome() {
+    /* Parked landing — preserves prior brand-home behavior */
+    return goTo(0, NavState.CLOSED, true);
+  }
+
+  const homeBtn = document.getElementById('nav-home');
+  if (homeBtn) {
+    homeBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (!interactive) return;
+      void goHome();
+    });
     return goTo(0, NavState.OPEN, true);
   }
 
@@ -597,6 +762,12 @@ export function initAppScroll(options) {
     { passive: true }
   );
 
+  /* Boot-safe pin: Screen 1, nav parked until unlock applies start state. */
+  shell.scrollTop = 0;
+  step = { screen: 0, nav: NavState.CLOSED };
+  frame.dataset.appScreen = '0';
+  frame.dataset.appNav = NavState.CLOSED;
+  applyNavDom(false, false);
   void requestStep(step, { animate: false });
 
   return {

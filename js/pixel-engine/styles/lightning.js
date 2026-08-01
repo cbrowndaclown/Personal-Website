@@ -20,6 +20,9 @@ export function createLightningStyle(deps) {
   const pixelField = deps.pixelField;
   const events = deps.events;
   const grid = deps.grid;
+  const renderer = deps.renderer;
+  const interaction = deps.interaction;
+  const stages = deps.stages && deps.stages.length ? deps.stages : [stage];
   if (!canvas || !stage) {
     return { id: 'lightning', implemented: true, mount() {}, destroy() {} };
   }
@@ -269,22 +272,6 @@ export function createLightningStyle(deps) {
       intervalMax: 6000,
     });
 
-    let stageLeft = 0;
-    let stageTop = 0;
-    let stageW = 0;
-    let stageH = 0;
-    let lastClientX = null;
-    let lastClientY = null;
-
-    function syncStageRect() {
-      const rect = stage.getBoundingClientRect();
-      stageLeft = rect.left;
-      stageTop = rect.top;
-      stageW = rect.width;
-      stageH = rect.height;
-      return rect;
-    }
-
     function lightningModeSelected() {
       return !!animConfig.motion && resolveActiveBgMode() === 'lightning';
     }
@@ -306,8 +293,9 @@ export function createLightningStyle(deps) {
         return;
       }
       /* Re-evaluate hover without waiting for another mousemove */
-      if (lastClientX != null && lastClientY != null) {
-        controller.setCursorInField(pointInField(lastClientX, lastClientY));
+      if (interaction && typeof interaction.reevaluate === 'function') {
+        const pointer = interaction.reevaluate();
+        controller.setCursorInField(!!pointer.inside);
       }
     }
 
@@ -318,23 +306,16 @@ export function createLightningStyle(deps) {
       syncMode();
     });
 
-    document.addEventListener('mousemove', (e) => {
-      lastClientX = e.clientX;
-      lastClientY = e.clientY;
-      if (!lightningModeSelected()) {
+    if (events && typeof events.on === 'function') {
+      events.on(PixelEvents.MouseMoved, (pointer) => {
+        controller.setCursorInField(
+          lightningModeSelected() && !!pointer.inside
+        );
+      });
+      events.on(PixelEvents.PointerLeft, () => {
         controller.setCursorInField(false);
-        return;
-      }
-      controller.setCursorInField(pointInField(e.clientX, e.clientY));
-    }, { passive: true });
-
-    document.documentElement.addEventListener('mouseleave', () => {
-      controller.setCursorInField(false);
-    });
-
-    window.addEventListener('blur', () => {
-      controller.setCursorInField(false);
-    });
+      });
+    }
 
     syncMode();
 
@@ -2161,12 +2142,16 @@ export function createLightningStyle(deps) {
     const weatherLayers = [clouds, rain, strikes];
 
     /* Tiny pixel marker under the pointer — DOM layer, not part of strike sim */
-    const cursorDot = document.getElementById('lightning-cursor');
+    const cursorDots = stages.map((surfaceStage) =>
+      surfaceStage.querySelector('.lightning-cursor')
+    );
     const CURSOR_DOT_SIZE = 5;
     /* Nudge up so the square sits on the OS cursor tip, not below it */
     const CURSOR_DOT_BENEATH = -1;
 
-    function showCursorDot(x, y) {
+    function showCursorDot(x, y, stageIndex) {
+      hideCursorDot();
+      const cursorDot = cursorDots[stageIndex] || cursorDots[0];
       if (!cursorDot) return;
       const dx = Math.round(x - CURSOR_DOT_SIZE * 0.5);
       const dy = Math.round(y + CURSOR_DOT_BENEATH);
@@ -2175,8 +2160,9 @@ export function createLightningStyle(deps) {
     }
 
     function hideCursorDot() {
-      if (!cursorDot) return;
-      cursorDot.classList.remove('is-in-field');
+      for (let i = 0; i < cursorDots.length; i++) {
+        if (cursorDots[i]) cursorDots[i].classList.remove('is-in-field');
+      }
     }
 
     let lastNow = 0;
@@ -2221,6 +2207,7 @@ export function createLightningStyle(deps) {
           size
         );
       }
+      if (renderer && typeof renderer.present === 'function') renderer.present();
     }
 
     /** Density teardown / sync — neutral system colors only (no Settings RGB). */
@@ -2469,13 +2456,18 @@ export function createLightningStyle(deps) {
       const recalib =
         typeof pixelField.recalibrationActive === 'function' &&
         pixelField.recalibrationActive();
+      const densityLocked =
+        typeof pixelField.densityChangeLocked === 'function' &&
+        pixelField.densityChangeLocked();
       const alive =
         introAlive ||
         ledsAlive ||
         (!densityOps && weatherAlive()) ||
         recalib ||
-        tearingDown;
+        tearingDown ||
+        densityLocked;
 
+      if (renderer && typeof renderer.present === 'function') renderer.present();
       if (perfMgr && typeof perfMgr.endFrame === 'function') {
         perfMgr.endFrame(performance.now());
       }
@@ -2561,6 +2553,24 @@ export function createLightningStyle(deps) {
       events.on(PixelEvents.PixelDensityChanged, (info) => {
         rebuildForDensity(info);
       });
+      events.on(PixelEvents.MouseMoved, (pointer) => {
+        if (!enabled) return;
+        if (!pointer.inside) {
+          ptrX = ptrY = -1;
+          hideCursorDot();
+          return;
+        }
+        ptrX = pointer.x;
+        ptrY = pointer.y;
+        syncCursorModeFromConfig();
+        if (cursorBias.paintTrail) pushCursorPaint(ptrX, ptrY);
+        showCursorDot(ptrX, ptrY, pointer.stageIndex);
+        start();
+      });
+      events.on(PixelEvents.PointerLeft, () => {
+        ptrX = ptrY = -1;
+        hideCursorDot();
+      });
     }
 
     /* SYSTEM 8 → SYSTEM 9: timing events become unique bolt geometry */
@@ -2612,7 +2622,7 @@ export function createLightningStyle(deps) {
     }, { passive: true });
 
     /* Click the field to seed a local storm cell (cloud + rain) */
-    stage.addEventListener('click', (e) => {
+    function onStageClick(e) {
       if (!enabled) return;
       if (
         typeof pixelField.interactionsEnabled === 'function' &&
@@ -2621,6 +2631,13 @@ export function createLightningStyle(deps) {
         return;
       }
       if (e.button != null && e.button !== 0) return;
+      const hit =
+        interaction && typeof interaction.pointInField === 'function'
+          ? interaction.pointInField(e.clientX, e.clientY)
+          : null;
+      if (!hit || !hit.inside) return;
+      const x = hit.x;
+      const y = hit.y;
       syncStageRect();
       const x = e.clientX - stageLeft;
       const y = e.clientY - stageTop;
@@ -2634,12 +2651,11 @@ export function createLightningStyle(deps) {
       }
       clickWeather.spawn(x, y, performance.now());
       start();
-    });
+    }
 
-    document.documentElement.addEventListener('mouseleave', () => {
-      ptrX = ptrY = -1;
-      hideCursorDot();
-    });
+    for (let i = 0; i < stages.length; i++) {
+      stages[i].addEventListener('click', onStageClick);
+    }
 
     resize();
   })();
