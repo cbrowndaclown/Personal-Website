@@ -18,6 +18,7 @@ export function createHeatStyle(deps) {
   const pixelIntro = deps.pixelIntro;
   const events = deps.events;
   const grid = deps.grid;
+  const renderer = deps.renderer;
   if (!canvas || !stage) {
     return { id: 'heat', implemented: true, mount() {}, destroy() {} };
   }
@@ -457,6 +458,7 @@ export function createHeatStyle(deps) {
         size
       );
     }
+    if (renderer && typeof renderer.present === 'function') renderer.present();
   }
 
   /* Soft Gaussian × smootherstep rim — pressure blooms, never stamps. */
@@ -917,6 +919,7 @@ export function createHeatStyle(deps) {
       ctx.fillRect(cx - size * 0.5, cy - size * 0.5, size, size);
     }
 
+    if (renderer && typeof renderer.present === 'function') renderer.present();
     if (perfMgr && typeof perfMgr.endFrame === 'function') {
       perfMgr.endFrame(performance.now());
     }

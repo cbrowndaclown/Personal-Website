@@ -17,6 +17,7 @@ export function createWaveStyle(deps) {
   const pixelField = deps.pixelField;
   const events = deps.events;
   const grid = deps.grid;
+  const renderer = deps.renderer;
   if (!canvas || !stage) {
     return { id: 'wave', implemented: true, mount() {}, destroy() {} };
   }
@@ -320,6 +321,7 @@ export function createWaveStyle(deps) {
         size,
       );
     }
+    if (renderer && typeof renderer.present === 'function') renderer.present();
   }
 
   /** Density teardown / sync — neutral system colors only (no Settings RGB). */
@@ -848,6 +850,7 @@ export function createWaveStyle(deps) {
       ctx.fillRect(cx - size * 0.5, cy - size * 0.5, size, size);
     }
 
+    if (renderer && typeof renderer.present === 'function') renderer.present();
     if (perfMgr && typeof perfMgr.endFrame === 'function') {
       perfMgr.endFrame(performance.now());
     }
@@ -927,6 +930,17 @@ export function createWaveStyle(deps) {
     events.on(PixelEvents.PixelDensityChanged, (info) => {
       rebuildForDensity(info);
     });
+    events.on(PixelEvents.MouseMoved, (p) => {
+      if (!enabled) return;
+      if (!p.inside) {
+        lastPtrX = lastPtrY = -1;
+        return;
+      }
+      injectAt(p.x, p.y);
+    });
+    events.on(PixelEvents.PointerLeft, () => {
+      lastPtrX = lastPtrY = -1;
+    });
   }
 
   window.addEventListener('resize', resize, { passive: true });
@@ -934,22 +948,6 @@ export function createWaveStyle(deps) {
     const ro = new ResizeObserver(() => resize());
     ro.observe(stage);
   }
-
-  document.addEventListener('mousemove', (e) => {
-    if (!enabled) return;
-    syncStageRect();
-    const x = e.clientX - stageLeft;
-    const y = e.clientY - stageTop;
-    if (x < 0 || y < 0 || x > viewW || y > viewH) {
-      lastPtrX = lastPtrY = -1;
-      return;
-    }
-    injectAt(x, y);
-  }, { passive: true });
-
-  document.documentElement.addEventListener('mouseleave', () => {
-    lastPtrX = lastPtrY = -1;
-  });
 
   /* Measure grid now; paint only if Wave is already active */
   resize();

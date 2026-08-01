@@ -90,7 +90,7 @@
       <!--
         Ribbon frame (.page-shell) stays fixed.
         #app-scroll is the sole vertical scrollport (CSS snap between screens).
-        Screen 1 keeps the existing pixel stage; Screen 2 is an empty shell.
+        Both screens expose the shared Pixel FS engine beneath independent content.
       -->
       <div class="app-scroll" id="app-scroll">
         <section
@@ -98,7 +98,7 @@
           id="pixel-fs-screen-1"
           aria-label="Pixel FS Screen 1"
         >
-          <!-- Framed display: pixel field lives only inside; bottom edge stays open -->
+          <!-- Framed display: Screen 1 boundary stays open at the bottom -->
           <div class="stage">
             <div class="stage__field" id="stage">
               <canvas id="heatmap" class="heatmap" aria-hidden="true"></canvas>
@@ -116,7 +116,35 @@
           id="pixel-fs-screen-2"
           aria-label="Pixel FS Screen 2"
         >
-          <!-- Screen 2 content intentionally empty — layout foundation only -->
+          <!-- Shared Pixel FS display surface; content overlay remains a sibling -->
+          <div class="stage stage--screen-2">
+            <div class="stage__field stage__field--screen-2" id="stage-2">
+              <canvas id="heatmap-2" class="heatmap" aria-hidden="true"></canvas>
+              <div class="lightning-cursor" aria-hidden="true"></div>
+            </div><!-- /.stage__field -->
+          </div><!-- /.stage -->
+
+          <!--
+            Page 2 Menu — a11y / content anchors for Screen 2.
+            Visual typography is rendered in the shared Pixel FS grid.
+          -->
+          <div
+            class="page-2-menu"
+            id="page-2-menu"
+            aria-label="Page 2 Menu"
+            aria-hidden="true"
+            data-visibility="hidden"
+            data-revealed="false"
+            data-reveal-phase="idle"
+          >
+            <div class="page-2-menu__region page-2-menu__region--top">
+              <p class="page-2-menu__line">Scroll up for header / top grid</p>
+            </div>
+            <div class="page-2-menu__region page-2-menu__region--bottom-left">
+              <p class="page-2-menu__line">/ for options</p>
+              <p class="page-2-menu__line">Scroll down for more</p>
+            </div>
+          </div><!-- /.page-2-menu -->
         </section>
       </div><!-- /.app-scroll -->
     </div><!-- /.page-shell -->

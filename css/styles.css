@@ -1059,10 +1059,20 @@ body {
    PAGE SHELL — Ribbon frame: permanent outer shell.
    Never a scroll container. Chrome padding + nameplate stay fixed;
    #app-scroll moves Pixel FS screens inside.
+   Screen 1: top + sides open at bottom. Screen 2: bottom + sides
+   open at top — one continuous Pixel FS display frame.
    ============================================================ */
 .page-shell {
-  --shell-pad-top: clamp(27px, 3.5vh, 38px);
+  --shell-pad-y: clamp(27px, 3.5vh, 38px);
+  --shell-pad-top: var(--shell-pad-y);
   --shell-pad-x: clamp(8px, 1.7vw, 24px);
+
+  /* Ribbon boundary flip — the open edge moves from bottom to top.
+     Composited translate only: aperture geometry never changes, so screens
+     keep their height and the scroll offset stays continuous. */
+  --shell-flip-ms: 420ms;
+  --shell-flip-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --shell-flip-fade-ms: 140ms;
 
   position: relative;
   flex: 0 0 auto;
@@ -1071,12 +1081,29 @@ body {
   height: 100dvh;
   display: block;
   background-color: #FFFFFF;
-  /* Original chrome: top + sides; bottom open */
+  /* Screen 1 chrome: top + sides; bottom open */
   padding:
-    var(--shell-pad-top)
+    var(--shell-pad-y)
     var(--shell-pad-x)
     0;
   overflow: hidden;
+}
+
+/* Whole-pixel chrome so the flip translate never lands on a sub-pixel and
+   resample the pixel field. Falls through to the clamp where round() is absent. */
+@supports (width: round(1px, 1px)) {
+  .page-shell {
+    --shell-pad-y: round(clamp(27px, 3.5vh, 38px), 1px);
+    --shell-pad-x: round(clamp(8px, 1.7vw, 24px), 1px);
+  }
+}
+
+/* Screen 2 — mirror chrome to the bottom half of the continuous frame */
+.site-frame[data-app-screen="1"] .page-shell {
+  padding:
+    0
+    var(--shell-pad-x)
+    var(--shell-pad-y);
 }
 
 /* ============================================================
@@ -1085,7 +1112,7 @@ body {
    ============================================================ */
 .app-scroll {
   position: absolute;
-  top: var(--shell-pad-top);
+  top: var(--shell-pad-y);
   left: var(--shell-pad-x);
   right: var(--shell-pad-x);
   bottom: 0;
@@ -1102,6 +1129,15 @@ body {
   -ms-overflow-style: none;
   /* Screens size to this scrollport (one full application viewport). */
   container-type: size;
+  transform: translate3d(0, 0, 0);
+  transition: transform var(--shell-flip-ms) var(--shell-flip-ease);
+}
+
+/* Screen 2 — slide the aperture up so the open edge lands on top.
+   The nameplate carries the identical transform and rides along. */
+.site-frame[data-app-screen="1"] .app-scroll,
+.site-frame[data-app-screen="1"] .nameplate {
+  transform: translate3d(0, calc(-1 * var(--shell-pad-y)), 0);
 }
 
 .app-scroll::-webkit-scrollbar {
@@ -1129,21 +1165,17 @@ body[data-boot] .app-scroll {
   scroll-snap-stop: always;
 }
 
-#pixel-fs-screen-1 {
+#pixel-fs-screen-1,
+#pixel-fs-screen-2 {
   display: flex;
   flex-direction: column;
   align-items: stretch;
 }
 
-#pixel-fs-screen-2 {
-  /* Empty shell — content added in a later phase */
-  background-color: #FFFFFF;
-}
-
 /* ============================================================
    STAGE — pixel field clipped to a squircle viewport.
    No border, stroke, or outer shadow — sharp field → white page.
-   Bottom edge stays open. Lives on Screen 1 only.
+   Screen 1 opens at the bottom; Screen 2 opens at the top.
    ============================================================ */
 .stage {
   --stage-radius: clamp(36px, 5.2vw, 68px);
@@ -1163,6 +1195,10 @@ body[data-boot] .app-scroll {
   corner-shape: squircle;
 }
 
+.stage--screen-2 {
+  border-radius: 0 0 var(--stage-radius) var(--stage-radius);
+}
+
 .stage__field {
   position: relative;
   flex: 1 1 auto;
@@ -1180,22 +1216,87 @@ body[data-boot] .app-scroll {
   padding: 0;
 }
 
+.stage__field--screen-2 {
+  border-radius: 0 0 var(--stage-radius) var(--stage-radius);
+}
+
+/* ============================================================
+   PAGE 2 MENU — Screen 2 a11y / content anchors.
+   Visual typography is rendered inside the shared Pixel FS grid
+   (intro LED pipeline — same as Screen 1 greeting / directory).
+   This overlay is not a second renderer; lines stay invisible.
+   ============================================================ */
+.page-2-menu {
+  --page-2-menu-inset-y: clamp(32px, 5.2vh, 56px);
+  --page-2-menu-inset-x: clamp(32px, 4.6vw, 56px);
+  --page-2-menu-corner-clear: clamp(18px, 2.4vw, 34px);
+  --page-2-menu-line-gap: 1.85em;
+
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  font-family: var(--f-sans);
+  font-weight: 600;
+  font-size: clamp(13px, 1.5vw, 16px);
+  letter-spacing: 0.08em;
+  line-height: 1.2;
+  color: rgba(var(--accent-rgb), 0.78);
+  user-select: none;
+  /* Visually inert — PE LEDs are the typography surface */
+  visibility: hidden;
+  opacity: 0;
+}
+
+.page-2-menu.is-visible {
+  /* Present for a11y / state hooks; PE LEDs remain the visual typography */
+  visibility: visible;
+  opacity: 0;
+}
+
+.page-2-menu__region {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  gap: var(--page-2-menu-line-gap);
+}
+
+.page-2-menu__region--top {
+  top: var(--page-2-menu-inset-y);
+  left: var(--page-2-menu-inset-x);
+  right: var(--page-2-menu-inset-x);
+  align-items: center;
+  text-align: center;
+}
+
+.page-2-menu__region--bottom-left {
+  bottom: max(var(--page-2-menu-inset-y), var(--page-2-menu-corner-clear));
+  left: max(var(--page-2-menu-inset-x), var(--page-2-menu-corner-clear));
+  align-items: flex-start;
+  text-align: left;
+}
+
+.page-2-menu__line {
+  margin: 0;
+  white-space: nowrap;
+}
+
 /* While boot (directory assemble) is active, prefer hold-to-FF over scroll gestures */
-body[data-boot] .stage__field {
+body[data-boot] #pixel-fs-screen-1 .stage__field {
   touch-action: none;
   user-select: none;
 }
 
 /* Energy / self-test boot — dormant black field inside the Pixel Engine only.
    Includes stabilizing so the completed lattice is not abandoned mid-handoff. */
-body[data-boot="powering_on"] .stage__field,
-body[data-boot="grid_generation"] .stage__field,
-body[data-boot="calibration"] .stage__field,
-body[data-boot="display_clear"] .stage__field,
-body[data-boot="self_test"] .stage__field,
-body[data-boot="typography_construction"] .stage__field,
-body[data-boot="typography"] .stage__field,
-body[data-boot="stabilizing"] .stage__field {
+body[data-boot="powering_on"] #pixel-fs-screen-1 .stage__field,
+body[data-boot="grid_generation"] #pixel-fs-screen-1 .stage__field,
+body[data-boot="calibration"] #pixel-fs-screen-1 .stage__field,
+body[data-boot="display_clear"] #pixel-fs-screen-1 .stage__field,
+body[data-boot="self_test"] #pixel-fs-screen-1 .stage__field,
+body[data-boot="typography_construction"] #pixel-fs-screen-1 .stage__field,
+body[data-boot="typography"] #pixel-fs-screen-1 .stage__field,
+body[data-boot="stabilizing"] #pixel-fs-screen-1 .stage__field {
   background-color: #000000;
 }
 
@@ -1256,6 +1357,8 @@ body[data-motion="on"][data-bg-mode="lightning"] .lightning-cursor.is-in-field {
   .settings__section-panel,
   .settings__section-chevron::before,
   .site-frame,
+  .app-scroll,
+  .nameplate,
   .topnav,
   .topnav__brand,
   .topnav__link,
@@ -1276,6 +1379,16 @@ body[data-motion="on"][data-bg-mode="lightning"] .lightning-cursor.is-in-field {
   pointer-events: none;
   margin: 0;
   padding: 0;
+  transform: translate3d(0, 0, 0);
+  transition:
+    transform var(--shell-flip-ms) var(--shell-flip-ease),
+    opacity var(--shell-flip-fade-ms) linear;
+}
+
+/* The rim runs along different edges per screen, so the path itself cannot
+   morph — it is rebuilt behind a brief fade at the midpoint of the flip. */
+.nameplate.is-flipping {
+  opacity: 0;
 }
 
 .nameplate__svg {
@@ -1317,6 +1430,13 @@ body[data-motion="on"][data-bg-mode="lightning"] .lightning-cursor.is-in-field {
   .stage {
     --stage-radius: clamp(28px, 4.5vw, 48px);
   }
+
+  .page-2-menu {
+    --page-2-menu-inset-y: clamp(28px, 4.6vh, 44px);
+    --page-2-menu-inset-x: clamp(28px, 4vw, 44px);
+    --page-2-menu-corner-clear: clamp(16px, 2.2vw, 26px);
+    font-size: clamp(12.5px, 1.7vw, 15px);
+  }
 }
 
 @media (max-width: 680px) {
@@ -1337,12 +1457,23 @@ body[data-motion="on"][data-bg-mode="lightning"] .lightning-cursor.is-in-field {
   .settings__btn { width: 36px; height: 36px; }
 
   .page-shell {
-    --shell-pad-top: 25px;
+    --shell-pad-y: 25px;
+    --shell-pad-top: var(--shell-pad-y);
     --shell-pad-x: clamp(4px, 1.35vw, 8px);
+  }
+
+  .page-2-menu {
+    --page-2-menu-inset-y: clamp(24px, 4.2vh, 36px);
+    --page-2-menu-inset-x: clamp(22px, 5vw, 32px);
+    --page-2-menu-corner-clear: 16px;
+    --page-2-menu-line-gap: 1.7em;
+    font-size: clamp(11.5px, 3.2vw, 14px);
+    letter-spacing: 0.07em;
   }
 
   .stage {
     --stage-radius: 28px;
   }
 }
+
 

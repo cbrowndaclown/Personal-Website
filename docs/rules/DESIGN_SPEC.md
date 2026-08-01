@@ -52,6 +52,18 @@ All systems should feel like they belong to the same visual language.
 
 Transitions should never appear disconnected.
 
+Screen 1 and Screen 2 are one continuous Pixel FS composition. Screen changes, ribbon boundary flips, and navigation motion should read as the same living system advancing state — not as separate pages.
+
+---
+
+# Application Motion
+
+Scroll and screen transitions are application-state changes, not traditional page scrolling.
+
+Each deliberate gesture should advance exactly one state.
+
+Motion between Screen 1 and Screen 2 should feel as intentional as pixel and intro animations.
+
 ---
 
 # Color

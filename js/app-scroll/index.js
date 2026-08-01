@@ -379,7 +379,35 @@ export function initAppScroll(options) {
     );
   }
 
-  /* ── Wheel — always one state edge; never free-scroll between screens ─── */
+  /* ── Wheel — one state edge per trackpad/mouse series (not per delta) ───
+     Trackpad momentum fires many wheel events. Without a series latch,
+     blocked ticks kept re-arming the idle timer so the swipe ended before
+     unlock — first swipes failed while keyboard (one event) worked. */
+  let wheelLatched = false;
+  let wheelAccum = 0;
+  let wheelIdleTimer = 0;
+  let wheelSeriesDir = 0;
+  const WHEEL_THRESHOLD = 48;
+
+  function endWheelSeries() {
+    if (wheelIdleTimer) {
+      clearTimeout(wheelIdleTimer);
+      wheelIdleTimer = 0;
+    }
+    wheelLatched = false;
+    wheelAccum = 0;
+    wheelSeriesDir = 0;
+    unlockGestureWhenIdle();
+  }
+
+  function armWheelSeriesIdle() {
+    if (wheelIdleTimer) clearTimeout(wheelIdleTimer);
+    wheelIdleTimer = window.setTimeout(() => {
+      wheelIdleTimer = 0;
+      endWheelSeries();
+    }, GESTURE_IDLE_MS);
+  }
+
   window.addEventListener(
     'wheel',
     (e) => {
@@ -389,16 +417,44 @@ export function initAppScroll(options) {
       const direction = Math.sign(e.deltaY);
       if (!direction) return;
 
-      const kind = classifyGesture(direction);
+      /* New series after idle — parity with touchstart / keydown unlock.
+         Must run before classifyGesture so a fresh swipe is not stuck
+         behind the post-transition soft lock. */
+      const seriesStart = !wheelLatched && wheelAccum === 0 && !wheelSeriesDir;
+      if (seriesStart && !isBusy()) {
+        gestureLocked = false;
+        clearGestureIdleTimer();
+      }
 
+      const kind = classifyGesture(direction);
       if (kind === 'noop') return;
 
-      /* Block and step both consume the gesture so native snap cannot skip. */
+      /* Consume so native snap cannot free-scroll / skip states. */
       e.preventDefault();
+      armWheelSeriesIdle();
+
+      /* Already stepped this swipe — eat momentum only. */
+      if (wheelLatched) return;
+
+      /* Direction flip within residual momentum starts a fresh accum. */
+      if (wheelSeriesDir && wheelSeriesDir !== direction) {
+        wheelAccum = 0;
+      }
+      wheelSeriesDir = direction;
+
       if (kind === 'block') {
-        unlockGestureWhenIdle();
+        /* Do not re-arm unlockGestureWhenIdle on every momentum tick. */
         return;
       }
+
+      /* Re-check after soft unlock — classify may have run while busy. */
+      if (isBusy() || gestureLocked || shellMoving) return;
+
+      wheelAccum += Math.abs(e.deltaY);
+      if (wheelAccum < WHEEL_THRESHOLD) return;
+
+      wheelLatched = true;
+      wheelAccum = 0;
       commitStep(direction);
     },
     { passive: false }

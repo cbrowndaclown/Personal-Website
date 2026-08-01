@@ -26,13 +26,23 @@ import { createExperimentalStyle } from './styles/experimental.js';
  * @param {object} [options]
  * @param {HTMLCanvasElement} [options.canvas]
  * @param {HTMLElement} [options.stage]
+ * @param {{ canvas: HTMLCanvasElement, stage: HTMLElement }[]} [options.surfaces]
  * @param {boolean} [options.prefersReduced]
  * @returns {object|null}
  */
 export function createPixelEngine(options = {}) {
-  const canvas = options.canvas || document.getElementById('heatmap');
-  const stage = options.stage || document.getElementById('stage');
+  const surfaces =
+    options.surfaces && options.surfaces.length
+      ? options.surfaces.filter((surface) => surface && surface.canvas && surface.stage)
+      : [{
+          canvas: options.canvas || document.getElementById('heatmap'),
+          stage: options.stage || document.getElementById('stage'),
+        }];
+  const canvas = surfaces[0] && surfaces[0].canvas;
+  const stage = surfaces[0] && surfaces[0].stage;
   if (!canvas || !stage) return null;
+  const canvases = surfaces.map((surface) => surface.canvas);
+  const stages = surfaces.map((surface) => surface.stage);
 
   const prefersReduced =
     options.prefersReduced != null
@@ -59,8 +69,8 @@ export function createPixelEngine(options = {}) {
   });
   const grid = createGridManager({ stage, events, cell: CELL });
   const state = createPixelStateManager({ grid, events });
-  const renderer = createRenderer({ canvas, grid });
-  const interaction = createInteractionManager({ stage, grid, events });
+  const renderer = createRenderer({ canvas, canvases, grid });
+  const interaction = createInteractionManager({ stage, stages, grid, events });
   const performance = createPerformanceManager({
     animConfig: config.animConfig,
     events,
@@ -81,6 +91,8 @@ export function createPixelEngine(options = {}) {
   const styleDeps = {
     canvas,
     stage,
+    surfaces,
+    stages,
     animConfig: config.animConfig,
     resolveActiveBgMode: config.resolveActiveBgMode,
     pixelBehavior,

@@ -1,12 +1,14 @@
 # Pixel FS Technical Specification
 
-Version: 1.0
+Version: 1.1
 
 This document defines the architecture, interaction model, animation philosophy, and technical behavior of Pixel FS.
 
 This specification is considered the source of truth for the project.
 
 Any implementation that conflicts with this document should be considered incorrect unless the user explicitly requests an architectural change.
+
+The documentation system itself (`docs/PROJECT_GUIDE.md`, `docs/ENGINEERING_RULES.md`, `docs/DESIGN_SPEC.md`, and this file) is part of the project architecture. Future agents must treat these documents as authoritative and keep them aligned with accepted systems.
 
 ---
 
@@ -50,19 +52,31 @@ Maintaining quality is more important than increasing feature count.
 
 # Overall Architecture
 
-Pixel FS is composed of multiple full-screen sections.
+Pixel FS uses an established two-screen full-screen layout.
 
-Each screen has a dedicated responsibility.
+The two screens are:
 
-Scrolling transitions between screens.
+• Pixel FS Screen 1 (`#pixel-fs-screen-1`) — primary landing experience
 
-The screens should feel connected as parts of one application rather than independent webpages.
+• Pixel FS Screen 2 (`#pixel-fs-screen-2`) — continuation of the Pixel FS experience
+
+Both screens live inside `#app-scroll`, the sole vertical scrollport.
+
+The outer ribbon frame (`.page-shell`) stays fixed. It is never the scroll container.
+
+Scrolling transitions between screens through a state machine backed by native CSS scroll snapping.
+
+The screens feel connected as parts of one application rather than independent webpages.
+
+This two-screen layout, scroll snapping, and Screen 1 ↔ Screen 2 architecture are stable and protected.
 
 ---
 
 # Pixel FS Screen 1
 
-Screen 1 is the landing experience.
+Screen 1 is the primary landing experience.
+
+This role is established architecture.
 
 Responsibilities:
 
@@ -72,7 +86,7 @@ Responsibilities:
 
 • navigation
 
-• ribbon banner
+• ribbon banner (Screen 1 boundary: top + sides, open bottom)
 
 • settings panel
 
@@ -80,15 +94,21 @@ Responsibilities:
 
 • first impression
 
+• hosting the authoritative Pixel FS simulation surface
+
 This screen establishes the visual language used throughout the project.
 
 ---
 
 # Pixel FS Screen 2
 
-Screen 2 is the continuation of the experience.
+Screen 2 is the continuation of the Pixel FS experience.
+
+This role is established architecture.
 
 Responsibilities:
+
+• continuation of the same application frame after Screen 1
 
 • secondary content
 
@@ -96,9 +116,13 @@ Responsibilities:
 
 • additional interactive elements
 
-• future feature growth
+• future feature growth within this screen (not a replacement layout)
+
+• hosting a display surface powered by the shared Pixel FS engine beneath an independent content overlay
 
 Screen 2 should visually feel like a continuation of Screen 1 rather than an entirely new page.
+
+The ribbon boundary mirrors for Screen 2 (bottom + sides, open top) so both screens read as one continuous Pixel FS display.
 
 ---
 
@@ -110,25 +134,55 @@ Scrolling should never feel like traditional webpage scrolling.
 
 Instead, scrolling transitions between application states.
 
-Future implementations should preserve this philosophy.
+This philosophy is implemented and protected.
 
----
+## Implementation
 
-Current state order:
+Authority lives in `js/app-scroll/`:
 
-Screen 1
+• `scroll-state.js` — pure `(screen × nav)` transition rules
 
-↓
+• `index.js` — sole controller that mutates step / nav DOM and programmatically settles `#app-scroll`
 
-Navigation Hidden
+Native CSS scroll snapping (`scroll-snap-type: y mandatory` on `#app-scroll`, with `scroll-snap-align: start` and `scroll-snap-stop: always` on each `.pixel-fs-screen`) defines resting points between full-screen sections.
 
-↓
+Free scrolling between screens is prevented. Deliberate gestures are consumed so native snap cannot skip states.
 
-Screen 2
+## One gesture, one state
+
+Each deliberate scroll gesture (wheel, touch, or keyboard) advances exactly one application state edge.
+
+No implementation may skip intermediate states.
+
+## Current state order
+
+Canonical cycle (never skip):
+
+Screen 1 + Navigation Open
+
+↓ scroll down
+
+Screen 1 + Navigation Closed
+
+↓ scroll down
+
+Screen 2 + Navigation Closed
+
+↑ scroll up
+
+Screen 2 + Navigation Open
+
+↑ scroll up
+
+Screen 1 + Navigation Open
+
+Load / unlock park at Screen 1 + Navigation Closed so the pixel field stays flush through boot and intro. Navigation Open is one up-gesture away.
 
 Reverse scrolling returns through the same states.
 
-No scrolling implementation should skip intermediate states.
+Home returns to the parked landing (Screen 1 + Navigation Closed).
+
+Unlock mirrors prior topnav gates: `pixeldirectory*` / `pixelbootready`.
 
 ---
 
@@ -139,6 +193,24 @@ The boot sequence is one of the defining characteristics of Pixel FS.
 It is considered a protected system.
 
 Unless explicitly requested, its behavior should remain unchanged.
+
+## Current boot pipeline
+
+The ordered Screen 1 boot pipeline is:
+
+1. `powering_on`
+
+2. `grid_generation`
+
+3. `calibration`
+
+4. `typography_construction`
+
+5. `stabilizing`
+
+6. `ready`
+
+Stage definitions live in `js/pixel-engine/boot/stages/`. The boot controller owns advancement, overlaps, interaction gating, and field compositing.
 
 The boot sequence establishes:
 
@@ -172,6 +244,16 @@ It serves as a framing element.
 
 It should always visually reinforce the currently active application region.
 
+## Current ribbon architecture
+
+• The ribbon frame (`.page-shell`) is permanent outer chrome. It is not a scroll container.
+
+• Chrome padding flips with the active screen: Screen 1 opens at the bottom; Screen 2 opens at the top.
+
+• The nameplate (`Benz Grotesk` textPath) travels along the active rim. Screen 1 uses the top/left/right path; Screen 2 uses the bottom/left/right path.
+
+• Ribbon layout listens to the scroll state machine (`appscrollchange` / `data-app-screen`) so the boundary stays continuous across screens.
+
 Future layouts should preserve this role.
 
 ---
@@ -182,7 +264,11 @@ Navigation is integrated into the Pixel FS experience.
 
 It should never feel disconnected from the pixel engine.
 
-Navigation transitions should remain smooth.
+Navigation visibility is part of the Screen 1 ↔ Screen 2 state machine (`open` / `closed`), not a separate scroll system.
+
+Navigation transitions use the existing site-frame transform animation.
+
+Navigation should remain smooth.
 
 Navigation should not unexpectedly interrupt animations.
 
@@ -217,6 +303,16 @@ It is responsible for:
 Rendering performance is a top priority.
 
 Future implementations should reuse the existing renderer whenever possible.
+
+## Screen 1 ↔ Screen 2 renderer integration
+
+Screen 1 and Screen 2 expose display surfaces powered by one Pixel FS engine.
+
+The engine maintains one authoritative simulation, renderer, pixel state, settings model, interaction pipeline, animation system, rendering-mode registry, and performance configuration. The active screen surface displays that shared frame; it does not create a second renderer or parallel pixel engine.
+
+Boot and intro remain owned by Screen 1. Screen 2 receives the resulting interactive Pixel FS environment without duplicating boot or renderer state.
+
+Screen 2 content is an independent overlay layer above the shared rendering surface. New content must not be coupled to the renderer or introduce a separate render pipeline.
 
 ---
 
@@ -316,11 +412,27 @@ Prefer extending existing systems.
 
 Unless explicitly instructed otherwise, these systems should not be modified:
 
+• two-screen application layout
+
+• native CSS scroll snapping
+
+• screen transition state machine
+
+• screen initialization flow
+
+• Screen 1 ↔ Screen 2 architecture
+
+• ribbon boundary architecture
+
+• boot pipeline
+
 • boot sequence
 
 • intro animation
 
 • ribbon banner
+
+• renderer integration between Screen 1 and Screen 2
 
 • settings panel
 
@@ -330,11 +442,13 @@ Unless explicitly instructed otherwise, these systems should not be modified:
 
 • saved settings
 
-• navigation behavior
+• existing navigation behavior
 
 • animation pipeline
 
 • density recalibration
+
+• documentation system (project architecture docs)
 
 ---
 
@@ -366,6 +480,10 @@ Preserve visual consistency.
 
 Maintain performance.
 
+7.
+
+Respect the Architectural Stability Rule, Principle of Least Change, and Single Source of Truth Rule in `ENGINEERING_RULES.md`.
+
 ---
 
 # Regression Policy
@@ -386,6 +504,10 @@ Before completing any task, verify:
 
 • ribbon banner still functions
 
+• scroll state machine and one-gesture-one-state behavior still function
+
+• Screen 1 ↔ Screen 2 transitions still function
+
 • performance remains unchanged
 
 ---
@@ -399,3 +521,5 @@ Every new feature should reinforce the illusion that the user is interacting wit
 Architecture should prioritize long-term stability over short-term convenience.
 
 Every implementation should move the project closer to that vision.
+
+Accepted subsystems are stable architecture. Build on them; do not redesign them unless the user explicitly requests an architectural change.
