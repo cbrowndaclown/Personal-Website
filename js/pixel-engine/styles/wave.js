@@ -644,6 +644,12 @@ export function createWaveStyle(deps) {
     ) {
       alive = true;
     }
+    if (
+      typeof pixelField.densityChangeLocked === 'function' &&
+      pixelField.densityChangeLocked()
+    ) {
+      alive = true;
+    }
     const dampScale = cursorInject.dampScale;
     const hasPtr = lastPtrX >= 0 && lastPtrY >= 0;
     const ptrFx = hasPtr ? lastPtrX / CELL : 0;

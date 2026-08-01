@@ -301,6 +301,18 @@ export function createDensityRebuildPipeline(options) {
       });
       return true;
     }
+    const surface =
+      typeof intro.getMenuSurface === 'function' ? intro.getMenuSurface() : 1;
+    if (
+      surface === 2 &&
+      typeof intro.beginScreen2MenuSequence === 'function'
+    ) {
+      intro.beginScreen2MenuSequence({
+        fromDensityRebuild: true,
+        instant: !!opts.instant,
+      });
+      return true;
+    }
     if (typeof intro.beginDirectorySequence === 'function') {
       intro.beginDirectorySequence({
         fromDensityRebuild: true,

@@ -655,8 +655,14 @@ export function createHeatStyle(deps) {
     }
 
     let alive = hasTrail || active || introAlive;
-    /* Keep painting while boot / density sync / teardown owns the lattice */
+    /* Keep painting while boot / density sync / teardown / menu restore owns the lattice */
     if (materialize || tearingDown) alive = true;
+    if (
+      typeof pixelField.densityChangeLocked === 'function' &&
+      pixelField.densityChangeLocked()
+    ) {
+      alive = true;
+    }
 
     /* Boot materialize clears black; density sync / ops keep the gray panel lit. */
     if (bootMaterializeActive()) {

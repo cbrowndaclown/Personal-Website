@@ -2439,12 +2439,16 @@ export function createLightningStyle(deps) {
       const recalib =
         typeof pixelField.recalibrationActive === 'function' &&
         pixelField.recalibrationActive();
+      const densityLocked =
+        typeof pixelField.densityChangeLocked === 'function' &&
+        pixelField.densityChangeLocked();
       const alive =
         introAlive ||
         ledsAlive ||
         (!densityOps && weatherAlive()) ||
         recalib ||
-        tearingDown;
+        tearingDown ||
+        densityLocked;
 
       if (renderer && typeof renderer.present === 'function') renderer.present();
       if (perfMgr && typeof perfMgr.endFrame === 'function') {

@@ -143,11 +143,13 @@ export function createIntroController(deps) {
   ];
 
   /* Screen 2 menu — same PE LED typography + directory assemble language.
-     Only content and dual-region positions differ. */
+     Only content and dual-region positions differ.
+     Arrows are intentionally smaller than Screen 1 directory chevrons. */
+  const S2_ARROW_SCALE = 0.78;
   const S2_LINES = [
-    { text: 'Scroll up for header / top grid', region: 'top',    align: 'center', pace: 1.20 },
+    { text: 'Scroll up for header / top grid', region: 'top',    align: 'center', arrow: 'up',   pace: 1.20 },
     { text: '/ for options',                   region: 'bottom', align: 'left',   pace: 1.00 },
-    { text: 'Scroll down for more',            region: 'bottom', align: 'left',   pace: 1.15 },
+    { text: 'Scroll down for more',            region: 'bottom', align: 'left',   arrow: 'down', pace: 1.15 },
   ];
 
   const DIR_FONT =
@@ -951,24 +953,31 @@ export function createIntroController(deps) {
     assembleMs = 0;
   }
 
-  function arrowSizeFor(fontPx) {
-    return Math.max(fontPx * 1.15, fontPx + 2);
+  function arrowSizeFor(fontPx, scale) {
+    const s = scale != null ? scale : 1.15;
+    /* Screen 1 keeps the larger chevron; Screen 2 passes a sub-1 scale. */
+    if (s >= 1) return Math.max(fontPx * s, fontPx + 2);
+    return Math.max(2, fontPx * s);
   }
 
-  function lineLayoutWidth(octx, line, fontPx) {
+  function lineLayoutWidth(octx, line, fontPx, arrowScale) {
     octx.font = `600 ${fontPx}px ${DIR_FONT}`;
     const textW = octx.measureText(line.text).width;
-    const arrowW = arrowSizeFor(fontPx) * 1.05;
-    const gap = Math.max(3, Math.round(fontPx * 0.35));
+    if (!line.arrow) return textW;
+    const arrowW = arrowSizeFor(fontPx, arrowScale) * 1.05;
+    const gap = Math.max(2, Math.round(fontPx * (arrowScale != null && arrowScale < 1 ? 0.28 : 0.35)));
     return textW + gap + arrowW;
   }
 
-  function fitDirFont(octx, lines, maxWidth, startPx) {
+  function fitDirFont(octx, lines, maxWidth, startPx, arrowScale) {
     let fontPx = startPx;
     for (let attempt = 0; attempt < 14; attempt++) {
       let widest = 0;
       for (let L = 0; L < lines.length; L++) {
-        widest = Math.max(widest, lineLayoutWidth(octx, lines[L], fontPx));
+        widest = Math.max(
+          widest,
+          lineLayoutWidth(octx, lines[L], fontPx, arrowScale)
+        );
       }
       if (widest <= maxWidth) break;
       fontPx = Math.max(4, fontPx - 1);
@@ -1002,7 +1011,18 @@ export function createIntroController(deps) {
     octx.restore();
   }
 
-  function sampleLineWithArrow(octx, line, cx, cy, fontPx) {
+  /**
+   * @param {CanvasRenderingContext2D} octx
+   * @param {{ text: string, arrow?: string }} line
+   * @param {number} x  Anchor x (center of line when align=center, left edge when left)
+   * @param {number} y
+   * @param {number} fontPx
+   * @param {{ align?: 'left' | 'center', arrowScale?: number }} [opts]
+   */
+  function sampleLineWithArrow(octx, line, x, y, fontPx, opts) {
+    const align = (opts && opts.align) || 'center';
+    const arrowScale = opts && opts.arrowScale;
+
     octx.fillStyle = '#000';
     octx.fillRect(0, 0, cols, rows);
     octx.fillStyle = '#fff';
@@ -1010,21 +1030,32 @@ export function createIntroController(deps) {
     octx.textAlign = 'left';
     octx.textBaseline = 'middle';
 
-    const arrowSize = arrowSizeFor(fontPx);
-    const gap = Math.max(3, Math.round(fontPx * 0.35));
     const textW = octx.measureText(line.text).width;
-    const arrowW = arrowSize * 1.05;
-    const totalW = textW + gap + arrowW;
-    const startX = cx - totalW * 0.5;
+    let totalW = textW;
+    let gap = 0;
+    let arrowSize = 0;
+    let arrowW = 0;
+    if (line.arrow) {
+      arrowSize = arrowSizeFor(fontPx, arrowScale);
+      gap = Math.max(
+        2,
+        Math.round(fontPx * (arrowScale != null && arrowScale < 1 ? 0.28 : 0.35))
+      );
+      arrowW = arrowSize * 1.05;
+      totalW = textW + gap + arrowW;
+    }
+    const startX = align === 'left' ? x : x - totalW * 0.5;
 
-    octx.fillText(line.text, startX, cy);
-    drawPixelArrow(
-      octx,
-      startX + textW + gap + arrowW * 0.5,
-      cy,
-      arrowSize,
-      line.arrow
-    );
+    octx.fillText(line.text, startX, y);
+    if (line.arrow) {
+      drawPixelArrow(
+        octx,
+        startX + textW + gap + arrowW * 0.5,
+        y,
+        arrowSize,
+        line.arrow
+      );
+    }
 
     const data = octx.getImageData(0, 0, cols, rows).data;
     const glyph = [];
@@ -1032,14 +1063,25 @@ export function createIntroController(deps) {
     for (let i = 0, n = cols * rows; i < n; i++) {
       if (data[i * 4] <= 140) continue;
       glyph.push(i);
-      const x = i % cols;
-      const y = (i / cols) | 0;
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
+      const gx = i % cols;
+      const gy = (i / cols) | 0;
+      if (gx < minX) minX = gx;
+      if (gx > maxX) maxX = gx;
+      if (gy < minY) minY = gy;
+      if (gy > maxY) maxY = gy;
     }
-    return { glyph, minX, maxX, minY, maxY };
+    return {
+      glyph,
+      minX,
+      maxX,
+      minY,
+      maxY,
+      startX,
+      textW,
+      gap,
+      arrowW,
+      totalW,
+    };
   }
 
   function bakeDirectory(opts) {
@@ -1268,57 +1310,6 @@ export function createIntroController(deps) {
     renderDirectoryFromBitmap(null);
   }
 
-  function fitPlainFont(octx, texts, maxWidth, startPx) {
-    let fontPx = startPx;
-    for (let attempt = 0; attempt < 14; attempt++) {
-      octx.font = `600 ${fontPx}px ${DIR_FONT}`;
-      let widest = 0;
-      for (let i = 0; i < texts.length; i++) {
-        widest = Math.max(widest, octx.measureText(texts[i]).width);
-      }
-      if (widest <= maxWidth) break;
-      fontPx = Math.max(4, fontPx - 1);
-    }
-    return fontPx;
-  }
-
-  /**
-   * Sample a plain line into the shared PE lattice (Screen 1 glyph language).
-   * @param {CanvasRenderingContext2D} octx
-   * @param {string} text
-   * @param {number} x
-   * @param {number} y
-   * @param {'left' | 'center'} align
-   * @param {number} fontPx
-   */
-  function samplePlainLine(octx, text, x, y, align, fontPx) {
-    octx.fillStyle = '#000';
-    octx.fillRect(0, 0, cols, rows);
-    octx.fillStyle = '#fff';
-    octx.font = `600 ${fontPx}px ${DIR_FONT}`;
-    octx.textAlign = align === 'center' ? 'center' : 'left';
-    octx.textBaseline = 'middle';
-    octx.fillText(text, x, y);
-
-    const data = octx.getImageData(0, 0, cols, rows).data;
-    const glyph = [];
-    let minX = cols;
-    let maxX = -1;
-    let minY = rows;
-    let maxY = -1;
-    for (let i = 0, n = cols * rows; i < n; i++) {
-      if (data[i * 4] <= 140) continue;
-      glyph.push(i);
-      const gx = i % cols;
-      const gy = (i / cols) | 0;
-      if (gx < minX) minX = gx;
-      if (gx > maxX) maxX = gx;
-      if (gy < minY) minY = gy;
-      if (gy > maxY) maxY = gy;
-    }
-    return { glyph, minX, maxX, minY, maxY };
-  }
-
   /**
    * Bake Screen 2 menu into the shared directory LED buffers.
    * Same assemble language as Screen 1 directory (DIR_TIMING, L→R wave).
@@ -1359,10 +1350,10 @@ export function createIntroController(deps) {
     const octx = off.getContext('2d', { alpha: false });
     if (!octx) return;
 
-    /* Same scaling language as Screen 1 directory (rows × 0.078 + fit). */
-    const texts = S2_LINES.map((l) => l.text);
+    /* Same scaling language as Screen 1 directory (rows × 0.078 + fit),
+       with smaller arrow chevrons reserved in the layout width. */
     let fontPx = Math.max(5, Math.floor(rows * 0.078));
-    fontPx = fitPlainFont(octx, texts, cols * 0.92, fontPx);
+    fontPx = fitDirFont(octx, S2_LINES, cols * 0.92, fontPx, S2_ARROW_SCALE);
     octx.font = `600 ${fontPx}px ${DIR_FONT}`;
 
     const lineGap = fontPx * 1.85;
@@ -1397,14 +1388,10 @@ export function createIntroController(deps) {
     for (let L = 0; L < jobs.length; L++) {
       const { line, cx: lx, cy: ly } = jobs[L];
 
-      const sampled = samplePlainLine(
-        octx,
-        line.text,
-        lx,
-        ly,
-        line.align,
-        fontPx
-      );
+      const sampled = sampleLineWithArrow(octx, line, lx, ly, fontPx, {
+        align: line.align,
+        arrowScale: S2_ARROW_SCALE,
+      });
       if (!sampled.glyph.length) {
         if (!instant) cursor += timing.linePause;
         continue;
@@ -1425,11 +1412,15 @@ export function createIntroController(deps) {
       const lineCx = (sampled.minX + sampled.maxX) * 0.5;
       const lineCy = (sampled.minY + sampled.maxY) * 0.5;
 
-      const startX =
-        line.align === 'center'
-          ? lx - octx.measureText(line.text).width * 0.5
-          : lx;
+      const startX = sampled.startX;
       const bands = wordBandsAt(octx, line.text, startX);
+      if (line.arrow) {
+        /* Arrow glyphs ride as their own idle word */
+        bands.push({
+          x0: startX + sampled.textW + sampled.gap * 0.35,
+          x1: startX + sampled.totalW + 1,
+        });
+      }
       const bandCount = Math.max(1, bands.length);
       const baseWid = dIdleWords.length;
       const wordReady = new Float32Array(bandCount);
@@ -1547,9 +1538,10 @@ export function createIntroController(deps) {
     directoryAllowed = true;
     menuSurface = 2;
 
+    /* Return visits snap; Pixel Density rebuilds always replay assemble. */
     const instant =
       !!opts.instant ||
-      screen2MenuPlayed ||
+      (!opts.fromDensityRebuild && screen2MenuPlayed) ||
       !animConfig.motion ||
       prefersReduced;
 
@@ -1573,6 +1565,9 @@ export function createIntroController(deps) {
       /* Return visit — no replay, so ease the settled text back in. */
       setMenuFade(0, 0);
       fadeMenuIn();
+      /* Density rebuild unlock listens for hold — must fire on snap path too. */
+      window.dispatchEvent(new CustomEvent('pixeldirectorystart'));
+      window.dispatchEvent(new CustomEvent('pixeldirectoryhold'));
       return;
     }
 
@@ -1582,6 +1577,7 @@ export function createIntroController(deps) {
     timeScale = 1;
     typographySettled = true;
     setBoot('directory');
+    window.dispatchEvent(new CustomEvent('pixeldirectorystart'));
   }
 
   /** Settle Screen 2 menu to idle hold (mid-assemble leave / skip). */
@@ -1600,6 +1596,7 @@ export function createIntroController(deps) {
     timeScale = 1;
     typographySettled = true;
     setBoot(null);
+    window.dispatchEvent(new CustomEvent('pixeldirectoryhold'));
   }
 
   /** Restore Screen 1 directory menu into the shared PE typography buffers. */
@@ -1639,12 +1636,13 @@ export function createIntroController(deps) {
    * Clear all content LEDs and lock the intro out of the PE canvas
    * until typography construction is explicitly started.
    * Directory pixels are destroyed — not hidden — until post-boot reveal.
+   * Preserves menuSurface so a Pixel Density rebuild on Screen 2 rebakes /
+   * replays Screen 2 menu instead of falling back to Screen 1 directory.
    */
   function suppressContent() {
     clearDissolveTimer();
     clearIntroLeds();
     directoryAllowed = false;
-    menuSurface = 1;
     clearDirectoryLeds();
     contentLocked = true;
     phase = 'idle';
@@ -1729,6 +1727,9 @@ export function createIntroController(deps) {
       if (menuSurface === 2) bakeScreen2Menu(bakeOpts);
       else bakeDirectory(bakeOpts);
     }
+
+    /* Keep Screen 2 session latch in sync when density rebuilds on Screen 2. */
+    if (menuSurface === 2) screen2MenuPlayed = true;
 
     if (opts.instant) {
       paintDirectoryHold();
@@ -2143,12 +2144,14 @@ export function createIntroController(deps) {
     }
     if (phase === 'directory') {
       if (!directoryAllowed) return false;
-      const lit = updateDirectoryLeds(t);
-      if (t >= assembleMs && assembleMs > 0) {
+      updateDirectoryLeds(t);
+      /* Stay alive for the whole assemble — returning only "any LED lit"
+         let style rAF loops die before the first glyph, so pixeldirectoryhold
+         never fired and Pixel Density stayed locked after one use. */
+      if (assembleMs <= 0 || t >= assembleMs) {
         enterIdle();
-        return true;
       }
-      return lit;
+      return true;
     }
     return false;
   }
