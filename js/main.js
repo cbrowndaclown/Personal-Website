@@ -468,7 +468,9 @@ import { initCommandPalette } from './command-palette/index.js';
       if (prevUnit > 1) offset = (offset / prevUnit) * unitLen;
       offset = ((offset % unitLen) + unitLen) % unitLen;
 
-      const copies = Math.max(2, Math.ceil(pathLen / unitLen) + 2);
+      /* Cover pathLen plus startOffset travel, with extra repeats so curved
+         corners never read as empty stretches along the open rim. */
+      const copies = Math.max(8, Math.ceil((pathLen + unitLen * 2) / unitLen) + 6);
       textPath.textContent = Array.from({ length: copies }, () => LABEL + SEP).join('');
 
       const pad = Math.ceil(fontSize * 1.6 + gap + 8);
