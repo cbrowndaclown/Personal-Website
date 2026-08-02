@@ -237,6 +237,7 @@ import { initCommandPalette } from './command-palette/index.js';
 
     const LABEL = 'Canaan Brown';
     const SEP   = '   ·   ';
+    const UNIT  = LABEL + SEP;
     const SQUIRCLE_N = 4;
     const CORNER_SAMPLES = 48;
     /* Slow liquid pace — px / second */
@@ -248,6 +249,8 @@ import { initCommandPalette } from './command-palette/index.js';
     let lastTs  = 0;
     let rafId   = 0;
     let running = false;
+    let lastFill = '';
+    let lastCopies = 0;
 
     function clamp(n, a, b) {
       return Math.max(a, Math.min(b, n));
@@ -385,18 +388,37 @@ import { initCommandPalette } from './command-palette/index.js';
       return d;
     }
 
-    function measureUnit(fontSize) {
-      const probe = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      probe.setAttribute('font-size', String(fontSize));
-      probe.setAttribute('font-family', 'Porca, system-ui, sans-serif');
-      probe.setAttribute('font-weight', '400');
-      probe.setAttribute('letter-spacing', '0.04em');
-      probe.textContent = LABEL + SEP;
-      probe.setAttribute('visibility', 'hidden');
-      svg.appendChild(probe);
-      const w = probe.getComputedTextLength();
-      svg.removeChild(probe);
-      return Math.max(w, fontSize * 8);
+    /**
+     * Advance width of one UNIT on the live textPath — the same metric
+     * startOffset uses — so wraps land on an identical glyph. Prefer
+     * averaging an existing multi-copy fill so layout never collapses text.
+     */
+    function measureLiveUnit(fontSize) {
+      if (lastCopies >= 2 && textPath.textContent === lastFill) {
+        const total = textPath.getComputedTextLength();
+        if (total > 1) return total / lastCopies;
+      }
+      const restore = textPath.textContent;
+      textPath.textContent = UNIT;
+      const w = textPath.getComputedTextLength();
+      if (restore && restore !== UNIT) textPath.textContent = restore;
+      else {
+        lastFill = UNIT;
+        lastCopies = 1;
+      }
+      return w > 1 ? w : Math.max(fontSize * 8, 1);
+    }
+
+    function setRibbonFill(copies) {
+      const fill = Array.from({ length: copies }, () => UNIT).join('');
+      if (fill === lastFill && textPath.textContent === fill) {
+        lastCopies = copies;
+        return copies;
+      }
+      textPath.textContent = fill;
+      lastFill = fill;
+      lastCopies = copies;
+      return copies;
     }
 
     /**
@@ -463,15 +485,19 @@ import { initCommandPalette } from './command-palette/index.js';
       if (!(pathLen > 1)) return;
 
       const prevUnit = unitLen;
-      unitLen = measureUnit(fontSize);
-
-      if (prevUnit > 1) offset = (offset / prevUnit) * unitLen;
-      offset = ((offset % unitLen) + unitLen) % unitLen;
+      let unit = measureLiveUnit(fontSize);
 
       /* Cover pathLen plus startOffset travel, with extra repeats so curved
          corners never read as empty stretches along the open rim. */
-      const copies = Math.max(8, Math.ceil((pathLen + unitLen * 2) / unitLen) + 6);
-      textPath.textContent = Array.from({ length: copies }, () => LABEL + SEP).join('');
+      const copies = Math.max(8, Math.ceil((pathLen + unit * 2) / unit) + 6);
+      setRibbonFill(copies);
+
+      /* Average over the full fill — matches the animated startOffset cycle. */
+      const total = textPath.getComputedTextLength();
+      unitLen = total > 1 ? total / copies : unit;
+
+      if (prevUnit > 1) offset = (offset / prevUnit) * unitLen;
+      offset = ((offset % unitLen) + unitLen) % unitLen;
 
       const pad = Math.ceil(fontSize * 1.6 + gap + 8);
       svg.setAttribute('viewBox', `${-pad} ${-pad} ${W + pad * 2} ${H + pad * 2}`);
@@ -522,7 +548,9 @@ import { initCommandPalette } from './command-palette/index.js';
       lastTs = ts;
 
       if (unitLen > 1) {
-        offset = (offset + SPEED * dt) % unitLen;
+        offset += SPEED * dt;
+        /* Subtract whole units — same phase, no probe/path metric drift. */
+        if (offset >= unitLen) offset -= unitLen * Math.floor(offset / unitLen);
         textPath.setAttribute('startOffset', String(-offset));
       }
       rafId = requestAnimationFrame(tick);

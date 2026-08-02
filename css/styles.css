@@ -21,7 +21,7 @@
   --accent-rgb: 255, 52, 158;
 
   /* Nav height — site-frame parks at -navH, reveals at 0 */
-  --topnav-h: 58px;
+  --topnav-h: 72px;
   --topnav-divider: rgba(229, 229, 229, 0.5); /* #E5E5E5 @ 50% */
 
   /* Boot indicator accent — matches Pixel Engine BOOT_RED */
@@ -123,9 +123,9 @@ body {
 
 .topnav__inner {
   --topnav-pad-x: clamp(20px, 3.5vw, 36px);
-  --topnav-link-gap: clamp(32px, 3.6vw, 56px);
-  --topnav-brand-clearance: clamp(64px, 8vw, 112px);
-  --topnav-settings-reserve: 52px; /* gear + breathing room before right cluster */
+  --topnav-link-gap: clamp(36px, 3.8vw, 60px);
+  --topnav-brand-clearance: clamp(84px, 9.5vw, 136px);
+  --topnav-settings-reserve: 56px; /* gear + breathing room before right cluster */
 
   position: relative;
   flex: 1 1 auto;
@@ -169,7 +169,7 @@ body {
   display: inline-block;
   flex-shrink: 0;
   font-family: var(--f-sans);
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 400;
   letter-spacing: 0.08em;
   line-height: 1;
@@ -188,7 +188,7 @@ body {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: -4px;
+  bottom: -5px;
   height: 1px;
   background-color: var(--topnav-divider);
   transform: scaleX(0);
@@ -226,7 +226,7 @@ body {
   border: 0;
   background: none;
   font-family: var(--f-brand);
-  font-size: 20px;
+  font-size: 26px;
   font-weight: 400;
   letter-spacing: 0.02em;
   line-height: 1;
@@ -261,8 +261,8 @@ body {
 
 .settings__btn {
   appearance: none;
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border: 1px solid rgba(255, 255, 255, 0.58);
   border-radius: 14px;
   corner-shape: squircle;
@@ -1516,20 +1516,20 @@ body[data-motion="on"][data-bg-mode="lightning"] .lightning-cursor.is-in-field {
 
 @media (max-width: 680px) {
   :root {
-    --topnav-h: 54px;
+    --topnav-h: 64px;
   }
 
   .topnav__inner {
-    --topnav-link-gap: 18px;
-    --topnav-brand-clearance: 50px;
-    --topnav-settings-reserve: 44px;
+    --topnav-link-gap: 20px;
+    --topnav-brand-clearance: 64px;
+    --topnav-settings-reserve: 48px;
   }
 
   .nameplate__text { font-size: 16px; }
-  .topnav__brand { font-size: 16px; }
-  .topnav__link { font-size: 13px; letter-spacing: 0.06em; }
+  .topnav__brand { font-size: 20px; }
+  .topnav__link { font-size: 15px; letter-spacing: 0.06em; }
   .site-footer { padding: 16px 20px; }
-  .settings__btn { width: 36px; height: 36px; }
+  .settings__btn { width: 40px; height: 40px; }
 
   .page-shell {
     --shell-pad-y: 25px;
