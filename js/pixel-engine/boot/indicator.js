@@ -1,6 +1,5 @@
 /* Center boot indicator — thin pixel arc that rotates in place.
-   On the final revolution the leading edge extends forward until the
-   open gap seals into a complete ring (trailing edge never reverses),
+   On the final revolution the open gap closes into a complete ring,
    holds briefly, then dissolves. Built entirely from lattice cells. */
 
 import { bootEnergyDurationMs, BOOT_TIMING } from './constants.js';
@@ -65,38 +64,26 @@ export function createBootIndicator() {
   }
 
   /**
-   * Base spin angle — always advances forward at constant omega.
-   * @param {number} now
-   */
-  function spinAngleAt(now) {
-    if (!armed || omega <= 0) return 0;
-    return (now - originMs) * omega;
-  }
-
-  /**
-   * Leading-edge (head) angle for painting.
-   * During close the head extends forward so the gap seals without
-   * ever pulling the trailing edge backward.
+   * Continuous rotation angle. Never clamps during spin —
+   * during close it advances until the target boundary, then holds.
    * @param {number} now
    */
   function angleAt(now) {
     if (!armed || omega <= 0) return 0;
-    if (mode === 'spin') return spinAngleAt(now);
-    if (mode === 'closing') {
-      const spin = Math.min(spinAngleAt(now), closeTargetAngle);
-      return spin - ARC_SPAN + spanAt(now);
+    if (mode === 'spin') {
+      return (now - originMs) * omega;
     }
-    /* Sealed: head sits one full span past the locked tail. */
-    return closeTargetAngle - ARC_SPAN + TWO_PI;
+    if (mode === 'closing') {
+      const a = (now - originMs) * omega;
+      return Math.min(a, closeTargetAngle);
+    }
+    return closeTargetAngle;
   }
 
   /**
    * Begin the final closing revolution. Rotation continues forward at the
    * same rate for a full 360°. Span grows linearly with that forward travel
    * so the open gap seals without reversing or snapping.
-   * Begin the final closing revolution. Always takes one full forward
-   * turn from the current angle. The trailing edge keeps rotating at
-   * omega; the leading edge extends forward until the gap seals.
    * @param {number} now
    */
   function beginClose(now) {
@@ -113,9 +100,8 @@ export function createBootIndicator() {
     /* Always a full forward revolution — never the short backward path */
     let target = Math.floor(a / TWO_PI) * TWO_PI + TWO_PI;
     if (target <= a + 0.02) target += TWO_PI;
-    const a = spinAngleAt(now);
     closeStartAngle = a;
-    closeTargetAngle = a + TWO_PI;
+    closeTargetAngle = target;
     mode = 'closing';
   }
 
@@ -126,23 +112,22 @@ export function createBootIndicator() {
   function closeProgress(now) {
     if (mode === 'circle_hold' || mode === 'dissolve' || mode === 'off') return 1;
     if (mode !== 'closing') return 0;
-    const travel = closeTargetAngle - closeStartAngle;
-    if (travel <= 1e-6) return 1;
-    return clamp01((Math.min(spinAngleAt(now), closeTargetAngle) - closeStartAngle) / travel);
+    const span = closeTargetAngle - closeStartAngle;
+    if (span <= 1e-6) return 1;
+    return clamp01((angleAt(now) - closeStartAngle) / span);
   }
 
   function isClosed(now) {
     if (!armed) return true;
     if (mode === 'off' || mode === 'circle_hold' || mode === 'dissolve') return true;
     if (mode !== 'closing') return false;
-    return spinAngleAt(now) >= closeTargetAngle - 1e-4;
+    return (now - originMs) * omega >= closeTargetAngle - 1e-4;
   }
 
   /**
    * Arc span — grows from chase-tail to a sealed ring during the close.
    * Linear with forward head travel so the trailing tip never reverses
    * (eased span growth outran omega and drove the gap the wrong way).
-   * Growth is applied at the leading edge only (see angleAt).
    * @param {number} now
    */
   function spanAt(now) {
@@ -192,6 +177,9 @@ export function createBootIndicator() {
   function beginCircleHold(now, field) {
     if (!armed) return;
     if (mode === 'circle_hold' || mode === 'dissolve' || mode === 'off') return;
+    if (mode === 'closing') {
+      closeTargetAngle = Math.round(closeTargetAngle / TWO_PI) * TWO_PI;
+    }
     if (field && field.cols && field.rows) {
       circleCells = buildCircleCells(field.cols, field.rows);
     }

@@ -41,16 +41,12 @@ export function createPixelEngine(options = {}) {
         }];
   const canvas = surfaces[0] && surfaces[0].canvas;
   const stage = surfaces[0] && surfaces[0].stage;
-  const canvas = options.canvas || document.getElementById('heatmap');
-  const stage = options.stage || document.getElementById('stage');
-  const hitBounds =
-    options.hitBounds
-    || document.getElementById('pixel-fs-screen-1-bounds')
-    || document.getElementById('pixel-fs-screen-1')
-    || stage;
   if (!canvas || !stage) return null;
   const canvases = surfaces.map((surface) => surface.canvas);
   const stages = surfaces.map((surface) => surface.stage);
+  /* One screen-sized lattice is presented to every surface, so the primary
+     stage is the interactive band unless a caller narrows it. */
+  const hitBounds = options.hitBounds || stage;
 
   const prefersReduced =
     options.prefersReduced != null
@@ -80,9 +76,13 @@ export function createPixelEngine(options = {}) {
   const grid = createGridManager({ stage, hitBounds, events, cell: CELL });
   const state = createPixelStateManager({ grid, events });
   const renderer = createRenderer({ canvas, canvases, grid });
-  const interaction = createInteractionManager({ stage, stages, grid, events });
-  const renderer = createRenderer({ canvas, grid });
-  const interaction = createInteractionManager({ stage, hitBounds, grid, events });
+  const interaction = createInteractionManager({
+    stage,
+    stages,
+    hitBounds,
+    grid,
+    events,
+  });
   const performance = createPerformanceManager({
     animConfig: config.animConfig,
     events,

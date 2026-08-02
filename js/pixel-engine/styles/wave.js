@@ -958,6 +958,24 @@ export function createWaveStyle(deps) {
     events.on(PixelEvents.PointerLeft, () => {
       lastPtrX = lastPtrY = -1;
     });
+  } else {
+    document.addEventListener('mousemove', (e) => {
+      if (!enabled) return;
+      syncStageRect();
+      const x = e.clientX - stageLeft;
+      const y = e.clientY - stageTop;
+      const maxW = (grid && grid.hitW > 0) ? grid.hitW : viewW;
+      const maxH = (grid && grid.hitH > 0) ? grid.hitH : viewH;
+      if (x < 0 || y < 0 || x > maxW || y > maxH) {
+        lastPtrX = lastPtrY = -1;
+        return;
+      }
+      injectAt(x, y);
+    }, { passive: true });
+
+    document.documentElement.addEventListener('mouseleave', () => {
+      lastPtrX = lastPtrY = -1;
+    });
   }
 
   window.addEventListener('resize', resize, { passive: true });
@@ -965,24 +983,6 @@ export function createWaveStyle(deps) {
     const ro = new ResizeObserver(() => resize());
     ro.observe(stage);
   }
-
-  document.addEventListener('mousemove', (e) => {
-    if (!enabled) return;
-    syncStageRect();
-    const x = e.clientX - stageLeft;
-    const y = e.clientY - stageTop;
-    const maxW = (grid && grid.hitW > 0) ? grid.hitW : viewW;
-    const maxH = (grid && grid.hitH > 0) ? grid.hitH : viewH;
-    if (x < 0 || y < 0 || x > maxW || y > maxH) {
-      lastPtrX = lastPtrY = -1;
-      return;
-    }
-    injectAt(x, y);
-  }, { passive: true });
-
-  document.documentElement.addEventListener('mouseleave', () => {
-    lastPtrX = lastPtrY = -1;
-  });
 
   /* Measure grid now; paint only if Wave is already active */
   resize();

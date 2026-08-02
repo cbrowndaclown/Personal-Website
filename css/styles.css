@@ -2,13 +2,14 @@
    DESIGN TOKENS
    ============================================================ */
 :root {
-  /* Fonts */
-  --f-serif: 'Cormorant Garamond', Georgia, serif;
-  --f-sans:  'Josefin Sans', system-ui, sans-serif;
-  --f-mono:  'DM Mono', 'Courier New', monospace;
-  --f-ribbon: 'Benz Grotesk', 'Josefin Sans', system-ui, sans-serif;
-  --f-brand: 'Inktera Demo', 'Josefin Sans', system-ui, sans-serif;
-  --f-settings: 'Food Think', 'FOOD THINK', 'Josefin Sans', system-ui, sans-serif;
+  /* Fonts — Porca for all CSS/UI text; Pixel FS LEDs bake Josefin Sans in JS */
+  --f-ui: 'Porca', system-ui, sans-serif;
+  --f-serif: var(--f-ui);
+  --f-sans: var(--f-ui);
+  --f-mono: var(--f-ui);
+  --f-ribbon: var(--f-ui);
+  --f-brand: var(--f-ui);
+  --f-settings: var(--f-ui);
 
   /* Heatmap field */
   --heat-field: #D2D2D2;
@@ -19,7 +20,7 @@
   --accent-b: 158;
   --accent-rgb: 255, 52, 158;
 
-  /* Nav height — topnav parks via margin inside the ribbon frame */
+  /* Nav height — site-frame parks at -navH, reveals at 0 */
   --topnav-h: 58px;
   --topnav-divider: rgba(229, 229, 229, 0.5); /* #E5E5E5 @ 50% */
 
@@ -41,13 +42,13 @@ html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   height: 100%;
-  overflow: hidden; /* app-scroll owns scroll; ribbon never scrolls */
+  overflow: hidden; /* site-frame owns motion; no document scroll gap */
 }
 
 a    { text-decoration: none; color: inherit; }
 
 /* ============================================================
-   PAGE — viewport clip; ribbon frame stays fixed in the viewport
+   PAGE — viewport clip; unified site-frame moves as one surface
    ============================================================ */
 body {
   height: 100%;
@@ -59,33 +60,34 @@ body {
   margin: 0;
   padding: 0;
   overflow: hidden;
+  font-family: var(--f-ui);
 }
 
 /* ============================================================
-   SITE FRAME — Application host.
-   Ribbon chrome lives in .page-shell; screens scroll in .app-scroll.
+   SITE FRAME — nav + page shell as one column; sole transform target
+   Hidden:  translateY(-navH) → frame flush with viewport top
+   Revealed: translateY(0)    → nav slides in attached to the frame
    ============================================================ */
 .site-frame {
   position: relative;
   z-index: 10;
   width: 100%;
-  height: 100%;
-  min-height: 100%;
-  max-height: 100%;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   background-color: #FFFFFF;
-  overflow: hidden;
-  overscroll-behavior: none;
+  overflow: visible;
+  transform: translate3d(0, calc(var(--topnav-h) * -1), 0);
+  transition: transform 0.58s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.site-frame.is-nav-revealed {
+  transform: translate3d(0, 0, 0);
 }
 
 /* ============================================================
-   TOP NAV — Screen 1 chrome seated under the top ribbon band.
-   Lives in the ribbon frame (not the scroll host) so open/close never
-   escapes the permanent outer shell, and remains available on any screen.
-   Hidden:  margin-top -navH (clipped by the ribbon; scroll host fills chrome)
-   Revealed: margin-top 0     (scroll host yields space; ribbon stays put)
+   TOP NAV — first child of site-frame; zero gap to page-shell below
    ============================================================ */
 .topnav {
   flex: 0 0 var(--topnav-h);
@@ -96,9 +98,7 @@ body {
   position: relative;
   pointer-events: none;
   overflow: visible;
-  z-index: 50; /* below nameplate ribbon; settings panel stacks above */
-  margin-top: calc(var(--topnav-h) * -1);
-  opacity: 0;
+  z-index: 100; /* above nameplate ribbon so the dropdown covers it */
   /* Glass — same language as settings panel */
   background:
     linear-gradient(
@@ -113,16 +113,10 @@ body {
     inset 0 1px 0 rgba(255, 255, 255, 0.75);
   -webkit-backdrop-filter: blur(32px) saturate(1.4);
   backdrop-filter: blur(32px) saturate(1.4);
-  transition:
-    margin-top 0.58s cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 0.35s ease,
-    border-bottom-color 0.35s ease;
-  will-change: margin-top;
+  transition: border-bottom-color 0.35s ease;
 }
 
 .site-frame.is-nav-revealed .topnav {
-  margin-top: 0;
-  opacity: 1;
   pointer-events: auto;
   border-bottom-color: var(--topnav-divider);
 }
@@ -333,7 +327,6 @@ body {
   right: 0;
   bottom: auto;
   left: auto;
-  z-index: 120; /* above nameplate ribbon so the dropdown covers it */
   width: min(320px, calc(100vw - 32px));
   height: min(var(--settings-panel-h), calc(100dvh - var(--topnav-h) - 24px));
   max-height: min(var(--settings-panel-h), calc(100dvh - var(--topnav-h) - 24px));
@@ -1082,18 +1075,9 @@ body {
   --shell-flip-ms: 420ms;
   --shell-flip-ease: cubic-bezier(0.22, 0.61, 0.36, 1);
   --shell-flip-fade-ms: 140ms;
-   PAGE SHELL — Ribbon Frame: permanent outer shell.
-   Never a scroll container. Never translates independently of screens.
-   Chrome padding + nameplate stay fixed; .app-scroll moves content inside.
-   ============================================================ */
-.page-shell {
-  --shell-pad-top: clamp(27px, 3.5vh, 38px);
-  --shell-pad-bottom: var(--shell-pad-top);
-  --shell-pad-x: clamp(8px, 1.7vw, 24px);
-  --stage-radius: clamp(36px, 5.2vw, 68px);
 
   position: relative;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   width: 100%;
   height: 100vh;
   height: 100dvh;
@@ -1194,65 +1178,22 @@ body[data-boot] .app-scroll {
    STAGE — pixel field clipped to a squircle viewport.
    No border, stroke, or outer shadow — sharp field → white page.
    Screen 1 opens at the bottom; Screen 2 opens at the top.
-  height: 100%;
-  max-height: 100%;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  background-color: #FFFFFF;
-  /* Chrome band on all sides — room for the ribbon text in the padding.
-     overflow hidden so this frame can never become a scroller; nameplate
-     paints inside the padding box. */
-  padding: var(--shell-pad-top) var(--shell-pad-x) var(--shell-pad-bottom);
-  overflow: hidden;
-  overscroll-behavior: none;
-}
-
-/* ============================================================
-   APP SCROLL — sole primary vertical scroll container.
-   Moves Pixel FS Screen 1 ↔ Screen 2 inside the fixed ribbon frame.
    ============================================================ */
-.app-scroll {
+.stage {
+  --stage-radius: clamp(36px, 5.2vw, 68px);
+
   position: relative;
   flex: 1 1 auto;
   width: 100%;
   min-height: 0;
-  height: auto;
-  min-height: 0;
-  max-height: 100%;
-  display: block; /* block scrollport — avoids flex min-content blowing height */
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  -webkit-overflow-scrolling: touch;
-  scroll-behavior: auto;
-  scroll-snap-type: y mandatory;
-  background-color: transparent;
-  /* Screens size to this scrollport (not the tall stage). */
-  container-type: size;
-  container-name: pixel-fs;
-}
-
-/* ============================================================
-   STAGE — tall device content spanning every Pixel FS screen.
-   Pixel canvas paints the full lattice; screens sit above it.
-   Scrolls as a unit inside .app-scroll (ribbon frame stays put).
-   ============================================================ */
-.stage {
-  position: relative;
-  width: 100%;
   display: flex;
   flex-direction: column;
-  align-items: stretch;
   padding: 0;
-  background-color: var(--heat-field);
+  background: transparent;
   border: 0;
   box-shadow: none;
-  /* clip (not hidden) so screens remain snap targets of .app-scroll */
   overflow: hidden;
-  overflow: clip;
-  border-radius: var(--stage-radius, clamp(36px, 5.2vw, 68px));
+  border-radius: var(--stage-radius) var(--stage-radius) 0 0;
   corner-shape: squircle;
 }
 
@@ -1261,64 +1202,20 @@ body[data-boot] .app-scroll {
 }
 
 .stage__field {
-/* ============================================================
-   PIXEL FS SCREENS — each fills the app-scroll viewport exactly.
-   Native snap targets; JS syncs (screen × nav) on settle.
-   ============================================================ */
-.pixel-fs-screen {
-  position: relative;
-  z-index: 1;
-  /* 100% of the #app-scroll scrollport via container query */
-  flex: 0 0 100cqh;
-  width: 100%;
-  height: 100cqh;
-  min-height: 100cqh;
-  max-height: 100cqh;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  pointer-events: none; /* field interactions use document-level PE hit-testing */
-  scroll-snap-align: start;
-  scroll-snap-stop: always;
-}
-
-/* Fallback when container queries are unavailable — match ribbon chrome math. */
-@supports not (height: 100cqh) {
-  .page-shell {
-    --pixel-fs-screen-h: calc(100dvh - var(--shell-pad-top) - var(--shell-pad-bottom));
-  }
-  .site-frame.is-nav-revealed .page-shell {
-    --pixel-fs-screen-h: calc(
-      100dvh - var(--shell-pad-top) - var(--shell-pad-bottom) - var(--topnav-h)
-    );
-  }
-  .pixel-fs-screen {
-    flex-basis: var(--pixel-fs-screen-h);
-    height: var(--pixel-fs-screen-h);
-    min-height: var(--pixel-fs-screen-h);
-    max-height: var(--pixel-fs-screen-h);
-  }
-}
-
-.pixel-fs-screen__field {
   position: relative;
   flex: 1 1 auto;
   width: 100%;
-  min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  min-height: 420px;
   overflow: hidden;
-  background-color: transparent;
+  background-color: var(--heat-field);
   border: 0;
   box-shadow: none;
-  border-radius: 0;
-  padding: 0;
-}
 
-/* Hit-bounds marker for Pixel FS Screen 1 — no fill, measures the interactive band */
-.pixel-fs-screen__field--interactive {
+  border-radius: var(--stage-radius) var(--stage-radius) 0 0;
+  corner-shape: squircle;
+
   display: block;
+  padding: 0;
 }
 
 .stage__field--screen-2 {
@@ -1386,25 +1283,81 @@ body[data-boot] .app-scroll {
   white-space: nowrap;
 }
 
-/* While boot (directory assemble) is active, prefer hold-to-FF over scroll gestures */
-body[data-boot] #pixel-fs-screen-1 .stage__field {
-.pixel-fs-screen__label {
-  margin: 0;
-  font-family: var(--f-sans);
-  font-weight: 600;
-  font-size: clamp(0.92rem, 2vw, 1.2rem);
-  letter-spacing: 0.16em;
-  line-height: 1;
-  text-transform: none;
-  color: rgba(58, 50, 40, 0.28);
-  user-select: none;
+
+/* ============================================================
+   COMMAND PALETTE — Screen 2 "/" command box.
+   The box, its option stack, the typed entry and the caret are
+   LEDs on the shared Pixel FS grid, raised by the intro
+   controller. Nothing here paints: this layer only captures
+   keystrokes and carries the listbox for assistive tech.
+   Geometry (--cp-*) is written by JS from the baked LED metrics
+   so the hidden field sits where the pixel box is.
+   ============================================================ */
+.command-palette {
+  --cp-left: 0px;
+  --cp-center-y: 0px;
+  --cp-font: 16px;
+
+  position: absolute;
+  inset: 0;
+  z-index: 20;
   pointer-events: none;
 }
+
+/* Caret and glyphs are drawn as pixels — the field itself must not show. */
+.command-palette__input {
+  position: absolute;
+  left: var(--cp-left);
+  top: calc(var(--cp-center-y) - var(--cp-font) * 0.75);
+  width: calc(var(--cp-font) * 7.2);
+  height: calc(var(--cp-font) * 1.5);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  opacity: 0;
+  background: transparent;
+  font-size: var(--cp-font);
+  color: transparent;
+  caret-color: transparent;
+  pointer-events: none;
+}
+
+.command-palette__list {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  list-style: none;
+}
+
 
 /* ── App startup lock — shell isolation (geometry stays final) ────────────
    Screen 2 stays in layout so the stage lattice stays two screens tall.
    Scroll is locked at Screen 1; nav/settings are inert. No reflow. */
-body[data-app-startup] .stage {
+body[data-app-startup] .app-scroll {
+  overflow: hidden;
+  scroll-snap-type: none;
+  touch-action: none;
+}
+
+body[data-app-startup] #pixel-fs-screen-2 {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+body[data-app-startup] .topnav,
+body[data-app-startup] .topnav * {
+  pointer-events: none !important;
+}
+
+/* While boot (directory assemble) is active, prefer hold-to-FF over scroll gestures */
+body[data-boot] #pixel-fs-screen-1 .stage__field {
   touch-action: none;
   user-select: none;
 }
@@ -1419,37 +1372,11 @@ body[data-boot="self_test"] #pixel-fs-screen-1 .stage__field,
 body[data-boot="typography_construction"] #pixel-fs-screen-1 .stage__field,
 body[data-boot="typography"] #pixel-fs-screen-1 .stage__field,
 body[data-boot="stabilizing"] #pixel-fs-screen-1 .stage__field {
-body[data-app-startup] .app-scroll {
-  overflow: hidden;
-  scroll-snap-type: none;
-}
-
-/* Inaccessible, but still laid out — ribbon / lattice geometry never shrinks. */
-body[data-app-startup] .pixel-fs-screen--2 {
-  visibility: hidden;
-  pointer-events: none;
-}
-
-/* Top nav + settings stay visible in final shape but are fully inert. */
-body[data-app-startup] .topnav,
-body[data-app-startup] .topnav * {
-  pointer-events: none !important;
-}
-
-/* Energy / self-test boot — Screen 1 lattice visuals only (data-boot).
-   Does not own scroll, nav, or Screen 2. Cleared when exclusive boot ends. */
-body[data-boot="powering_on"] .stage,
-body[data-boot="grid_generation"] .stage,
-body[data-boot="calibration"] .stage,
-body[data-boot="display_clear"] .stage,
-body[data-boot="self_test"] .stage,
-body[data-boot="typography_construction"] .stage,
-body[data-boot="stabilizing"] .stage {
   background-color: #000000;
 }
 
 /* ============================================================
-   HEATMAP — fine pixel grid covering the full device shell.
+   HEATMAP — fine pixel grid inside the clipped stage only.
    Elastic pressure field: pink under soft cursor force, cool gray at rest.
    ============================================================ */
 .heatmap {
@@ -1467,7 +1394,7 @@ body[data-motion="off"] .heatmap {
   display: none !important;
 }
 
-body[data-motion="off"] .stage {
+body[data-motion="off"] .stage__field {
   background-color: var(--heat-field);
 }
 
@@ -1523,7 +1450,7 @@ body[data-motion="on"][data-bg-mode="lightning"] .lightning-cursor.is-in-field {
   position: absolute;
   top: 0;
   left: 0;
-  z-index: 90; /* above topnav chrome; settings panel stacks higher */
+  z-index: 90;
   pointer-events: none;
   margin: 0;
   padding: 0;
@@ -1544,9 +1471,6 @@ body[data-motion="on"][data-bg-mode="lightning"] .lightning-cursor.is-in-field {
   display: block;
   overflow: visible;
   pointer-events: none;
-  /* Own compositor layer — isolates per-frame startOffset paints */
-  transform: translateZ(0);
-  backface-visibility: hidden;
 }
 
 .nameplate__text {
@@ -1557,10 +1481,28 @@ body[data-motion="on"][data-bg-mode="lightning"] .lightning-cursor.is-in-field {
 }
 
 /* ============================================================
+   FOOTER — pinned to base of the page shell, near-invisible
+   ============================================================ */
+.site-footer {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 20px 44px;
+  text-align: center;
+  font-family: var(--f-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.10em;
+  color: rgba(58, 50, 40, 0.22);
+  pointer-events: none;
+  z-index: 50;
+}
+
+/* ============================================================
    RESPONSIVE
    ============================================================ */
 @media (max-width: 1024px) {
-  .page-shell {
+  .stage {
     --stage-radius: clamp(28px, 4.5vw, 48px);
   }
 
@@ -1586,6 +1528,7 @@ body[data-motion="on"][data-bg-mode="lightning"] .lightning-cursor.is-in-field {
   .nameplate__text { font-size: 16px; }
   .topnav__brand { font-size: 16px; }
   .topnav__link { font-size: 13px; letter-spacing: 0.06em; }
+  .site-footer { padding: 16px 20px; }
   .settings__btn { width: 36px; height: 36px; }
 
   .page-shell {
@@ -1604,9 +1547,6 @@ body[data-motion="on"][data-bg-mode="lightning"] .lightning-cursor.is-in-field {
   }
 
   .stage {
-    --shell-pad-top: 25px;
-    --shell-pad-bottom: 25px;
-    --shell-pad-x: clamp(4px, 1.35vw, 8px);
     --stage-radius: 28px;
   }
 }

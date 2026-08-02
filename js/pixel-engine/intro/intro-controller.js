@@ -3,9 +3,6 @@
    glyph construction, migration, Screen 1 directory assemble, Screen 2 menu
    assemble, and idle float — one shared PE LED typography pipeline.
 
-   Directory assemble supports Standard timing, density-rebuild timing, and
-   Space-skip Magnetic Lock (displaced menu pixels snap into alignment).
-
    Lattice geometry (cols / rows / cell) is adopted from the shared GridManager
    or the density-rebuild authority — never invented from pending Settings. */
 
@@ -150,6 +147,9 @@ export function createIntroController(deps) {
     if (info.cell > 0) ledCell = Number(info.cell);
     else if (sharedGrid && sharedGrid.cell > 0) ledCell = sharedGrid.cell;
     idleYCache = null;
+    /* Command overlay buffers are lattice-sized; the Screen 2 rebake that
+       follows a grid change re-raises them at the new pitch. */
+    if (cmdOn && cmdOn.length !== cols * rows) releaseCommandBuffers();
   }
 
   const INTRO_LINES = [
@@ -168,14 +168,47 @@ export function createIntroController(deps) {
      Only content and dual-region positions differ.
      Arrows are intentionally smaller than Screen 1 directory chevrons. */
   const S2_ARROW_SCALE = 0.78;
+  /* `key` marks a line the command layer can measure and mask.
+     `prefix` is the leading run that survives masking — the LED "/" stays
+     lit while everything after it clears for the command box. */
   const S2_LINES = [
     { text: 'Scroll up for header / top grid', region: 'top',    align: 'center', arrow: 'up',   pace: 1.20 },
-    { text: '/ for options',                   region: 'bottom', align: 'left',   pace: 1.00 },
+    { text: '/ for options',                   region: 'bottom', align: 'left',   pace: 1.00, key: 'options', prefix: '/' },
     { text: 'Scroll down for more',            region: 'bottom', align: 'left',   arrow: 'down', pace: 1.15 },
   ];
 
   const DIR_FONT =
     '"Josefin Sans", "Apple Symbols", "Segoe UI Symbol", "Noto Sans Symbols", system-ui, sans-serif';
+
+  /*
+    Screen 2 command overlay — the "/" box is LED typography like every other
+    Screen 2 line. Box chrome, option rows, typed entry and caret are baked
+    into the lattice and composited in brightness(), so nothing about the
+    command layer sits on top of the display as DOM.
+
+    Box chrome snaps to whole LED cells (1-cell stroke). Entry text sits
+    between the menu line and the option stack; the prompt slash is redrawn
+    at entry size so it matches what you type.
+  */
+  const CMD_BOX_W_EM      = 7.2;  /* × entryFontPx — sized for CMD_MAX_ENTRY chars */
+  const CMD_ENTRY_SCALE   = 0.85; /* × menu fontPx — box prompt + typed entry */
+  const CMD_OPTION_SCALE  = 0.68; /* × menu fontPx */
+  const CMD_ROW_STRIDE    = 1.42; /* × optionFontPx */
+  const CMD_LIST_GAP      = 0.75; /* × optionFontPx, box top → bottom row */
+  const CMD_HINT_LEVEL    = 0.5;
+  const CMD_BOX_LEVEL     = 0.82;
+  const CMD_DIM_LEVEL     = 0.45; /* unmatched rows while a command matches */
+  const CMD_BOX_MS        = 120;  /* box leads, rows follow */
+  const CMD_ROW_STAGGER   = 55;   /* each row leaves the box after the one below */
+  const CMD_REVEAL_MS     = 240;  /* L→R wave across one row */
+  const CMD_JITTER_MS     = 26;
+  const CMD_MIGRATE_MS    = 220;
+  const CMD_DRIFT_MIN     = 4;
+  const CMD_DRIFT_MAX     = 12;
+  const CMD_CARET_MS      = 1060;
+  const CMD_MAX_ENTRY     = 10;
+  const CMD_CLOSE_MS      = 240;  /* fade + outward pop on dismiss */
+  const CMD_CLOSE_POP     = 0.9;  /* drift scale while closing */
 
   /* ── controller state ─────────────────────────────────────────────────── */
   let phase = 'idle'; /* typography | directory | idle | skipped | dissolving */
@@ -232,6 +265,41 @@ export function createIntroController(deps) {
   /* Immutable completed glyph bitmap — idle never writes here */
   let dBitmap = null;
   let idleYCache = null; /* scratch: per-word Y for the current frame */
+
+  /* Per-cell suppression flag — masked LEDs stay baked but never render.
+     Lets the command layer clear "for options" without dropping the bake. */
+  let dHide = null;
+  /* Per-word idle-float freeze — the prompt glyph holds still inside the
+     command box instead of drifting against its static LED frame. */
+  let dPinWord = null;
+  /* Grid-space geometry of keyed Screen 2 lines, refreshed on every bake. */
+  /** @type {Map<string, object>} */
+  const s2LineMetrics = new Map();
+  /* Keys currently masked after their prefix — reapplied across rebakes. */
+  /** @type {Set<string>} */
+  const s2MaskedKeys = new Set();
+
+  /* Command overlay — LED buffers for the "/" box, its options and entry. */
+  let cmdOpen = false;
+  let cmdClosing = false;
+  let cmdCloseWall = 0;
+  /** @type {null | (() => void)} */
+  let cmdCloseDone = null;
+  let cmdKey = null;
+  /** @type {{ name: string, hint?: string }[]} */
+  let cmdOptions = [];
+  let cmdText = '';
+  let cmdChrome = null;   /* box + option glyph levels */
+  let cmdChromeAt = null; /* per-cell assemble time (ms since open) */
+  let cmdRow = null;      /* 0 = box chrome, 1..N = option rows */
+  let cmdRowMul = null;   /* per-row level multiplier — match emphasis */
+  let cmdDriftX = null, cmdDriftY = null;
+  let cmdEntry = null;    /* typed text */
+  let cmdCaret = null;    /* caret bar */
+  let cmdOn = null, cmdOx = null, cmdOy = null;
+  let cmdStartWall = 0;
+  let cmdCaretWall = 0;
+  let cmdEntryAt = 0;
 
   /* Space-skip Magnetic Lock — edge-displaced converge + lock flash + shock */
   let directoryMagLock = false;
@@ -509,36 +577,9 @@ export function createIntroController(deps) {
     ledCell = layout.cell;
   }
 
-  /**
-   * Rows covering Pixel FS Screen 1 only — intro / directory stay composed in the
-   * landing viewport while the lattice paints the full device shell.
-   */
-  function resolveContentRows() {
-    if (sharedGrid && sharedGrid.contentRows > 0) {
-      return Math.max(1, Math.min(rows, sharedGrid.contentRows | 0));
-    }
-    const host =
-      document.getElementById('pixel-fs-screen-1-bounds')
-      || document.getElementById('pixel-fs-screen-1');
-    if (host && rows > 0) {
-      const cell = getLedCell();
-      const rect = host.getBoundingClientRect();
-      const layout = computeGridLayout(rect.width, rect.height, cell);
-      return Math.max(1, Math.min(rows, layout.rows));
-    }
-    return rows;
-  }
-
-  /** Active sample height for glyph baking (Pixel FS Screen 1 band). */
-  let sampleH = 0;
-
-  /**
-   * Intro must not write data-boot — that attribute is PE exclusive-boot
-   * visuals only. Shell unlock is owned by clearAppStartup().
-   * @param {string|null|undefined} _flag
-   */
-  function setBoot(_flag) {
-    void _flag;
+  function setBoot(flag) {
+    if (flag) document.body.dataset.boot = flag;
+    else delete document.body.dataset.boot;
   }
 
   function isActivePhase() {
@@ -625,6 +666,7 @@ export function createIntroController(deps) {
    * Preserves only caller-owned settings (animConfig).
    */
   function destroyGridState() {
+    closeScreen2Command({ instant: true });
     clearDissolveTimer();
     destroyIntroLeds();
     clearDirectoryLeds();
@@ -660,9 +702,8 @@ export function createIntroController(deps) {
   }
 
   function sampleLineGlyphs(octx, text, cx, cy) {
-    const h = sampleH > 0 ? sampleH : rows;
     octx.fillStyle = '#000';
-    octx.fillRect(0, 0, cols, h);
+    octx.fillRect(0, 0, cols, rows);
     octx.fillStyle = '#fff';
     octx.textAlign = 'center';
     octx.textBaseline = 'middle';
@@ -672,10 +713,10 @@ export function createIntroController(deps) {
        threshold on the coarse grid — stamp a small solid glyph so they read. */
     reinforceTrailingPunct(octx, text, cx, cy);
 
-    const data = octx.getImageData(0, 0, cols, h).data;
+    const data = octx.getImageData(0, 0, cols, rows).data;
     const glyph = [];
-    let minX = cols, maxX = -1, minY = h, maxY = -1;
-    for (let i = 0, n = cols * h; i < n; i++) {
+    let minX = cols, maxX = -1, minY = rows, maxY = -1;
+    for (let i = 0, n = cols * rows; i < n; i++) {
       if (data[i * 4] <= 140) continue;
       glyph.push(i);
       const x = i % cols;
@@ -750,21 +791,18 @@ export function createIntroController(deps) {
 
     if (cols < 16 || rows < 16) return;
 
-    sampleH = resolveContentRows();
-    if (sampleH < 16) return;
-
     const off = document.createElement('canvas');
     off.width = cols;
-    off.height = sampleH;
+    off.height = rows;
     const octx = off.getContext('2d', { alpha: false });
     if (!octx) return;
 
     const lineCount = INTRO_LINES.length;
-    let fontPx = Math.max(5, Math.floor(sampleH * 0.085));
+    let fontPx = Math.max(5, Math.floor(rows * 0.085));
     fontPx = fitIntroFont(octx, INTRO_LINES, cols * 0.90, fontPx);
 
     let lineGap = fontPx * 1.55;
-    while (lineGap * (lineCount - 1) > sampleH * 0.72 && fontPx > 4) {
+    while (lineGap * (lineCount - 1) > rows * 0.72 && fontPx > 4) {
       fontPx -= 1;
       octx.font = `600 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
       lineGap = fontPx * 1.55;
@@ -774,7 +812,7 @@ export function createIntroController(deps) {
     lineGap = fontPx * 1.55;
 
     const blockH = lineGap * (lineCount - 1);
-    const startY = sampleH * 0.5 - blockH * 0.5;
+    const startY = rows * 0.5 - blockH * 0.5;
     const cx = cols * 0.5;
 
     let cursor = 0;
@@ -1012,15 +1050,12 @@ export function createIntroController(deps) {
     dWordId = null;
     dIdleWords = [];
     dBitmap = null;
+    dHide = null;
+    dPinWord = null;
     idleYCache = null;
     assembleMs = 0;
   }
 
-  function arrowSizeFor(fontPx, scale) {
-    const s = scale != null ? scale : 1.15;
-    /* Screen 1 keeps the larger chevron; Screen 2 passes a sub-1 scale. */
-    if (s >= 1) return Math.max(fontPx * s, fontPx + 2);
-    return Math.max(2, fontPx * s);
   /**
    * Convergence remain (1 → 0). Ease-in accelerates into alignment; the last
    * fraction snaps hard — mechanical stop, not a soft settle.
@@ -1209,8 +1244,11 @@ export function createIntroController(deps) {
     return true;
   }
 
-  function arrowSizeFor(fontPx) {
-    return Math.max(fontPx * 1.15, fontPx + 2);
+  function arrowSizeFor(fontPx, scale) {
+    const s = scale != null ? scale : 1.15;
+    /* Screen 1 keeps the larger chevron; Screen 2 passes a sub-1 scale. */
+    if (s >= 1) return Math.max(fontPx * s, fontPx + 2);
+    return Math.max(2, fontPx * s);
   }
 
   function lineLayoutWidth(octx, line, fontPx, arrowScale) {
@@ -1276,10 +1314,8 @@ export function createIntroController(deps) {
     const align = (opts && opts.align) || 'center';
     const arrowScale = opts && opts.arrowScale;
 
-  function sampleLineWithArrow(octx, line, cx, cy, fontPx) {
-    const h = sampleH > 0 ? sampleH : rows;
     octx.fillStyle = '#000';
-    octx.fillRect(0, 0, cols, h);
+    octx.fillRect(0, 0, cols, rows);
     octx.fillStyle = '#fff';
     octx.font = `600 ${fontPx}px ${DIR_FONT}`;
     octx.textAlign = 'left';
@@ -1312,10 +1348,10 @@ export function createIntroController(deps) {
       );
     }
 
-    const data = octx.getImageData(0, 0, cols, h).data;
+    const data = octx.getImageData(0, 0, cols, rows).data;
     const glyph = [];
-    let minX = cols, maxX = -1, minY = h, maxY = -1;
-    for (let i = 0, n = cols * h; i < n; i++) {
+    let minX = cols, maxX = -1, minY = rows, maxY = -1;
+    for (let i = 0, n = cols * rows; i < n; i++) {
       if (data[i * 4] <= 140) continue;
       glyph.push(i);
       const gx = i % cols;
@@ -1364,28 +1400,26 @@ export function createIntroController(deps) {
     dOy = new Float32Array(n);
     dWordId = new Int16Array(n);
     dWordId.fill(-1);
+    dHide = new Uint8Array(n);
     dIdleWords = [];
     dBitmap = null;
+    s2LineMetrics.clear();
     assembleMs = 0;
-    directoryMagLock = false;
 
     if (cols < 16 || rows < 16) return;
 
-    sampleH = resolveContentRows();
-    if (sampleH < 16) return;
-
     const off = document.createElement('canvas');
     off.width = cols;
-    off.height = sampleH;
+    off.height = rows;
     const octx = off.getContext('2d', { alpha: false });
     if (!octx) return;
 
     const lineCount = DIR_LINES.length;
-    let fontPx = Math.max(5, Math.floor(sampleH * 0.078));
+    let fontPx = Math.max(5, Math.floor(rows * 0.078));
     fontPx = fitDirFont(octx, DIR_LINES, cols * 0.90, fontPx);
 
     let lineGap = fontPx * 1.85;
-    while (lineGap * (lineCount - 1) > sampleH * 0.46 && fontPx > 4) {
+    while (lineGap * (lineCount - 1) > rows * 0.46 && fontPx > 4) {
       fontPx -= 1;
       lineGap = fontPx * 1.85;
     }
@@ -1394,7 +1428,7 @@ export function createIntroController(deps) {
     lineGap = fontPx * 1.85;
 
     const blockH = lineGap * (lineCount - 1);
-    const startY = sampleH * 0.5 - blockH * 0.5;
+    const startY = rows * 0.5 - blockH * 0.5;
     const cx = cols * 0.5;
     let cursor = 0;
 
@@ -1528,6 +1562,555 @@ export function createIntroController(deps) {
     freezeDirectoryBitmap();
   }
 
+  /*
+    Rebuild dHide from the masked-key set. Masking is geometric — the whole
+    keyed line goes dark (prefix included) so the command layer can redraw
+    the prompt slash at entry size. Survives rebakes without re-measure.
+  */
+  function applyS2Masks() {
+    if (!dHide) return;
+    dHide.fill(0);
+    if (!s2MaskedKeys.size) return;
+    s2MaskedKeys.forEach((key) => {
+      const m = s2LineMetrics.get(key);
+      if (!m) return;
+      const pad = Math.max(2, Math.round(m.fontPx * 0.35));
+      const x0 = Math.max(0, Math.round(m.minX) - pad);
+      const x1 = Math.min(cols - 1, Math.round(m.maxX) + pad);
+      const y0 = Math.max(0, Math.round(m.minY) - pad);
+      const y1 = Math.min(rows - 1, Math.round(m.maxY) + pad);
+      for (let y = y0; y <= y1; y++) {
+        for (let x = x0; x <= x1; x++) dHide[y * cols + x] = 1;
+      }
+    });
+  }
+
+  /**
+   * Grid-space geometry of a keyed Screen 2 line, or null when Screen 2
+   * content is not currently baked into the shared directory buffers.
+   * @param {string} key
+   */
+  function getScreen2LineMetrics(key) {
+    if (menuSurface !== 2) return null;
+    const m = s2LineMetrics.get(key);
+    return m ? { ...m } : null;
+  }
+
+  /**
+   * Clear (or restore) a keyed Screen 2 line while the command box owns it.
+   * @param {string} key
+   * @param {boolean} masked
+   */
+  function setScreen2LineMasked(key, masked) {
+    if (masked) s2MaskedKeys.add(key);
+    else s2MaskedKeys.delete(key);
+    applyS2Masks();
+  }
+
+  /* ── Screen 2 command overlay ─────────────────────────────────────────── */
+
+  function releaseCommandBuffers() {
+    cmdChrome = null;
+    cmdChromeAt = null;
+    cmdRow = null;
+    cmdRowMul = null;
+    cmdDriftX = null;
+    cmdDriftY = null;
+    cmdEntry = null;
+    cmdCaret = null;
+    cmdOn = null;
+    cmdOx = null;
+    cmdOy = null;
+  }
+
+  function commandContext() {
+    if (!(cols > 0) || !(rows > 0)) return null;
+    const off = document.createElement('canvas');
+    off.width = cols;
+    off.height = rows;
+    const octx = off.getContext('2d', { alpha: false });
+    if (!octx) return null;
+    octx.font = `600 ${commandFontPx()}px ${DIR_FONT}`;
+    octx.textAlign = 'left';
+    octx.textBaseline = 'middle';
+    return octx;
+  }
+
+  /** Entry / prompt size in grid units (between menu and options). */
+  function commandFontPx() {
+    const m = s2LineMetrics.get(cmdKey);
+    if (!m || !(m.fontPx > 0)) return 0;
+    return Math.max(5, Math.round(m.fontPx * CMD_ENTRY_SCALE));
+  }
+
+  /**
+   * Box + entry geometry in grid units, derived from the keyed line the
+   * command layer opened against. The prompt slash is redrawn at entry size
+   * inside the box; typed text resumes after it.
+   * Dimensions are whole cells so the frame lands on the lattice.
+   */
+  function commandGeometry() {
+    const m = s2LineMetrics.get(cmdKey);
+    if (!m || !(m.fontPx > 0)) return null;
+    const menuFontPx = m.fontPx;
+    const entryFontPx = Math.max(5, Math.round(menuFontPx * CMD_ENTRY_SCALE));
+    const optionFontPx = Math.max(4, Math.round(menuFontPx * CMD_OPTION_SCALE));
+    const padX = Math.max(2, Math.round(entryFontPx * 0.28));
+    const padY = Math.max(1, Math.round(entryFontPx * 0.16));
+    const boxH = Math.max(3, entryFontPx + padY * 2);
+    const boxW = Math.max(8, Math.round(entryFontPx * CMD_BOX_W_EM));
+    const radius = Math.max(1, Math.round(entryFontPx * 0.22));
+    const boxLeft = Math.round(m.minX) - padX;
+    const boxTop = Math.round(m.cy - boxH * 0.5);
+    const promptX = m.startX;
+    return {
+      fontPx: entryFontPx,
+      menuFontPx,
+      entryFontPx,
+      optionFontPx,
+      padX,
+      boxH,
+      boxLeft,
+      boxTop,
+      boxW,
+      radius,
+      cy: m.cy,
+      promptX,
+      entryX: promptX, /* refined in bakeCommandEntry after measuring '/' */
+    };
+  }
+
+  function roundRectPath(c, x, y, w, h, r) {
+    const rad = Math.max(0, Math.min(r, w * 0.5, h * 0.5));
+    if (typeof c.roundRect === 'function') {
+      c.beginPath();
+      c.roundRect(x, y, w, h, rad);
+      return;
+    }
+    c.beginPath();
+    c.moveTo(x + rad, y);
+    c.arcTo(x + w, y, x + w, y + h, rad);
+    c.arcTo(x + w, y + h, x, y + h, rad);
+    c.arcTo(x, y + h, x, y, rad);
+    c.arcTo(x, y, x + w, y, rad);
+    c.closePath();
+  }
+
+  /**
+   * Rasterize one overlay element into a level buffer. When `rowStart` is a
+   * number the lit cells also receive the directory assemble language —
+   * left→right wave plus an outward spawn offset they migrate home from.
+   * @param {CanvasRenderingContext2D} octx
+   * @param {Float32Array} level
+   * @param {(c: CanvasRenderingContext2D) => void} draw
+   * @param {number} lv
+   * @param {number|null} rowStart
+   * @param {number} rowId  -1 leaves row tagging untouched
+   * @param {number} [ink]  Coverage a cell needs to count as lit
+   */
+  function stampCommandPass(octx, level, draw, lv, rowStart, rowId, ink) {
+    const cut = ink != null ? ink : 140;
+    octx.fillStyle = '#000';
+    octx.fillRect(0, 0, cols, rows);
+    octx.fillStyle = '#fff';
+    octx.strokeStyle = '#fff';
+    draw(octx);
+
+    const data = octx.getImageData(0, 0, cols, rows).data;
+    const n = cols * rows;
+    const hits = [];
+    let minX = cols;
+    let maxX = -1;
+    let sumX = 0;
+    let sumY = 0;
+    for (let i = 0; i < n; i++) {
+      if (data[i * 4] <= cut) continue;
+      hits.push(i);
+      const x = i % cols;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      sumX += x;
+      sumY += (i / cols) | 0;
+    }
+    if (!hits.length) return;
+
+    const spanX = Math.max(1, maxX - minX);
+    const midX = sumX / hits.length;
+    const midY = sumY / hits.length;
+
+    for (let h = 0; h < hits.length; h++) {
+      const i = hits[h];
+      if (lv > level[i]) level[i] = lv;
+      if (rowId >= 0 && cmdRow) cmdRow[i] = rowId;
+      if (rowStart == null || !cmdChromeAt) continue;
+      const x = i % cols;
+      const y = (i / cols) | 0;
+      const xNorm = (x - minX) / spanX;
+      const jitter = (hash01(i, 0xa71) - 0.5) * CMD_JITTER_MS;
+      cmdChromeAt[i] = Math.max(
+        rowStart,
+        rowStart + xNorm * CMD_REVEAL_MS + jitter
+      );
+      let ang = Math.atan2(y - midY, x - midX);
+      if (!isFinite(ang)) ang = hash01(i, 0xa74) * Math.PI * 2;
+      ang += (hash01(i, 0xa72) - 0.5) * 0.9;
+      const dist =
+        CMD_DRIFT_MIN + hash01(i, 0xa73) * (CMD_DRIFT_MAX - CMD_DRIFT_MIN);
+      cmdDriftX[i] = Math.cos(ang) * dist;
+      cmdDriftY[i] = Math.sin(ang) * dist;
+    }
+  }
+
+  /**
+   * Bake box chrome and the option stack. Rows assemble bottom-to-top so the
+   * list reads as rising out of the box.
+   * @param {boolean} instant
+   */
+  function bakeCommandChrome(instant) {
+    const geo = commandGeometry();
+    if (!geo) return false;
+    const octx = commandContext();
+    if (!octx) return false;
+
+    const n = cols * rows;
+    cmdChrome = new Float32Array(n);
+    cmdChromeAt = new Float32Array(n);
+    cmdRow = new Uint8Array(n);
+    cmdDriftX = new Float32Array(n);
+    cmdDriftY = new Float32Array(n);
+    cmdEntry = new Float32Array(n);
+    cmdCaret = new Float32Array(n);
+    cmdOn = new Float32Array(n);
+    cmdOx = new Float32Array(n);
+    cmdOy = new Float32Array(n);
+    cmdRowMul = new Float32Array(cmdOptions.length + 1).fill(1);
+
+    /* Whole-cell frame + 1-LED stroke — edges read as lattice, not a smear. */
+    const bx = geo.boxLeft + 0.5;
+    const by = geo.boxTop + 0.5;
+    const bw = Math.max(4, geo.boxW - 1);
+    const bh = Math.max(3, geo.boxH - 1);
+    stampCommandPass(
+      octx,
+      cmdChrome,
+      (c) => {
+        c.lineWidth = 1;
+        c.lineJoin = 'round';
+        roundRectPath(c, bx, by, bw, bh, geo.radius);
+        c.stroke();
+      },
+      CMD_BOX_LEVEL,
+      instant ? null : 0,
+      0,
+      80
+    );
+
+    /* Prompt slash at entry size — menu glyph is masked so sizes match. */
+    const entryFont = geo.entryFontPx;
+    stampCommandPass(
+      octx,
+      cmdChrome,
+      (c) => {
+        c.font = `600 ${entryFont}px ${DIR_FONT}`;
+        c.fillText('/', geo.promptX, geo.cy);
+      },
+      1,
+      instant ? null : 0,
+      0
+    );
+
+    const count = cmdOptions.length;
+    const optFont = geo.optionFontPx;
+    octx.font = `600 ${optFont}px ${DIR_FONT}`;
+    const rowStride = optFont * CMD_ROW_STRIDE;
+    const bottomCy = geo.boxTop - optFont * CMD_LIST_GAP - optFont * 0.5;
+    const nameX = geo.boxLeft + geo.padX;
+    let nameCol = 0;
+    for (let r = 0; r < count; r++) {
+      nameCol = Math.max(nameCol, octx.measureText(cmdOptions[r].name).width);
+    }
+    nameCol += optFont * 0.85;
+
+    for (let r = 0; r < count; r++) {
+      const cy = bottomCy - (count - 1 - r) * rowStride;
+      const start = CMD_BOX_MS + (count - 1 - r) * CMD_ROW_STAGGER;
+      const opt = cmdOptions[r];
+      stampCommandPass(
+        octx,
+        cmdChrome,
+        (c) => {
+          c.font = `600 ${optFont}px ${DIR_FONT}`;
+          c.fillText(opt.name, nameX, cy);
+        },
+        1,
+        instant ? null : start,
+        r + 1
+      );
+      if (opt.hint) {
+        stampCommandPass(
+          octx,
+          cmdChrome,
+          (c) => {
+            c.font = `600 ${optFont}px ${DIR_FONT}`;
+            c.fillText(opt.hint, nameX + nameCol, cy);
+          },
+          CMD_HINT_LEVEL,
+          instant ? null : start + 40,
+          r + 1
+        );
+      }
+    }
+
+    cmdEntryAt = instant ? 0 : CMD_BOX_MS + CMD_REVEAL_MS * 0.5;
+    return true;
+  }
+
+  /**
+   * Freeze idle float on every word of the line the box grew from, so the
+   * surviving prompt glyph stays centered in its frame.
+   * @param {boolean} pinned
+   */
+  function setCommandLinePinned(pinned) {
+    dPinWord = null;
+    if (!pinned || !dWordId || !dIdleWords.length) return;
+    const m = s2LineMetrics.get(cmdKey);
+    if (!m) return;
+    const pad = Math.max(2, Math.round(m.fontPx * 0.35));
+    const x0 = Math.max(0, Math.round(m.minX) - pad);
+    const x1 = Math.min(cols - 1, Math.round(m.maxX) + pad);
+    const y0 = Math.max(0, Math.round(m.minY) - pad);
+    const y1 = Math.min(rows - 1, Math.round(m.maxY) + pad);
+    const pins = new Uint8Array(dIdleWords.length);
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const wid = dWordId[y * cols + x];
+        if (wid >= 0 && wid < pins.length) pins[wid] = 1;
+      }
+    }
+    dPinWord = pins;
+  }
+
+  /** Re-rasterize typed entry + caret. Instant — typing never re-assembles. */
+  function bakeCommandEntry() {
+    const geo = commandGeometry();
+    if (!geo || !cmdEntry || !cmdCaret) return;
+    const octx = commandContext();
+    if (!octx) return;
+
+    cmdEntry.fill(0);
+    cmdCaret.fill(0);
+
+    const entryFont = geo.entryFontPx;
+    octx.font = `600 ${entryFont}px ${DIR_FONT}`;
+    const promptW = octx.measureText('/').width;
+    const entryX = geo.promptX + promptW;
+    const text = cmdText;
+    const textW = text ? octx.measureText(text).width : 0;
+    if (text) {
+      stampCommandPass(
+        octx,
+        cmdEntry,
+        (c) => {
+          c.font = `600 ${entryFont}px ${DIR_FONT}`;
+          c.fillText(text, entryX, geo.cy);
+        },
+        1,
+        null,
+        -1
+      );
+    }
+
+    /* Whole cells only — a fractional bar antialiases into a dim smear. */
+    const caretX = Math.round(entryX + textW + entryFont * 0.12);
+    const caretY = Math.round(geo.cy - entryFont * 0.55);
+    const caretW = Math.max(1, Math.round(entryFont * 0.16) - 1);
+    const caretH = Math.max(3, Math.round(entryFont * 1.1));
+    stampCommandPass(
+      octx,
+      cmdCaret,
+      (c) => c.fillRect(caretX, caretY, caretW, caretH),
+      1,
+      null,
+      -1
+    );
+  }
+
+  /** Rebake in place — resize / density keeps the box open and settled. */
+  function rebakeCommandOverlay() {
+    if (!cmdOpen || cmdClosing) return;
+    if (!bakeCommandChrome(true)) {
+      releaseCommandBuffers();
+      return;
+    }
+    bakeCommandEntry();
+    setCommandLinePinned(true);
+  }
+
+  /**
+   * Composite the overlay for this frame: assemble wave, match emphasis,
+   * typed entry, blinking caret — or the dismiss fade/pop.
+   * @param {number} wall
+   */
+  function updateCommandOverlay(wall) {
+    if (!cmdOpen || !cmdOn || cmdOn.length !== cols * rows) return false;
+    const n = cols * rows;
+    cmdOn.fill(0);
+    cmdOx.fill(0);
+    cmdOy.fill(0);
+
+    /* Dismiss: reverse the assemble drift while fading out. */
+    if (cmdClosing) {
+      const u = Math.min(1, (wall - cmdCloseWall) / CMD_CLOSE_MS);
+      const e = easeOutCubic(u);
+      const fade = 1 - e;
+      for (let i = 0; i < n; i++) {
+        let level = 0;
+        const lv = cmdChrome[i];
+        if (lv > 0) level = lv * cmdRowMul[cmdRow[i]];
+        if (cmdEntry[i] > level) level = cmdEntry[i];
+        if (!(level > 0)) continue;
+        cmdOn[i] = level * fade;
+        cmdOx[i] = cmdDriftX[i] * e * CMD_CLOSE_POP;
+        cmdOy[i] = cmdDriftY[i] * e * CMD_CLOSE_POP;
+      }
+      if (u >= 1) {
+        finishCommandClose();
+        return false;
+      }
+      return true;
+    }
+
+    const t = wall - cmdStartWall;
+    const entryVisible = t >= cmdEntryAt;
+    const caretPhase = (wall - cmdCaretWall) % CMD_CARET_MS;
+    const caretLit = entryVisible && caretPhase < CMD_CARET_MS * 0.55;
+
+    for (let i = 0; i < n; i++) {
+      const lv = cmdChrome[i];
+      if (lv > 0) {
+        const at = cmdChromeAt[i];
+        if (t >= at) {
+          const e = easeOutCubic(Math.min(1, (t - at) / CMD_MIGRATE_MS));
+          cmdOn[i] = lv * cmdRowMul[cmdRow[i]] * (0.35 + 0.65 * e);
+          if (e < 1) {
+            cmdOx[i] = cmdDriftX[i] * (1 - e);
+            cmdOy[i] = cmdDriftY[i] * (1 - e);
+          }
+        }
+      }
+      if (!entryVisible) continue;
+      if (cmdEntry[i] > cmdOn[i]) cmdOn[i] = cmdEntry[i];
+      if (caretLit && cmdCaret[i] > cmdOn[i]) cmdOn[i] = cmdCaret[i];
+    }
+    return true;
+  }
+
+  /**
+   * Grow the command box out of a keyed line's LED prefix.
+   * @param {string} key
+   * @param {{ name: string, hint?: string }[]} options
+   * @returns {boolean}
+   */
+  function openScreen2Command(key, options) {
+    if (menuSurface !== 2) return false;
+    if (!s2LineMetrics.get(key)) return false;
+    /* A dismiss mid-flight would leave stale buffers — cut it short. */
+    if (cmdClosing) closeScreen2Command({ instant: true });
+    cmdKey = key;
+    cmdOptions = Array.isArray(options) ? options.slice() : [];
+    cmdText = '';
+    cmdOpen = true;
+    cmdClosing = false;
+    const animate = animConfig.motion && !prefersReduced;
+    if (!bakeCommandChrome(!animate)) {
+      closeScreen2Command({ instant: true });
+      return false;
+    }
+    bakeCommandEntry();
+    setCommandLinePinned(true);
+    cmdStartWall = performance.now();
+    cmdCaretWall = cmdStartWall;
+    return true;
+  }
+
+  /**
+   * @param {string} text  Typed entry after the LED prompt glyph
+   * @param {number} [matchIndex]  Option the entry is a prefix of, else -1
+   */
+  function setScreen2CommandText(text, matchIndex) {
+    if (!cmdOpen || cmdClosing) return;
+    const next = String(text == null ? '' : text).slice(0, CMD_MAX_ENTRY);
+    const match = matchIndex == null ? -1 : matchIndex | 0;
+    if (next !== cmdText) {
+      cmdText = next;
+      /* Caret rides the entry — hold it solid through the keystroke. */
+      cmdCaretWall = performance.now();
+      bakeCommandEntry();
+    }
+    if (!cmdRowMul) return;
+    for (let r = 1; r < cmdRowMul.length; r++) {
+      cmdRowMul[r] = match < 0 || match === r - 1 ? 1 : CMD_DIM_LEVEL;
+    }
+  }
+
+  function finishCommandClose() {
+    cmdOpen = false;
+    cmdClosing = false;
+    cmdCloseWall = 0;
+    cmdKey = null;
+    cmdOptions = [];
+    cmdText = '';
+    dPinWord = null;
+    releaseCommandBuffers();
+    const done = cmdCloseDone;
+    cmdCloseDone = null;
+    if (done) done();
+  }
+
+  /**
+   * Dismiss the command overlay. Defaults to a short fade/pop; pass
+   * `{ instant: true }` for teardown paths that cannot wait a frame.
+   * @param {{ instant?: boolean, onDone?: () => void }} [opts]
+   */
+  function closeScreen2Command(opts) {
+    opts = opts || {};
+    if (typeof opts.onDone === 'function') {
+      const prev = cmdCloseDone;
+      cmdCloseDone = prev
+        ? () => {
+            prev();
+            opts.onDone();
+          }
+        : opts.onDone;
+    }
+
+    if (!cmdOpen && !cmdClosing) {
+      const done = cmdCloseDone;
+      cmdCloseDone = null;
+      if (done) done();
+      return;
+    }
+
+    const animate =
+      !opts.instant &&
+      animConfig.motion &&
+      !prefersReduced &&
+      !!cmdOn;
+
+    if (!animate) {
+      finishCommandClose();
+      return;
+    }
+
+    if (cmdClosing) return;
+    cmdClosing = true;
+    cmdCloseWall = performance.now();
+  }
+
+  function isScreen2CommandOpen() {
+    return cmdOpen;
+  }
+
   /* Snapshot completed target glyphs once — read-only for all idle renders. */
   function freezeDirectoryBitmap() {
     const n = cols * rows;
@@ -1552,10 +2135,14 @@ export function createIntroController(deps) {
     for (let i = 0; i < n; i++) {
       const level = dBitmap[i];
       if (!(level > 0)) continue;
+      if (dHide && dHide[i]) continue;
       any = true;
       const wid = dWordId ? dWordId[i] : -1;
+      const pinned = wid >= 0 && dPinWord && dPinWord[wid];
       const shiftPx =
-        yCache && wid >= 0 && wid < yCache.length ? yCache[wid] : 0;
+        !pinned && yCache && wid >= 0 && wid < yCache.length
+          ? yCache[wid]
+          : 0;
       const x = i % cols;
       const y = (i / cols) | 0;
       scatterIdleLight(dOn, x, y, level, shiftPx);
@@ -1597,8 +2184,10 @@ export function createIntroController(deps) {
     dOy = new Float32Array(n);
     dWordId = new Int16Array(n);
     dWordId.fill(-1);
+    dHide = new Uint8Array(n);
     dIdleWords = [];
     dBitmap = null;
+    s2LineMetrics.clear();
     assembleMs = 0;
 
     if (cols < 16 || rows < 16) return;
@@ -1686,6 +2275,20 @@ export function createIntroController(deps) {
       for (let b = 0; b < bandCount; b++) {
         wordReady[b] = lineStart;
         dIdleWords.push(createIdleWord(lineStart));
+      }
+
+      if (line.key) {
+        s2LineMetrics.set(line.key, {
+          cell: ledCell,
+          fontPx,
+          startX,
+          cy: ly,
+          prefixW: line.prefix ? octx.measureText(line.prefix).width : 0,
+          minX: sampled.minX,
+          maxX: sampled.maxX,
+          minY: sampled.minY,
+          maxY: sampled.maxY,
+        });
       }
 
       for (let g = 0; g < sampled.glyph.length; g++) {
@@ -1781,6 +2384,9 @@ export function createIntroController(deps) {
 
     assembleMs = cursor;
     freezeDirectoryBitmap();
+    applyS2Masks();
+    /* Line metrics just moved — re-raise an open command box onto them. */
+    rebakeCommandOverlay();
   }
 
   /**
@@ -1861,6 +2467,7 @@ export function createIntroController(deps) {
   /** Restore Screen 1 directory menu into the shared PE typography buffers. */
   function restoreScreen1Menu() {
     if (killed || contentLocked) return;
+    closeScreen2Command({ instant: true });
     ensureGrid();
     clearDissolveTimer();
     clearIntroLeds();
@@ -1899,6 +2506,7 @@ export function createIntroController(deps) {
    * replays Screen 2 menu instead of falling back to Screen 1 directory.
    */
   function suppressContent() {
+    closeScreen2Command({ instant: true });
     clearDissolveTimer();
     clearIntroLeds();
     directoryAllowed = false;
@@ -1909,7 +2517,7 @@ export function createIntroController(deps) {
     holdingFF = false;
     timeScale = 1;
     resetContentClock();
-    /* Do not touch data-boot — exclusive boot visuals only; intro never owns it */
+    /* Do not touch data-boot — boot controller owns it during exclusive phases */
   }
 
   /**
@@ -2072,15 +2680,6 @@ export function createIntroController(deps) {
        (topnav, Screen 2, scroll, snap) without boot owning layout anymore. */
     clearAppStartup();
 
-    /* No content to display (grid too small for directory layout).
-       Skip straight to idle so pixeldirectoryhold fires immediately
-       and callers waiting on the directory sequence are never stalled. */
-    if (assembleMs <= 0) {
-      resetContentClock();
-      enterIdle();
-      return;
-    }
-
     resetContentClock();
     phase = 'directory';
     setBoot('directory');
@@ -2147,7 +2746,6 @@ export function createIntroController(deps) {
     opts = opts || {};
     clearDissolveTimer();
     directoryMagLock = false;
-    killed = false;
     contentLocked = false;
     directoryAllowed = true;
     ensureGrid();
@@ -2172,7 +2770,7 @@ export function createIntroController(deps) {
         timeScale = 1;
         typographySettled = true;
         setBoot('directory');
-        /* Settle/Magnetic Lock keeps shell locked until hold — jumpToReady owns unlock. */
+        /* Magnetic Lock keeps the shell locked until hold fires. */
         window.dispatchEvent(new CustomEvent('pixeldirectorystart'));
         return;
       }
@@ -2213,6 +2811,8 @@ export function createIntroController(deps) {
 
   function skip() {
     if (phase === 'idle' || phase === 'skipped') return;
+    /* Magnetic Lock already running — let it finish */
+    if (directoryMagLock) return;
     clearDissolveTimer();
     /* Screen 2 assemble skip — settle Screen 2 menu, not Screen 1 directory. */
     if (menuSurface === 2) {
@@ -2220,21 +2820,11 @@ export function createIntroController(deps) {
       return;
     }
     killed = true;
-    skipToDirectoryHold();
-    if (phase === 'idle' || phase === 'skipped') {
-      /* Already holding — ignore */
-      return;
-    }
-    if (directoryMagLock) {
-      /* Magnetic Lock already running — let it finish */
-      return;
-    }
-    killed = true;
-    clearDissolveTimer();
     skipToDirectoryHold({ settle: true });
   }
 
   function cancel() {
+    closeScreen2Command({ instant: true });
     killed = true;
     contentLocked = false;
     directoryAllowed = false;
@@ -2392,14 +2982,11 @@ export function createIntroController(deps) {
       if (dOy) dOy[i] = 0;
       if (!(dGoneAt && dGoneAt[i] > dOnAt[i])) continue;
       if (t < dOnAt[i] || t >= dGoneAt[i]) continue;
+      if (dHide && dHide[i]) continue;
       anyLit = true;
 
-      const base = dTarget && dTarget[i]
-        ? (dBitmap ? dBitmap[i] : dLevel[i])
-        : dLevel[i];
-      const level = base;
-
       if (dTarget && dTarget[i]) {
+        const level = dBitmap ? dBitmap[i] : dLevel[i];
         const wid = dWordId ? dWordId[i] : -1;
         const shiftPx =
           yCache && wid >= 0 && wid < yCache.length ? yCache[wid] : 0;
@@ -2407,7 +2994,7 @@ export function createIntroController(deps) {
         const y = (i / cols) | 0;
         scatterIdleLight(dOn, x, y, level, shiftPx);
       } else {
-        dOn[i] = level;
+        dOn[i] = dLevel[i];
       }
     }
     return anyLit;
@@ -2459,11 +3046,12 @@ export function createIntroController(deps) {
 
     const wall = now || performance.now();
     tickMenuFade(wall);
+    const cmdAlive = updateCommandOverlay(wall);
     tickContentClock(wall);
     const t = phaseElapsedMs();
 
     if (phase === 'idle') {
-      if (!directoryAllowed || !dBitmap) return false;
+      if (!directoryAllowed || !dBitmap) return cmdAlive;
       const yCache = dIdleWords.length
         ? tickAllIdleWords(dIdleWords, assembleMs + 1, false)
         : null;
@@ -2472,10 +3060,10 @@ export function createIntroController(deps) {
     }
     if (phase === 'typography' || phase === 'dissolving') {
       if (phase === 'typography') isTypographySettled();
-      return updateIntroLeds(t);
+      return updateIntroLeds(t) || cmdAlive;
     }
     if (phase === 'directory') {
-      if (!directoryAllowed) return false;
+      if (!directoryAllowed) return cmdAlive;
       updateDirectoryLeds(t);
       /* Stay alive for the whole assemble — returning only "any LED lit"
          let style rAF loops die before the first glyph, so pixeldirectoryhold
@@ -2485,7 +3073,7 @@ export function createIntroController(deps) {
       }
       return true;
     }
-    return false;
+    return cmdAlive;
   }
 
   function brightness(i) {
@@ -2493,11 +3081,17 @@ export function createIntroController(deps) {
     const a = iOn ? iOn[i] : 0;
     /* Directory contribution only after explicit post-boot reveal */
     const b = directoryAllowed && dOn ? dOn[i] * menuFade : 0;
-    return a > b ? a : b;
+    let v = a > b ? a : b;
+    /* Command overlay shares the menu's transition fade — same surface */
+    const c = cmdOn ? cmdOn[i] * menuFade : 0;
+    if (c > v) v = c;
+    return v;
   }
 
   function offsetX(i) {
     if (contentLocked) return 0;
+    const c = cmdOx ? cmdOx[i] : 0;
+    if (c) return c;
     const d = directoryAllowed && dOx ? dOx[i] : 0;
     if (d) return d;
     return iOx ? iOx[i] : 0;
@@ -2505,6 +3099,8 @@ export function createIntroController(deps) {
 
   function offsetY(i) {
     if (contentLocked) return 0;
+    const c = cmdOy ? cmdOy[i] : 0;
+    if (c) return c;
     const d = directoryAllowed && dOy ? dOy[i] : 0;
     if (d) return d;
     return iOy ? iOy[i] : 0;
@@ -2702,6 +3298,15 @@ export function createIntroController(deps) {
     hasPlayedScreen2Menu: hasPlayedScreen2Menu,
     fadeMenuOut: fadeMenuOut,
     fadeMenuIn: fadeMenuIn,
+
+    /* Command layer — measure and mask keyed Screen 2 lines, and drive the
+       command box as LED typography on the same lattice */
+    getScreen2LineMetrics: getScreen2LineMetrics,
+    setScreen2LineMasked: setScreen2LineMasked,
+    openScreen2Command: openScreen2Command,
+    setScreen2CommandText: setScreen2CommandText,
+    closeScreen2Command: closeScreen2Command,
+    isScreen2CommandOpen: isScreen2CommandOpen,
   };
 
 }

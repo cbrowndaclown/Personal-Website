@@ -276,15 +276,6 @@ export function createLightningStyle(deps) {
       return !!animConfig.motion && resolveActiveBgMode() === 'lightning';
     }
 
-    function pointInField(clientX, clientY) {
-      syncStageRect();
-      const x = clientX - stageLeft;
-      const y = clientY - stageTop;
-      const maxW = (grid && grid.hitW > 0) ? grid.hitW : stageW;
-      const maxH = (grid && grid.hitH > 0) ? grid.hitH : stageH;
-      return x >= 0 && y >= 0 && x <= maxW && y <= maxH;
-    }
-
     function syncMode() {
       const active = lightningModeSelected();
       controller.setModeActive(active);
@@ -2601,26 +2592,6 @@ export function createLightningStyle(deps) {
       ro.observe(stage);
     }
 
-    document.addEventListener('mousemove', (e) => {
-      if (!enabled) return;
-      syncStageRect();
-      const x = e.clientX - stageLeft;
-      const y = e.clientY - stageTop;
-      const maxW = (grid && grid.hitW > 0) ? grid.hitW : viewW;
-      const maxH = (grid && grid.hitH > 0) ? grid.hitH : viewH;
-      if (x < 0 || y < 0 || x > maxW || y > maxH) {
-        ptrX = ptrY = -1;
-        hideCursorDot();
-        return;
-      }
-      ptrX = x;
-      ptrY = y;
-      syncCursorModeFromConfig();
-      if (cursorBias.paintTrail) pushCursorPaint(x, y);
-      showCursorDot(x, y);
-      start();
-    }, { passive: true });
-
     /* Click the field to seed a local storm cell (cloud + rain) */
     function onStageClick(e) {
       if (!enabled) return;
@@ -2638,12 +2609,6 @@ export function createLightningStyle(deps) {
       if (!hit || !hit.inside) return;
       const x = hit.x;
       const y = hit.y;
-      syncStageRect();
-      const x = e.clientX - stageLeft;
-      const y = e.clientY - stageTop;
-      const maxW = (grid && grid.hitW > 0) ? grid.hitW : viewW;
-      const maxH = (grid && grid.hitH > 0) ? grid.hitH : viewH;
-      if (x < 0 || y < 0 || x > maxW || y > maxH) return;
       if (typeof pixelField.cellInteractive === 'function' && CELL > 0) {
         const cx = Math.min(cols - 1, Math.max(0, (x / CELL) | 0));
         const cy = Math.min(rows - 1, Math.max(0, (y / CELL) | 0));

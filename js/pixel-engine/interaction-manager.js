@@ -1,7 +1,7 @@
 /* Interaction Manager — pointer / hover / future gesture + keyboard entry point.
    V1 preserves current field hover behavior via MouseMoved / PointerLeft events.
-   Hit-testing is clamped to hitBounds (Pixel FS Screen 1) while the painted lattice
-   may span the full device shell. */
+   Each Pixel FS screen owns a stage element, so hit-testing walks the stage list
+   and reports which surface the pointer landed on. */
 
 import { PixelEvents } from './constants.js';
 
@@ -9,7 +9,7 @@ import { PixelEvents } from './constants.js';
  * @param {object} options
  * @param {HTMLElement} options.stage
  * @param {HTMLElement[]} [options.stages]
- * @param {HTMLElement} [options.hitBounds]
+ * @param {HTMLElement} [options.hitBounds] — interactive band; defaults to stage
  * @param {ReturnType<import('./grid-manager.js').createGridManager>} options.grid
  * @param {import('./events.js').EventSystem} options.events
  */
@@ -54,17 +54,6 @@ export function createInteractionManager(options) {
       }
     }
     return { inside: false, x: -1, y: -1, stageIndex: -1, stage: null };
-    grid.syncStageRect();
-    if (typeof grid.syncHitBounds === 'function') grid.syncHitBounds();
-    const x = cx - grid.stageLeft;
-    const y = cy - grid.stageTop;
-    const w = grid.hitW > 0 ? grid.hitW : grid.viewW;
-    const h = grid.hitH > 0 ? grid.hitH : grid.viewH;
-    /* Interactive band is Pixel FS Screen 1 — clamp to hitBounds size in
-       stage-local coordinates (hitBounds shares the stage's top-left). */
-    return x >= 0 && y >= 0 && x <= w && y <= h
-      ? { inside: true, x, y }
-      : { inside: false, x, y };
   }
 
   function emitMove(cx, cy) {
