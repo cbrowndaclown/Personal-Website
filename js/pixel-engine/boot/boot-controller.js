@@ -1624,7 +1624,16 @@ export function createBootController(options) {
       ensureFieldSize();
       field.fillPresence(1);
       jumpToReady({ instantDirectory: false });
-      intro.beginDirectorySequence({ fromMotionReenable: true });
+      /* Motion can be toggled from either screen — replay whichever menu the
+         shared typography buffers were holding. */
+      const onScreen2 =
+        typeof intro.getMenuSurface === 'function' &&
+        intro.getMenuSurface() === 2;
+      if (onScreen2 && typeof intro.beginScreen2MenuSequence === 'function') {
+        intro.beginScreen2MenuSequence({ instant: true });
+      } else {
+        intro.beginDirectorySequence({ fromMotionReenable: true });
+      }
     });
   }
 

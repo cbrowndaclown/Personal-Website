@@ -8,3 +8,4 @@ export { createSlider } from './slider.js';
 export { createDropdown } from './dropdown.js';
 export { createColorPicker } from './color.js';
 export { createNumberInput } from './number.js';
+export { createActionButton } from './button.js';

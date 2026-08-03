@@ -9,6 +9,7 @@ import {
   createDropdown,
   createColorPicker,
   createNumberInput,
+  createActionButton,
 } from './controls/index.js';
 import { createSection } from './section.js';
 import {
@@ -52,8 +53,8 @@ function syncDisabled(row, control, def, api) {
 function needsInspectorSync(def) {
   return (
     def.type === 'segment' ||
+    def.type === 'button' ||
     def.id === 'style' ||
-    def.id === 'motion' ||
     def.id === 'pixel-preset'
   );
 }
@@ -227,6 +228,20 @@ export function renderSetting(body, def, api, syncGate) {
     syncControl = () => {
       number.setValue(Number(def.get(api)));
       syncDisabled(row, number, def, api);
+    };
+  } else if (def.type === 'button') {
+    /* Action rows have no stored value — `get` supplies the button caption. */
+    const button = createActionButton({
+      id: `settings-${def.id}`,
+      labelledBy: row.labelId,
+      label: String(def.get(api)),
+      onPress: () => applySet(null),
+    });
+    row.body.appendChild(button.root);
+
+    syncControl = () => {
+      button.setLabel(String(def.get(api)));
+      syncDisabled(row, button, def, api);
     };
   } else {
     /* Reserved / unknown types — quiet stub so the registry stays extensible. */

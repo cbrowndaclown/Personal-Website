@@ -189,6 +189,24 @@ export function initPage2Menu(options) {
 
   window.addEventListener('appscrollchange', onAppScrollChange);
 
+  /* A cleared LED line leaves the display — drop its anchor so the a11y tree
+     matches what Screen 2 actually shows. */
+  window.addEventListener('pixelscreen2clear', (event) => {
+    const keys = event && event.detail ? event.detail.keys : null;
+    if (!Array.isArray(keys)) return;
+    keys.forEach((key) => {
+      const line = root.querySelector(`.page-2-menu__line[data-line-key="${key}"]`);
+      if (line) line.hidden = true;
+    });
+  });
+
+  /* `/menu` re-raises every line — the anchors come back with them. */
+  window.addEventListener('pixelscreen2restore', () => {
+    root.querySelectorAll('.page-2-menu__line').forEach((line) => {
+      line.hidden = false;
+    });
+  });
+
   /* data-app-screen flips when the transition starts. Both screens share one
      rendered frame, so menu text must clear before they cross the viewport —
      otherwise the same lines read twice. Content swaps still wait for settle. */

@@ -288,8 +288,7 @@ body {
   transition:
     color 0.2s ease,
     background 0.2s ease,
-    box-shadow 0.2s ease,
-    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
+    box-shadow 0.2s ease;
 }
 
 .settings__btn:hover {
@@ -310,13 +309,92 @@ body {
 
 .settings__btn[aria-expanded="true"] {
   color: rgba(58, 50, 40, 0.92);
-  transform: rotate(45deg);
+}
+
+/* Slight box nudge while swapping cog ↔ tools */
+.settings__btn.is-toggling {
+  animation: settings-btn-nudge 0.38s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes settings-btn-nudge {
+  0% {
+    transform: rotate(0deg);
+  }
+  42% {
+    transform: rotate(14deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+.settings__icons {
+  position: relative;
+  display: block;
+  width: 20px;
+  height: 20px;
+  transform-origin: 50% 50%;
+  will-change: transform;
 }
 
 .settings__icon {
+  /* 8-bit icons — gray metal (no accent hover) */
+  --cog-face: #949494;
+  --cog-mid: #6e6e6e;
+  --cog-shade: #4a4a4a;
+  --cog-outline: #2a2a2a;
+  position: absolute;
+  inset: 0;
   display: block;
-  transform-origin: 50% 50%;
-  will-change: transform;
+  width: 20px;
+  height: 20px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  transition: opacity 0.08s linear;
+}
+
+.settings__icon--cog {
+  opacity: 1;
+}
+
+.settings__icon--tools {
+  opacity: 0;
+}
+
+.settings__btn[data-icon="tools"] .settings__icon--cog {
+  opacity: 0;
+}
+
+.settings__btn[data-icon="tools"] .settings__icon--tools {
+  opacity: 1;
+}
+
+.settings__icon-face {
+  fill: var(--cog-face);
+}
+
+.settings__icon-mid {
+  fill: var(--cog-mid);
+}
+
+.settings__icon-shade {
+  fill: var(--cog-shade);
+}
+
+.settings__icon-outline {
+  fill: var(--cog-outline);
+}
+
+.settings__icon-orange-hl {
+  fill: #f0c24a;
+}
+
+.settings__icon-orange {
+  fill: #e8842a;
+}
+
+.settings__icon-orange-shade {
+  fill: #a8481e;
 }
 
 .settings__panel {
@@ -477,6 +555,42 @@ body {
 
 .settings__reset:active {
   background: rgba(58, 50, 40, 0.11);
+}
+
+/* Action rows — settings that do something rather than store a value. */
+.settings__action {
+  appearance: none;
+  margin: 0;
+  padding: 8px 16px;
+  border: 1px solid rgba(58, 50, 40, 0.14);
+  border-radius: 10px;
+  background: rgba(58, 50, 40, 0.04);
+  color: rgba(28, 20, 10, 0.88);
+  font-family: var(--f-settings);
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  cursor: pointer;
+  transition:
+    color 0.18s ease,
+    background 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.settings__action:hover:not(:disabled) {
+  background: rgba(58, 50, 40, 0.08);
+  border-color: rgba(58, 50, 40, 0.18);
+}
+
+.settings__action:focus-visible {
+  outline: 2px solid rgba(58, 50, 40, 0.35);
+  outline-offset: 2px;
+}
+
+.settings__action:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 
 /* ── Collapsible inspector sections ───────────────────────── */
@@ -1337,6 +1451,102 @@ body[data-boot] .app-scroll {
 }
 
 
+/* ============================================================
+   FULL SCREEN SETTINGS — the inspector mounted in the stage.
+   Replaces the old Motion off state: rather than leaving a dead
+   gray field, that same space becomes the settings surface. The
+   host lives inside .stage__field, so it inherits the squircle
+   clip and only ever covers the screen it was opened on.
+   ============================================================ */
+.settings-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  justify-content: center;
+  padding: clamp(18px, 3.2vw, 44px);
+  background-color: var(--heat-field);
+  opacity: 0;
+  transform: scale(0.985);
+  transition:
+    opacity 0.26s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.settings-stage.is-open {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.settings-stage__shell {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  height: 100%;
+  min-height: 0;
+  padding: 20px 0 0;
+  border-radius: 24px;
+  corner-shape: squircle;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.9),
+    0 1px 2px rgba(28, 20, 10, 0.04),
+    0 18px 52px rgba(28, 20, 10, 0.1);
+}
+
+.settings-stage__head {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 0 20px;
+}
+
+.settings-stage__title {
+  margin: 0;
+  font-family: var(--f-settings);
+  font-size: 1.55rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  color: rgba(28, 20, 10, 0.94);
+}
+
+.settings-stage__close {
+  appearance: none;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: rgba(58, 50, 40, 0.45);
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+  transition: color 0.18s ease, background 0.18s ease;
+}
+
+.settings-stage__close:hover {
+  color: rgba(58, 50, 40, 0.88);
+  background: rgba(58, 50, 40, 0.06);
+}
+
+.settings-stage__close:focus-visible {
+  outline: 2px solid rgba(58, 50, 40, 0.35);
+  outline-offset: 2px;
+}
+
+/* Wider host — let the rows breathe past the dropdown's cramped gutters. */
+.settings-stage__shell .settings__body {
+  gap: 8px;
+  padding: 0 16px 20px;
+}
+
+
 /* ── App startup lock — shell isolation (geometry stays final) ────────────
    Screen 2 stays in layout so the stage lattice stays two screens tall.
    Scroll is locked at Screen 1; nav/settings are inert. No reflow. */
@@ -1431,14 +1641,21 @@ body[data-motion="on"][data-bg-mode="lightning"] .lightning-cursor.is-in-field {
   .settings__toggle-thumb,
   .settings__section-panel,
   .settings__section-chevron::before,
+  .settings__action,
+  .settings-stage,
   .site-frame,
   .app-scroll,
   .nameplate,
   .topnav,
   .topnav__brand,
   .topnav__link,
-  .topnav__link::after {
+  .topnav__link::after,
+  .settings__icon {
     transition: none;
+  }
+
+  .settings__btn.is-toggling {
+    animation: none;
   }
 
   .lightning-cursor {

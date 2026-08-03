@@ -293,19 +293,25 @@ export const SETTINGS = [
     get: (api) => api.getEffectColor(),
     set: (api, rgb, publish) => api.setEffectColor(rgb.r, rgb.g, rgb.b, publish),
   },
+  /* Replaces the old Motion on/off pair: switching the pixel field off now
+     hands that space to the inspector instead of leaving it blank. The panel
+     opens inside whichever screen is in view and restores motion on close. */
   {
-    id: 'motion',
-    label: 'Motion',
-    desc: 'Animations and pixel field',
+    id: 'settings-surface',
+    label: 'Full Screen Settings',
+    desc: 'Turn the pixel field into a full size settings panel',
     categoryId: 'animations',
-    type: 'segment',
-    defaultValue: 'on',
-    options: [
-      { value: 'on', label: 'On' },
-      { value: 'off', label: 'Off' },
-    ],
-    get: (api) => (api.getMotion() ? 'on' : 'off'),
-    set: (api, value) => api.setMotion(value === 'on'),
+    type: 'button',
+    get: (api) =>
+      typeof api.isSettingsExpanded === 'function' && api.isSettingsExpanded()
+        ? 'Close'
+        : 'Open',
+    set: (api) => {
+      if (typeof api.isSettingsExpanded !== 'function') return;
+      if (api.isSettingsExpanded()) api.collapseSettings();
+      else api.expandSettings();
+    },
+    disabledWhen: (api) => typeof api.expandSettings !== 'function',
   },
   {
     id: 'cursor-mode',

@@ -10,17 +10,33 @@
    raised by the intro controller. The DOM here is input plumbing only: a
    visually hidden field to capture keystrokes and a listbox for assistive
    tech. Nothing in this module paints.
+
+   Enter runs whatever command the entry is a prefix of. The actions themselves
+   are LED work, so each one is a single call into the intro controller.
    ========================================================================== */
 
 const LINE_KEY = 'options';
+/* Screen 2 top-region menu line — `/text` clears it to free the corner. */
+const HEADER_KEY = 'header';
 
 /* Order is top-to-bottom on screen; the last entry sits against the box. */
 const COMMANDS = [
   { name: '/clear', hint: 'Clears screen' },
   { name: '/text',  hint: 'Opens text box' },
-  { name: '/close', hint: 'Closes command box' },
   { name: '/more',  hint: 'Displays more options' },
 ];
+
+/* The second page of `/more`. Actions land later; the list is the feature. */
+const MORE_COMMANDS = [
+  { name: '/paint',    hint: 'Allows you to paint' },
+  { name: '/widgets',  hint: 'Manage widgets' },
+  { name: '/theme',    hint: 'Manage site theme' },
+  { name: '/settings', hint: 'Quick open settings' },
+];
+
+/* Only meaningful once `/clear` has emptied the screen, so it joins the list
+   at open time instead of living in COMMANDS. */
+const MENU_COMMAND = { name: '/menu', hint: 'Restores menu' };
 
 /* Matches the LED entry cap in the intro controller. */
 const MAX_ENTRY = 10;
@@ -50,6 +66,12 @@ export function initCommandPalette(options) {
   let intro = opts.intro || null;
   let open = false;
   let layoutRaf = 0;
+  /** Option the entry currently prefixes, or -1. */
+  let match = -1;
+  /** A command's animation owns the box — hold keystrokes until it settles. */
+  let running = false;
+  /** The list the LED stack is currently showing. */
+  let commands = COMMANDS.slice();
 
   function resolveIntro() {
     if (intro) return intro;
@@ -72,17 +94,25 @@ export function initCommandPalette(options) {
   list.setAttribute('role', 'listbox');
   list.setAttribute('aria-label', 'Screen 2 commands');
 
-  /* Spoken counterpart to the LED option stack. */
+  /* Spoken counterpart to the LED option stack — rebuilt whenever the stack
+     changes, so assistive tech reads the list the display is showing. */
   /** @type {HTMLLIElement[]} */
-  const optionEls = COMMANDS.map((cmd) => {
-    const li = document.createElement('li');
-    li.className = 'command-palette__option';
-    li.setAttribute('role', 'option');
-    li.setAttribute('aria-selected', 'false');
-    li.textContent = `${cmd.name} — ${cmd.hint}`;
-    list.append(li);
-    return li;
-  });
+  let optionEls = [];
+
+  function renderOptions() {
+    list.replaceChildren();
+    optionEls = commands.map((cmd) => {
+      const li = document.createElement('li');
+      li.className = 'command-palette__option';
+      li.setAttribute('role', 'option');
+      li.setAttribute('aria-selected', 'false');
+      li.textContent = `${cmd.name} — ${cmd.hint}`;
+      list.append(li);
+      return li;
+    });
+  }
+
+  renderOptions();
 
   const input = document.createElement('input');
   input.className = 'command-palette__input';
@@ -115,12 +145,20 @@ export function initCommandPalette(options) {
     const originY = canvasRect.top - screenRect.top;
 
     const cell = m.cell;
+    /* Prefer the live box: `/clear` slides it off the menu line it grew from. */
+    const box =
+      typeof ctrl.getScreen2CommandBox === 'function'
+        ? ctrl.getScreen2CommandBox()
+        : null;
     /* Match intro-controller CMD_ENTRY_SCALE / commandGeometry. */
-    const entryGrid = Math.max(5, Math.round(m.fontPx * 0.85));
+    const entryGrid =
+      box && box.fontPx > 0 ? box.fontPx : Math.max(5, Math.round(m.fontPx * 0.85));
     const fontPx = entryGrid * cell;
     const padX = Math.max(2, Math.round(entryGrid * 0.28)) * cell;
-    const boxLeft = Math.round(originX + Math.round(m.minX) * cell - padX);
-    const centerY = Math.round(originY + m.cy * cell);
+    const boxLeft = box
+      ? Math.round(originX + box.boxLeft * cell)
+      : Math.round(originX + Math.round(m.minX) * cell - padX);
+    const centerY = Math.round(originY + (box ? box.cy : m.cy) * cell);
 
     root.style.setProperty('--cp-left', `${boxLeft}px`);
     root.style.setProperty('--cp-center-y', `${centerY}px`);
@@ -147,6 +185,8 @@ export function initCommandPalette(options) {
     if (open) return false;
     if (document.body.hasAttribute('data-app-startup')) return false;
     if (document.body.hasAttribute('data-boot')) return false;
+    /* The stage is the settings panel — there is no lattice to grow out of. */
+    if (document.body.hasAttribute('data-settings-stage')) return false;
     if (!onScreen2()) return false;
     const ctrl = resolveIntro();
     if (!ctrl || typeof ctrl.getScreen2LineMetrics !== 'function') return false;
@@ -165,14 +205,19 @@ export function initCommandPalette(options) {
     return !!ctrl.getScreen2LineMetrics(LINE_KEY);
   }
 
-  /** Push the entry to the LED box and emphasize the option it prefixes. */
+  /**
+   * Push the entry to the LED box and emphasize the option it prefixes. An
+   * entry short enough to prefix several options takes the topmost, so what
+   * Enter runs is always the highest lit row rather than an arbitrary one.
+   */
   function syncEntry() {
     const typed = ('/' + input.value).trim().toLowerCase();
-    let match = -1;
+    match = -1;
+    if (typed.length > 1) {
+      match = commands.findIndex((cmd) => cmd.name.startsWith(typed));
+    }
     optionEls.forEach((el, index) => {
-      const hit = typed.length > 1 && COMMANDS[index].name.startsWith(typed);
-      if (hit) match = index;
-      el.setAttribute('aria-selected', hit ? 'true' : 'false');
+      el.setAttribute('aria-selected', index === match ? 'true' : 'false');
     });
 
     const ctrl = resolveIntro();
@@ -188,6 +233,145 @@ export function initCommandPalette(options) {
     }
   }
 
+  /* ── Commands ───────────────────────────────────────────────────────────
+     Every action is LED work on the shared grid, so each runner is a call into
+     the intro controller plus the keystroke gate around its animation. */
+
+  function beginRun() {
+    running = true;
+    /* readOnly keeps focus (and the LED caret) while the animation plays. */
+    input.readOnly = true;
+  }
+
+  function endRun() {
+    running = false;
+    input.readOnly = false;
+  }
+
+  /**
+   * `/clear` — retire everything on Screen 2, the box included, then raise
+   * the box again lower on the display with its options.
+   */
+  function runClear() {
+    const ctrl = resolveIntro();
+    if (!ctrl || typeof ctrl.clearScreen2Content !== 'function') return;
+    beginRun();
+    /* The entry that invoked the command is spent — reset it before the box
+       goes so the caret returns on an empty prompt. */
+    input.value = '';
+    syncEntry();
+    /* The box comes back offering `/menu`: the screen it restores is the one
+       this command is about to retire. */
+    commands = COMMANDS.concat(MENU_COMMAND);
+    renderOptions();
+    const started = ctrl.clearScreen2Content({
+      options: commands,
+      onDone: () => {
+        if (!open) return;
+        endRun();
+        syncEntry();
+        scheduleLayout();
+      },
+    });
+    if (!started) endRun();
+  }
+
+  /**
+   * `/text` — clear the top menu line, then raise the text box in the corner
+   * it vacated. The text box takes the surface, so the command box closes.
+   */
+  function runText() {
+    const ctrl = resolveIntro();
+    if (!ctrl || typeof ctrl.clearScreen2Lines !== 'function') return;
+    beginRun();
+    const started = ctrl.clearScreen2Lines([HEADER_KEY], {
+      quick: true,
+      onDone: () => {
+        endRun();
+        closePalette();
+        if (typeof ctrl.openScreen2TextBox === 'function') {
+          ctrl.openScreen2TextBox();
+        }
+      },
+    });
+    if (!started) endRun();
+  }
+
+  /**
+   * `/more` — retire the option stack and raise the second page in its place.
+   * The box itself never moves, so the swap reads as the list turning over.
+   */
+  function runMore() {
+    const ctrl = resolveIntro();
+    if (!ctrl || typeof ctrl.setScreen2CommandOptions !== 'function') return;
+    beginRun();
+    input.value = '';
+    syncEntry();
+    commands = MORE_COMMANDS.slice();
+    renderOptions();
+    const started = ctrl.setScreen2CommandOptions(commands, {
+      onDone: () => {
+        if (!open) return;
+        endRun();
+        syncEntry();
+        scheduleLayout();
+      },
+    });
+    if (!started) endRun();
+  }
+
+  /**
+   * `/menu` — hand Screen 2 back to the menu. The box goes first so the
+   * assemble replays into an empty grid, exactly like the first visit.
+   */
+  function runMenu() {
+    const ctrl = resolveIntro();
+    if (!ctrl || typeof ctrl.replayScreen2Menu !== 'function') return;
+    closePalette();
+    /* Chained onto the dismiss already in flight — fires once it settles. */
+    if (typeof ctrl.closeScreen2Command === 'function') {
+      ctrl.closeScreen2Command({ onDone: () => ctrl.replayScreen2Menu() });
+    } else {
+      ctrl.replayScreen2Menu();
+    }
+  }
+
+  /** Run the option the entry currently prefixes. */
+  function runMatchedCommand() {
+    if (running || match < 0 || match >= commands.length) return;
+    switch (commands[match].name) {
+      case '/clear':
+        runClear();
+        return;
+      case '/text':
+        runText();
+        return;
+      case '/more':
+        runMore();
+        return;
+      case '/menu':
+        runMenu();
+        return;
+      default:
+        /* The `/more` page is a listing for now — no actions behind it yet. */
+        return;
+    }
+  }
+
+  /**
+   * The list the box opens with. `/menu` only earns a row once `/clear` has
+   * emptied the screen there would be something to restore.
+   */
+  function activeCommands() {
+    const ctrl = resolveIntro();
+    const cleared = !!(
+      ctrl &&
+      typeof ctrl.hasScreen2Cleared === 'function' &&
+      ctrl.hasScreen2Cleared()
+    );
+    return cleared ? COMMANDS.concat(MENU_COMMAND) : COMMANDS.slice();
+  }
+
   function openPalette() {
     if (!canOpen()) return false;
     const ctrl = resolveIntro();
@@ -198,9 +382,11 @@ export function initCommandPalette(options) {
       open = false;
       return false;
     }
+    commands = activeCommands();
+    renderOptions();
     /* Mask first: the box grows into the space the menu line just vacated. */
     setMasked(true);
-    if (!ctrl.openScreen2Command(LINE_KEY, COMMANDS)) {
+    if (!ctrl.openScreen2Command(LINE_KEY, commands)) {
       open = false;
       setMasked(false);
       return false;
@@ -221,6 +407,8 @@ export function initCommandPalette(options) {
   function closePalette(opts) {
     if (!open) return;
     open = false;
+    endRun();
+    match = -1;
     root.dataset.open = 'false';
     root.setAttribute('aria-hidden', 'true');
     delete screen.dataset.commandPalette;
@@ -261,6 +449,26 @@ export function initCommandPalette(options) {
     openPalette();
   });
 
+  /* The text box outlives the command box that raised it, so nothing holds
+     focus to dismiss it — Escape retires it the way it does the command box,
+     without spending `/clear` on the whole screen. */
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || open) return;
+    /* Settings owns Escape while its panel is up. */
+    if (document.querySelector('.settings__panel.is-open')) return;
+    if (editableTarget(e.target) || !onScreen2()) return;
+    const ctrl = resolveIntro();
+    if (
+      !ctrl ||
+      typeof ctrl.isScreen2TextBoxOpen !== 'function' ||
+      !ctrl.isScreen2TextBoxOpen()
+    ) {
+      return;
+    }
+    e.preventDefault();
+    ctrl.closeScreen2TextBox();
+  });
+
   input.addEventListener('input', syncEntry);
 
   input.addEventListener('keydown', (e) => {
@@ -270,6 +478,16 @@ export function initCommandPalette(options) {
       closePalette();
       return;
     }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      runMatchedCommand();
+      return;
+    }
+    /* A running command owns the box — swallow edits until it settles. */
+    if (running) {
+      e.preventDefault();
+      return;
+    }
     /* Backspacing past the prompt dismisses the box, matching the slash
        that opened it. */
     if (e.key === 'Backspace' && input.value === '') {
@@ -277,7 +495,6 @@ export function initCommandPalette(options) {
       closePalette();
       return;
     }
-    if (e.key === 'Enter') e.preventDefault();
   });
 
   /* Dismiss on in-page focus loss, but keep open across tab/window switches —

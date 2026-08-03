@@ -377,6 +377,7 @@ export function initAppScroll(options) {
       target &&
       target.closest &&
       (target.closest('.settings') ||
+        target.closest('.settings-stage') ||
         target.closest('input') ||
         target.closest('textarea') ||
         target.closest('select') ||

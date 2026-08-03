@@ -3,6 +3,7 @@
 import { createSection } from './section.js';
 import { bindAccordion } from './accordion.js';
 import { getSettingsCatalog } from './catalog.js';
+import { createSettingsExpander } from './expand.js';
 import { resetSettingsToDefaults } from './definitions/index.js';
 import { isAppStartup } from '../app-startup.js';
 
@@ -25,15 +26,22 @@ export function initSettings(api) {
   if (!root || !btn || !panel || !close || !body) return;
 
   let open = false;
-  const icon = btn.querySelector('.settings__icon');
+  const icons = btn.querySelector('.settings__icons');
+  const reduceMotion =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   /* Gear spin tracks wheel/trackpad — rAF-coalesced, no forced JS scroll */
   let gearAngle = 0;
   let gearRaf = 0;
   let pendingGearDelta = 0;
+  let iconSwapTimer = 0;
+  let toggleEndTimer = 0;
   const GEAR_SCALE = 0.22;
   const GEAR_MIN_ANGLE = -75;
   const GEAR_MAX_ANGLE = 75;
+  const ICON_SWAP_MS = 160;
+  const TOGGLE_MS = 380;
 
   function nudgeGear(deltaY) {
     if (isAppStartup()) return;
@@ -44,22 +52,42 @@ export function initSettings(api) {
       gearRaf = 0;
       const delta = pendingGearDelta;
       pendingGearDelta = 0;
-      if (!delta || !icon) return;
+      if (!delta || !icons) return;
       gearAngle = Math.min(
         GEAR_MAX_ANGLE,
         Math.max(GEAR_MIN_ANGLE, gearAngle + delta * GEAR_SCALE)
       );
-      icon.style.transform = `rotate(${gearAngle}deg)`;
+      icons.style.transform = `rotate(${gearAngle}deg)`;
     });
   }
 
   function setOpen(next) {
     if (next && isAppStartup()) return;
+    if (next === open) return;
     open = next;
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
     btn.setAttribute('aria-label', open ? 'Close settings' : 'Open settings');
     panel.classList.toggle('is-open', open);
     panel.setAttribute('aria-hidden', open ? 'false' : 'true');
+
+    /* Box nudge + mid-spin icon swap (cog ↔ tools) */
+    window.clearTimeout(iconSwapTimer);
+    window.clearTimeout(toggleEndTimer);
+    const targetIcon = open ? 'tools' : 'cog';
+    if (reduceMotion) {
+      btn.dataset.icon = targetIcon;
+      btn.classList.remove('is-toggling');
+    } else {
+      btn.classList.remove('is-toggling');
+      void btn.offsetWidth;
+      btn.classList.add('is-toggling');
+      iconSwapTimer = window.setTimeout(() => {
+        btn.dataset.icon = targetIcon;
+      }, ICON_SWAP_MS);
+      toggleEndTimer = window.setTimeout(() => {
+        btn.classList.remove('is-toggling');
+      }, TOGGLE_MS);
+    }
 
     if (open) {
       close.focus({ preventScroll: true });
@@ -109,7 +137,51 @@ export function initSettings(api) {
     },
   };
 
-  getSettingsCatalog(api, syncGate).forEach((entry) => {
+  /* Motion is no longer a setting of its own — the full screen panel owns the
+     off state, and that panel never survives a reload. A persisted off would
+     leave a dead field with nothing left in the UI to revive it. */
+  if (typeof api.getMotion === 'function' && !api.getMotion()) {
+    api.setMotion(true);
+  }
+
+  /* Reset footer — data-driven via SETTINGS defaultValue. Built before the
+     catalog so the expander can move it with the body. */
+  const foot = document.createElement('div');
+  foot.className = 'settings__foot';
+  const resetBtn = document.createElement('button');
+  resetBtn.type = 'button';
+  resetBtn.className = 'settings__reset';
+  resetBtn.id = 'settings-reset';
+  resetBtn.textContent = 'Reset to Defaults';
+  resetBtn.setAttribute('aria-label', 'Reset all settings to defaults');
+  resetBtn.addEventListener('click', () => {
+    resetSettingsToDefaults(api);
+    /* Defaults restore motion, but the field is the panel right now. */
+    if (expander && expander.isExpanded()) api.setMotion(false);
+    syncFromConfig();
+  });
+  foot.appendChild(resetBtn);
+
+  const expander = createSettingsExpander({
+    panel,
+    body,
+    foot,
+    button: btn,
+    api,
+    onExpand: () => setOpen(false),
+  });
+
+  /* Catalog-facing api — engine getters plus the panel's own surface control,
+     so a SettingDef can drive the expansion like any other setting. */
+  const uiApi = expander
+    ? Object.assign({}, api, {
+        expandSettings: () => expander.expand(),
+        collapseSettings: () => expander.collapse(),
+        isSettingsExpanded: () => expander.isExpanded(),
+      })
+    : api;
+
+  getSettingsCatalog(uiApi, syncGate).forEach((entry) => {
     const section = createSection({
       id: entry.id,
       title: entry.title,
@@ -136,20 +208,6 @@ export function initSettings(api) {
     sections: sectionHandles,
   });
 
-  /* Reset footer — data-driven via SETTINGS defaultValue */
-  const foot = document.createElement('div');
-  foot.className = 'settings__foot';
-  const resetBtn = document.createElement('button');
-  resetBtn.type = 'button';
-  resetBtn.className = 'settings__reset';
-  resetBtn.id = 'settings-reset';
-  resetBtn.textContent = 'Reset to Defaults';
-  resetBtn.setAttribute('aria-label', 'Reset all settings to defaults');
-  resetBtn.addEventListener('click', () => {
-    resetSettingsToDefaults(api);
-    syncFromConfig();
-  });
-  foot.appendChild(resetBtn);
   panel.appendChild(foot);
 
   window.addEventListener('animconfigchange', (e) => {
@@ -202,6 +260,11 @@ export function initSettings(api) {
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     if (isAppStartup()) return;
+    /* The gear is the way back out of the full screen panel. */
+    if (expander && expander.isExpanded()) {
+      expander.collapse();
+      return;
+    }
     setOpen(!open);
   });
 
@@ -211,7 +274,12 @@ export function initSettings(api) {
   });
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && open) setOpen(false);
+    if (e.key !== 'Escape') return;
+    if (expander && expander.isExpanded()) {
+      expander.collapse();
+      return;
+    }
+    if (open) setOpen(false);
   });
 
   document.addEventListener('pointerdown', (e) => {
