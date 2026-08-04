@@ -385,6 +385,11 @@ export function initAppScroll(options) {
     );
   }
 
+  /* Full screen settings owns the display — no screen / nav steps until it leaves. */
+  function settingsStageOpen() {
+    return document.body.hasAttribute('data-settings-stage');
+  }
+
   /* ── Wheel — one state edge per trackpad/mouse series (not per delta) ───
      Trackpad momentum fires many wheel events. Without a series latch,
      blocked ticks kept re-arming the idle timer so the swipe ended before
@@ -417,7 +422,7 @@ export function initAppScroll(options) {
   window.addEventListener(
     'wheel',
     (e) => {
-      if (!interactive) return;
+      if (!interactive || settingsStageOpen()) return;
       if (ignoredTarget(e.target)) return;
 
       const direction = Math.sign(e.deltaY);
@@ -478,7 +483,12 @@ export function initAppScroll(options) {
   window.addEventListener(
     'touchstart',
     (e) => {
-      if (!interactive || e.touches.length !== 1 || ignoredTarget(e.target)) {
+      if (
+        !interactive ||
+        settingsStageOpen() ||
+        e.touches.length !== 1 ||
+        ignoredTarget(e.target)
+      ) {
         touchActive = false;
         return;
       }
@@ -554,7 +564,7 @@ export function initAppScroll(options) {
   window.addEventListener(
     'keydown',
     (e) => {
-      if (!interactive || isBusy()) return;
+      if (!interactive || settingsStageOpen() || isBusy()) return;
       if (ignoredTarget(e.target)) return;
 
       let direction = 0;
@@ -611,7 +621,7 @@ export function initAppScroll(options) {
   if (homeBtn) {
     homeBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      if (!interactive) return;
+      if (!interactive || settingsStageOpen()) return;
       void goHome();
     });
   }

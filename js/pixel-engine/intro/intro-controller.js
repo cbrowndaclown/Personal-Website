@@ -182,6 +182,56 @@ export function createIntroController(deps) {
   const DIR_FONT =
     '"Josefin Sans", "Apple Symbols", "Segoe UI Symbol", "Noto Sans Symbols", system-ui, sans-serif';
 
+  /* ── Supersampled rasterization ────────────────────────────────────────
+     Text is drawn on an offscreen canvas whose resolution is 1 cell = 1 px.
+     At small font sizes thin strokes alias away, producing wrong glyphs
+     ('a' → 'o', 'i' → 'ii'). Supersampling draws at S× resolution and
+     downsamples by taking the brightest sub-pixel per cell, which preserves
+     thin connecting strokes that a 1:1 rasterize discards.
+     ──────────────────────────────────────────────────────────────────── */
+  const RASTER_SUPER = 3;
+  const MIN_FONT = 7;
+
+  function superCanvas() {
+    if (!(cols > 0) || !(rows > 0)) return null;
+    const S = RASTER_SUPER;
+    const off = document.createElement('canvas');
+    off.width = cols * S;
+    off.height = rows * S;
+    const ctx = off.getContext('2d', { alpha: false });
+    if (!ctx) return null;
+    ctx.setTransform(S, 0, 0, S, 0, 0);
+    return ctx;
+  }
+
+  function readSuper(octx) {
+    const S = RASTER_SUPER;
+    const sW = cols * S;
+    const sH = rows * S;
+    const data = octx.getImageData(0, 0, sW, sH).data;
+    const out = new Uint8Array(cols * rows);
+    for (let gy = 0; gy < rows; gy++) {
+      for (let gx = 0; gx < cols; gx++) {
+        let mx = 0;
+        for (let sy = 0; sy < S; sy++) {
+          const row = (gy * S + sy) * sW;
+          for (let sx = 0; sx < S; sx++) {
+            const v = data[(row + gx * S + sx) * 4];
+            if (v > mx) mx = v;
+          }
+        }
+        out[gy * cols + gx] = mx;
+      }
+    }
+    return out;
+  }
+
+  function adaptiveInk(fontPx) {
+    if (fontPx >= 14) return 140;
+    if (fontPx <= 5) return 40;
+    return Math.round(40 + (fontPx - 5) * (100 / 9));
+  }
+
   /*
     Screen 2 command overlay — the "/" box is LED typography like every other
     Screen 2 line. Box chrome, option rows, typed entry and caret are baked
@@ -350,7 +400,7 @@ export function createIntroController(deps) {
   /** @type {null | (() => void)} */
   let cmdRowsNextDone = null;
 
-  /* Text box overlay — LED chrome only; content lands in a later pass. */
+  /* Text box overlay — LED chrome + typed content. */
   let txtOpen = false;
   let txtClosing = false;
   let txtCloseWall = 0;
@@ -358,6 +408,11 @@ export function createIntroController(deps) {
   let txtDriftX = null, txtDriftY = null;
   let txtOn = null, txtOx = null, txtOy = null;
   let txtStartWall = 0;
+  let txtCaretWall = 0;
+  let txtContent = '';
+  let txtEntry = null;  /* typed text LED buffer */
+  let txtCaret = null;  /* caret bar LED buffer */
+  let txtScrollPx = 0;  /* px scrolled left when text overflows the box */
 
   /* Space-skip Magnetic Lock — edge-displaced converge + lock flash + shock */
   let directoryMagLock = false;
@@ -755,12 +810,13 @@ export function createIntroController(deps) {
         widest = Math.max(widest, octx.measureText(lines[L].text).width);
       }
       if (widest <= maxWidth) break;
-      fontPx = Math.max(4, fontPx - 1);
+      fontPx = Math.max(MIN_FONT, fontPx - 1);
+      if (fontPx <= MIN_FONT) break;
     }
     return fontPx;
   }
 
-  function sampleLineGlyphs(octx, text, cx, cy) {
+  function sampleLineGlyphs(octx, text, cx, cy, fontPx) {
     octx.fillStyle = '#000';
     octx.fillRect(0, 0, cols, rows);
     octx.fillStyle = '#fff';
@@ -768,15 +824,14 @@ export function createIntroController(deps) {
     octx.textBaseline = 'middle';
     octx.fillText(text, cx, cy);
 
-    /* Thin trailing marks (esp. commas) often antialias below the LED
-       threshold on the coarse grid — stamp a small solid glyph so they read. */
     reinforceTrailingPunct(octx, text, cx, cy);
 
-    const data = octx.getImageData(0, 0, cols, rows).data;
+    const cut = adaptiveInk(fontPx || 14);
+    const data = readSuper(octx);
     const glyph = [];
     let minX = cols, maxX = -1, minY = rows, maxY = -1;
     for (let i = 0, n = cols * rows; i < n; i++) {
-      if (data[i * 4] <= 140) continue;
+      if (data[i] <= cut) continue;
       glyph.push(i);
       const x = i % cols;
       const y = (i / cols) | 0;
@@ -850,18 +905,15 @@ export function createIntroController(deps) {
 
     if (cols < 16 || rows < 16) return;
 
-    const off = document.createElement('canvas');
-    off.width = cols;
-    off.height = rows;
-    const octx = off.getContext('2d', { alpha: false });
+    const octx = superCanvas();
     if (!octx) return;
 
     const lineCount = INTRO_LINES.length;
-    let fontPx = Math.max(5, Math.floor(rows * 0.085));
+    let fontPx = Math.max(MIN_FONT, Math.floor(rows * 0.085));
     fontPx = fitIntroFont(octx, INTRO_LINES, cols * 0.90, fontPx);
 
     let lineGap = fontPx * 1.55;
-    while (lineGap * (lineCount - 1) > rows * 0.72 && fontPx > 4) {
+    while (lineGap * (lineCount - 1) > rows * 0.72 && fontPx > MIN_FONT) {
       fontPx -= 1;
       octx.font = `600 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
       lineGap = fontPx * 1.55;
@@ -880,7 +932,7 @@ export function createIntroController(deps) {
 
     for (let L = 0; L < lineCount; L++) {
       const cy = startY + L * lineGap;
-      const sampled = sampleLineGlyphs(octx, INTRO_LINES[L].text, cx, cy);
+      const sampled = sampleLineGlyphs(octx, INTRO_LINES[L].text, cx, cy, fontPx);
       if (!sampled.glyph.length) {
         lineMeta.push(null);
         continue;
@@ -1331,7 +1383,8 @@ export function createIntroController(deps) {
         );
       }
       if (widest <= maxWidth) break;
-      fontPx = Math.max(4, fontPx - 1);
+      fontPx = Math.max(MIN_FONT, fontPx - 1);
+      if (fontPx <= MIN_FONT) break;
     }
     return fontPx;
   }
@@ -1408,11 +1461,12 @@ export function createIntroController(deps) {
       );
     }
 
-    const data = octx.getImageData(0, 0, cols, rows).data;
+    const cut = adaptiveInk(fontPx);
+    const data = readSuper(octx);
     const glyph = [];
     let minX = cols, maxX = -1, minY = rows, maxY = -1;
     for (let i = 0, n = cols * rows; i < n; i++) {
-      if (data[i * 4] <= 140) continue;
+      if (data[i] <= cut) continue;
       glyph.push(i);
       const gx = i % cols;
       const gy = (i / cols) | 0;
@@ -1468,18 +1522,15 @@ export function createIntroController(deps) {
 
     if (cols < 16 || rows < 16) return;
 
-    const off = document.createElement('canvas');
-    off.width = cols;
-    off.height = rows;
-    const octx = off.getContext('2d', { alpha: false });
+    const octx = superCanvas();
     if (!octx) return;
 
     const lineCount = DIR_LINES.length;
-    let fontPx = Math.max(5, Math.floor(rows * 0.078));
+    let fontPx = Math.max(MIN_FONT, Math.floor(rows * 0.078));
     fontPx = fitDirFont(octx, DIR_LINES, cols * 0.90, fontPx);
 
     let lineGap = fontPx * 1.85;
-    while (lineGap * (lineCount - 1) > rows * 0.46 && fontPx > 4) {
+    while (lineGap * (lineCount - 1) > rows * 0.46 && fontPx > MIN_FONT) {
       fontPx -= 1;
       lineGap = fontPx * 1.85;
     }
@@ -1703,11 +1754,7 @@ export function createIntroController(deps) {
 
   /** @param {number} [fontPx]  Defaults to the open command box entry size. */
   function commandContext(fontPx) {
-    if (!(cols > 0) || !(rows > 0)) return null;
-    const off = document.createElement('canvas');
-    off.width = cols;
-    off.height = rows;
-    const octx = off.getContext('2d', { alpha: false });
+    const octx = superCanvas();
     if (!octx) return null;
     octx.font = `600 ${fontPx > 0 ? fontPx : commandFontPx()}px ${DIR_FONT}`;
     octx.textAlign = 'left';
@@ -1804,7 +1851,7 @@ export function createIntroController(deps) {
     octx.strokeStyle = '#fff';
     draw(octx);
 
-    const data = octx.getImageData(0, 0, cols, rows).data;
+    const data = readSuper(octx);
     const n = cols * rows;
     const hits = [];
     let minX = cols;
@@ -1812,7 +1859,7 @@ export function createIntroController(deps) {
     let sumX = 0;
     let sumY = 0;
     for (let i = 0; i < n; i++) {
-      if (data[i * 4] <= cut) continue;
+      if (data[i] <= cut) continue;
       hits.push(i);
       const x = i % cols;
       if (x < minX) minX = x;
@@ -1922,6 +1969,8 @@ export function createIntroController(deps) {
     }
     nameCol += optFont * 0.85;
 
+    const optInk = adaptiveInk(optFont);
+
     for (let r = 0; r < count; r++) {
       const cy = bottomCy - (count - 1 - r) * rowStride;
       const start = CMD_BOX_MS + (count - 1 - r) * CMD_ROW_STAGGER;
@@ -1935,7 +1984,8 @@ export function createIntroController(deps) {
         },
         1,
         instant ? null : start,
-        r + 1
+        r + 1,
+        optInk
       );
       if (opt.hint) {
         stampCommandPass(
@@ -1947,7 +1997,8 @@ export function createIntroController(deps) {
           },
           CMD_HINT_LEVEL,
           instant ? null : start + 40,
-          r + 1
+          r + 1,
+          optInk
         );
       }
     }
@@ -2199,7 +2250,8 @@ export function createIntroController(deps) {
     cmdRowsPhase = 'shown';
     cmdRowsNext = null;
     cmdRowsNextDone = null;
-    cmdShiftRows = 0;
+    /* Preserve cmdShiftRows so a reopen after `/clear` lands at the same
+       lowered position. Only replayScreen2Menu resets it to zero. */
     dPinWord = null;
     releaseCommandBuffers();
     const done = cmdCloseDone;
@@ -2371,6 +2423,7 @@ export function createIntroController(deps) {
     s2ClearedKeys.clear();
     s2MaskedKeys.clear();
     s2ContentCleared = false;
+    cmdShiftRows = 0;
     /* The one-shot latch is what makes return visits snap — drop it so the
        menu assembles again. */
     screen2MenuPlayed = false;
@@ -2580,6 +2633,8 @@ export function createIntroController(deps) {
     txtOn = null;
     txtOx = null;
     txtOy = null;
+    txtEntry = null;
+    txtCaret = null;
   }
 
   /**
@@ -2621,6 +2676,8 @@ export function createIntroController(deps) {
     txtOn = new Float32Array(n);
     txtOx = new Float32Array(n);
     txtOy = new Float32Array(n);
+    txtEntry = new Float32Array(n);
+    txtCaret = new Float32Array(n);
 
     const bx = geo.boxLeft + 0.5;
     const by = geo.boxTop + 0.5;
@@ -2644,10 +2701,79 @@ export function createIntroController(deps) {
     return true;
   }
 
+  /** Rasterize the typed content + caret inside the text box. */
+  function bakeTextEntry() {
+    const geo = textBoxGeometry();
+    if (!geo || !txtEntry || !txtCaret) return;
+    const octx = commandContext(geo.fontPx);
+    if (!octx) return;
+
+    txtEntry.fill(0);
+    txtCaret.fill(0);
+
+    const text = txtContent;
+    const padX = Math.max(2, Math.round(geo.fontPx * 0.28));
+    const entryX = geo.boxLeft + padX;
+    const cy = Math.round(geo.boxTop + geo.boxH * 0.5);
+
+    octx.font = `600 ${geo.fontPx}px ${DIR_FONT}`;
+    const textW = text ? octx.measureText(text).width : 0;
+
+    /* Content area = box interior minus left + right pad. */
+    const contentW = geo.boxW - padX * 2;
+    /* Scroll so the caret is always visible inside the box. */
+    const caretEnd = textW + geo.fontPx * 0.3;
+    if (caretEnd - txtScrollPx > contentW) {
+      txtScrollPx = caretEnd - contentW;
+    }
+    if (caretEnd < txtScrollPx + geo.fontPx) {
+      txtScrollPx = Math.max(0, caretEnd - geo.fontPx);
+    }
+    if (txtScrollPx < 0) txtScrollPx = 0;
+    if (textW <= contentW) txtScrollPx = 0;
+
+    if (text) {
+      /* Clip to the box interior via a clipped rasterize. Draw the text
+         shifted by -scrollPx, then only pick up cells within the box. */
+      stampCommandPass(
+        octx,
+        txtEntry,
+        (c) => {
+          c.save();
+          c.beginPath();
+          c.rect(geo.boxLeft + padX, geo.boxTop, contentW, geo.boxH);
+          c.clip();
+          c.font = `600 ${geo.fontPx}px ${DIR_FONT}`;
+          c.fillText(text, entryX - txtScrollPx, cy);
+          c.restore();
+        },
+        1,
+        null,
+        -1
+      );
+    }
+
+    const caretX = Math.round(entryX + textW - txtScrollPx + geo.fontPx * 0.12);
+    if (caretX >= geo.boxLeft + padX && caretX < geo.boxLeft + padX + contentW + 2) {
+      const caretY = Math.round(cy - geo.fontPx * 0.55);
+      const caretW = Math.max(1, Math.round(geo.fontPx * 0.16) - 1);
+      const caretH = Math.max(3, Math.round(geo.fontPx * 1.1));
+      stampCommandPass(
+        octx,
+        txtCaret,
+        (c) => c.fillRect(caretX, caretY, caretW, caretH),
+        1,
+        null,
+        -1
+      );
+    }
+  }
+
   /** Rebake in place — resize / density keeps the box open and settled. */
   function rebakeTextOverlay() {
     if (!txtOpen || txtClosing) return;
     if (!bakeTextBox(true)) releaseTextBuffers();
+    else bakeTextEntry();
   }
 
   /**
@@ -2681,17 +2807,24 @@ export function createIntroController(deps) {
     }
 
     const t = wall - txtStartWall;
+    const caretPhase = (wall - txtCaretWall) % CMD_CARET_MS;
+    const caretLit = caretPhase < CMD_CARET_MS * 0.55;
+
     for (let i = 0; i < n; i++) {
       const lv = txtLevel[i];
-      if (!(lv > 0)) continue;
-      const at = txtAt[i];
-      if (t < at) continue;
-      const e = easeOutCubic(Math.min(1, (t - at) / CMD_MIGRATE_MS));
-      txtOn[i] = lv * (0.35 + 0.65 * e);
-      if (e < 1) {
-        txtOx[i] = txtDriftX[i] * (1 - e);
-        txtOy[i] = txtDriftY[i] * (1 - e);
+      if (lv > 0) {
+        const at = txtAt[i];
+        if (t >= at) {
+          const e = easeOutCubic(Math.min(1, (t - at) / CMD_MIGRATE_MS));
+          txtOn[i] = lv * (0.35 + 0.65 * e);
+          if (e < 1) {
+            txtOx[i] = txtDriftX[i] * (1 - e);
+            txtOy[i] = txtDriftY[i] * (1 - e);
+          }
+        }
       }
+      if (txtEntry && txtEntry[i] > txtOn[i]) txtOn[i] = txtEntry[i];
+      if (caretLit && txtCaret && txtCaret[i] > txtOn[i]) txtOn[i] = txtCaret[i];
     }
     return true;
   }
@@ -2710,14 +2843,52 @@ export function createIntroController(deps) {
       finishTextClose();
       return false;
     }
+    txtContent = '';
+    txtScrollPx = 0;
+    bakeTextEntry();
     txtStartWall = performance.now();
+    txtCaretWall = txtStartWall;
     return true;
+  }
+
+  /**
+   * @param {string} text
+   */
+  function setScreen2TextBoxText(text) {
+    if (!txtOpen || txtClosing) return;
+    const next = String(text == null ? '' : text);
+    if (next !== txtContent) {
+      txtContent = next;
+      txtCaretWall = performance.now();
+      bakeTextEntry();
+    }
+  }
+
+  /**
+   * Grid-space geometry of the open text box — lets the DOM capture field
+   * track the LED box the way the command palette does.
+   */
+  function getScreen2TextBox() {
+    if (!txtOpen || txtClosing) return null;
+    const geo = textBoxGeometry();
+    if (!geo) return null;
+    return {
+      cell: ledCell,
+      fontPx: geo.fontPx,
+      boxLeft: geo.boxLeft,
+      boxTop: geo.boxTop,
+      boxW: geo.boxW,
+      boxH: geo.boxH,
+      cy: Math.round(geo.boxTop + geo.boxH * 0.5),
+    };
   }
 
   function finishTextClose() {
     txtOpen = false;
     txtClosing = false;
     txtCloseWall = 0;
+    txtContent = '';
+    txtScrollPx = 0;
     releaseTextBuffers();
   }
 
@@ -2825,15 +2996,10 @@ export function createIntroController(deps) {
 
     if (cols < 16 || rows < 16) return;
 
-    const off = document.createElement('canvas');
-    off.width = cols;
-    off.height = rows;
-    const octx = off.getContext('2d', { alpha: false });
+    const octx = superCanvas();
     if (!octx) return;
 
-    /* Same scaling language as Screen 1 directory (rows × 0.078 + fit),
-       with smaller arrow chevrons reserved in the layout width. */
-    let fontPx = Math.max(5, Math.floor(rows * 0.078));
+    let fontPx = Math.max(MIN_FONT, Math.floor(rows * 0.078));
     fontPx = fitDirFont(octx, S2_LINES, cols * 0.92, fontPx, S2_ARROW_SCALE);
     octx.font = `600 ${fontPx}px ${DIR_FONT}`;
 
@@ -3968,6 +4134,8 @@ export function createIntroController(deps) {
     replayScreen2Menu: replayScreen2Menu,
     clearScreen2Lines: clearScreen2Lines,
     openScreen2TextBox: openScreen2TextBox,
+    setScreen2TextBoxText: setScreen2TextBoxText,
+    getScreen2TextBox: getScreen2TextBox,
     closeScreen2TextBox: closeScreen2TextBox,
     isScreen2TextBoxOpen: isScreen2TextBoxOpen,
   };

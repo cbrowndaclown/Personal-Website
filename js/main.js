@@ -178,6 +178,8 @@ import { initCommandPalette } from './command-palette/index.js';
       getPixelDensity: engine.getPixelDensity,
       setPixelDensity: engine.setPixelDensity,
       isPixelDensityLocked: engine.isPixelDensityLocked,
+      /* Live lattice pitch — the full screen settings clear sweeps on it. */
+      getPixelCell: () => engine.grid.cell,
       getEffectQuality: engine.getEffectQuality,
       setEffectQuality: engine.setEffectQuality,
       getFrameRateTarget: engine.getFrameRateTarget,

@@ -102,6 +102,9 @@ export function initSettings(api) {
   const syncFns = [];
   const softSyncFns = [];
   const sectionHandles = [];
+  /* Top level categories only — the full screen rail routes these into its
+     detail column, so it needs them apart from their nested subsections. */
+  const categorySections = [];
 
   function syncFromConfig() {
     if (suppressSyncDepth > 0) return;
@@ -168,6 +171,8 @@ export function initSettings(api) {
     foot,
     button: btn,
     api,
+    categorySections,
+    sections: sectionHandles,
     onExpand: () => setOpen(false),
   });
 
@@ -201,6 +206,7 @@ export function initSettings(api) {
     });
     body.appendChild(section.root);
     sectionHandles.push(section);
+    categorySections.push(section);
   });
 
   bindAccordion({

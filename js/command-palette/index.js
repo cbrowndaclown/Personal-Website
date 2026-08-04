@@ -123,7 +123,19 @@ export function initCommandPalette(options) {
   input.maxLength = MAX_ENTRY;
   input.setAttribute('aria-label', 'Command input');
 
-  root.append(list, input);
+  /* Text box input — lives next to the command input but only captures
+     keystrokes while the text box is open. */
+  const txtInput = document.createElement('input');
+  txtInput.className = 'command-palette__input command-palette__input--text';
+  txtInput.type = 'text';
+  txtInput.autocomplete = 'off';
+  txtInput.autocapitalize = 'off';
+  txtInput.spellcheck = false;
+  txtInput.setAttribute('aria-label', 'Text box input');
+
+  let txtOpen = false;
+
+  root.append(list, input, txtInput);
   screen.append(root);
 
   /* ── Geometry ───────────────────────────────────────────────────────── */
@@ -292,6 +304,7 @@ export function initCommandPalette(options) {
         if (typeof ctrl.openScreen2TextBox === 'function') {
           ctrl.openScreen2TextBox();
         }
+        openTextInput();
       },
     });
     if (!started) endRun();
@@ -427,10 +440,91 @@ export function initCommandPalette(options) {
     }
   }
 
+  /* ── Text box input ─────────────────────────────────────────────────── */
+
+  function layoutTextInput() {
+    const ctrl = resolveIntro();
+    if (!ctrl || typeof ctrl.getScreen2TextBox !== 'function') return;
+    const box = ctrl.getScreen2TextBox();
+    if (!box || !(box.cell > 0)) return;
+
+    const canvasRect = canvas.getBoundingClientRect();
+    const screenRect = screen.getBoundingClientRect();
+    const originX = canvasRect.left - screenRect.left;
+    const originY = canvasRect.top - screenRect.top;
+
+    const left = Math.round(originX + box.boxLeft * box.cell);
+    const top = Math.round(originY + box.boxTop * box.cell);
+    const w = Math.round(box.boxW * box.cell);
+    const h = Math.round(box.boxH * box.cell);
+    const font = Math.round(box.fontPx * box.cell);
+
+    root.style.setProperty('--tp-left', `${left}px`);
+    root.style.setProperty('--tp-top', `${top}px`);
+    root.style.setProperty('--tp-width', `${w}px`);
+    root.style.setProperty('--tp-height', `${h}px`);
+    root.style.setProperty('--tp-font', `${font}px`);
+  }
+
+  function syncTextEntry() {
+    const ctrl = resolveIntro();
+    if (ctrl && typeof ctrl.setScreen2TextBoxText === 'function') {
+      ctrl.setScreen2TextBoxText(txtInput.value);
+    }
+  }
+
+  function openTextInput() {
+    if (txtOpen) return;
+    txtOpen = true;
+    layoutTextInput();
+    txtInput.value = '';
+    txtInput.style.pointerEvents = 'auto';
+    requestAnimationFrame(() => {
+      txtInput.focus({ preventScroll: true });
+    });
+  }
+
+  function closeTextInput() {
+    if (!txtOpen) return;
+    txtOpen = false;
+    txtInput.blur();
+    txtInput.value = '';
+    txtInput.style.pointerEvents = '';
+  }
+
+  txtInput.addEventListener('input', syncTextEntry);
+
+  txtInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      const ctrl = resolveIntro();
+      if (ctrl && typeof ctrl.closeScreen2TextBox === 'function') {
+        ctrl.closeScreen2TextBox();
+      }
+      closeTextInput();
+      return;
+    }
+  });
+
+  txtInput.addEventListener('blur', () => {
+    requestAnimationFrame(() => {
+      if (!txtOpen) return;
+      if (document.hidden || !document.hasFocus()) return;
+      if (root.contains(document.activeElement)) return;
+      const ctrl = resolveIntro();
+      if (ctrl && typeof ctrl.closeScreen2TextBox === 'function') {
+        ctrl.closeScreen2TextBox();
+      }
+      closeTextInput();
+    });
+  });
+
   /* ── Input wiring ───────────────────────────────────────────────────── */
 
   function editableTarget(target) {
     if (!target || !target.closest) return false;
+    if (target === txtInput) return true;
     return !!(
       target.closest('input') ||
       target.closest('textarea') ||
@@ -456,7 +550,9 @@ export function initCommandPalette(options) {
     if (e.key !== 'Escape' || open) return;
     /* Settings owns Escape while its panel is up. */
     if (document.querySelector('.settings__panel.is-open')) return;
-    if (editableTarget(e.target) || !onScreen2()) return;
+    if (!onScreen2()) return;
+    /* The txtInput's own keydown already handles Escape when it has focus. */
+    if (e.target === txtInput) return;
     const ctrl = resolveIntro();
     if (
       !ctrl ||
@@ -467,6 +563,7 @@ export function initCommandPalette(options) {
     }
     e.preventDefault();
     ctrl.closeScreen2TextBox();
+    closeTextInput();
   });
 
   input.addEventListener('input', syncEntry);
@@ -508,9 +605,15 @@ export function initCommandPalette(options) {
     });
   });
 
-  /* Reclaim the caret when returning to a still-open palette. */
+  /* Reclaim the caret when returning to a still-open palette or text box. */
   function restoreFocusIfOpen() {
-    if (!open || document.hidden || !document.hasFocus()) return;
+    if (document.hidden || !document.hasFocus()) return;
+    if (txtOpen) {
+      if (document.activeElement === txtInput) return;
+      txtInput.focus({ preventScroll: true });
+      return;
+    }
+    if (!open) return;
     if (document.activeElement === input) return;
     input.focus({ preventScroll: true });
   }
@@ -521,13 +624,17 @@ export function initCommandPalette(options) {
      already authoritative here. */
   window.addEventListener('appscrollchange', () => {
     if (onScreen2()) scheduleLayout();
-    else closePalette({ instant: true });
+    else {
+      closePalette({ instant: true });
+      closeTextInput();
+    }
   });
 
   /* A menu replay (density rebuild, motion re-enable) re-raises Screen 2 from
      scratch and drops the LED box with it — do not keep capturing keys. */
   window.addEventListener('pixeldirectorystart', () => {
     closePalette({ instant: true });
+    closeTextInput();
   });
 
   window.addEventListener('resize', scheduleLayout, { passive: true });
