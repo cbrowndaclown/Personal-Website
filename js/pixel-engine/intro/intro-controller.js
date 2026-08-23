@@ -288,6 +288,8 @@ export function createIntroController(deps) {
   let directoryAllowed = false;
   /* Which menu content occupies the shared directory LED buffers: 1 | 2 */
   let menuSurface = 1;
+  /* Which screen the current d* buffers were baked for (0 = none). */
+  let bakedMenuSurface = 0;
   /* Screen 2 menu assemble plays at most once per page load */
   let screen2MenuPlayed = false;
   /*
@@ -1166,6 +1168,7 @@ export function createIntroController(deps) {
     dPinWord = null;
     idleYCache = null;
     assembleMs = 0;
+    bakedMenuSurface = 0;
   }
 
   /**
@@ -1496,6 +1499,7 @@ export function createIntroController(deps) {
       return;
     }
     menuSurface = 1;
+    bakedMenuSurface = 1;
     setMenuFade(1, 0);
     const instant = !!(opts && opts.instant);
     /* Density rebuild uses a tighter timing profile; startup stays DIR_TIMING. */
@@ -2968,6 +2972,8 @@ export function createIntroController(deps) {
       clearDirectoryLeds();
       return;
     }
+    menuSurface = 2;
+    bakedMenuSurface = 2;
     /* A clear front cannot survive a rebake — settle it so the cleared lines
        stay masked on the new lattice. */
     if (s2ClearActive) finishScreen2Clear();
@@ -3199,7 +3205,9 @@ export function createIntroController(deps) {
    */
   function beginScreen2MenuSequence(opts) {
     opts = opts || {};
-    if (killed || contentLocked) return;
+    /* Intentional start — clear cancel/lock like beginDirectorySequence. */
+    killed = false;
+    contentLocked = false;
     ensureGrid();
     clearDissolveTimer();
     clearIntroLeds();
@@ -3296,6 +3304,31 @@ export function createIntroController(deps) {
     return menuSurface;
   }
 
+  /**
+   * Visible app screen index from #site-frame (0 = Screen 1, 1 = Screen 2).
+   * @returns {number | null}
+   */
+  function readLiveAppScreen() {
+    const frame = document.getElementById('site-frame');
+    if (!frame || frame.dataset.appScreen == null) return null;
+    const n = Number(frame.dataset.appScreen);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  /**
+   * Align menuSurface with the screen currently in view. Density / preset /
+   * motion restore must not trust a cache that cancel() or a Screen 1 bake
+   * may have left stale while the user is still on Screen 2.
+   * @returns {1 | 2}
+   */
+  function syncMenuSurfaceFromLiveScreen() {
+    const screen = readLiveAppScreen();
+    if (screen != null) {
+      menuSurface = screen >= 1 ? 2 : 1;
+    }
+    return menuSurface;
+  }
+
   function hasPlayedScreen2Menu() {
     return screen2MenuPlayed;
   }
@@ -3363,6 +3396,7 @@ export function createIntroController(deps) {
     /* Allow bake buffers; keep locked so brightness()/update stay silent. */
     directoryAllowed = true;
     contentLocked = true;
+    syncMenuSurfaceFromLiveScreen();
     const bakeOpts = opts.instant
       ? { instant: true }
       : opts.densityRebuild !== false
@@ -3391,17 +3425,20 @@ export function createIntroController(deps) {
     contentLocked = false;
     directoryAllowed = true;
     clearIntroLeds();
+    /* Live screen wins — stage 4 may have baked the wrong menu if surface
+       was stale (e.g. cancel used to force Screen 1 while parked on Screen 2). */
+    const surface = syncMenuSurfaceFromLiveScreen();
 
-    if (!dOn || !dBitmap) {
+    if (!dOn || !dBitmap || bakedMenuSurface !== surface) {
       const bakeOpts = opts.instant
         ? { instant: true }
         : { densityRebuild: true };
-      if (menuSurface === 2) bakeScreen2Menu(bakeOpts);
+      if (surface === 2) bakeScreen2Menu(bakeOpts);
       else bakeDirectory(bakeOpts);
     }
 
     /* Keep Screen 2 session latch in sync when density rebuilds on Screen 2. */
-    if (menuSurface === 2) screen2MenuPlayed = true;
+    if (surface === 2) screen2MenuPlayed = true;
 
     if (opts.instant) {
       paintDirectoryHold();
@@ -3634,7 +3671,9 @@ export function createIntroController(deps) {
     killed = true;
     contentLocked = false;
     directoryAllowed = false;
-    menuSurface = 1;
+    /* Keep menuSurface (and sync from the live screen) so a density rebuild
+       or motion re-enable on Screen 2 does not fall back to Screen 1 directory. */
+    syncMenuSurfaceFromLiveScreen();
     clearDissolveTimer();
     directoryMagLock = false;
     clearIntroLeds();
@@ -4111,6 +4150,7 @@ export function createIntroController(deps) {
     settleScreen2Menu: settleScreen2Menu,
     restoreScreen1Menu: restoreScreen1Menu,
     getMenuSurface: getMenuSurface,
+    syncMenuSurfaceFromLiveScreen: syncMenuSurfaceFromLiveScreen,
     hasPlayedScreen2Menu: hasPlayedScreen2Menu,
     fadeMenuOut: fadeMenuOut,
     fadeMenuIn: fadeMenuIn,

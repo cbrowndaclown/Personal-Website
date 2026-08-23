@@ -302,7 +302,11 @@ export function createDensityRebuildPipeline(options) {
       return true;
     }
     const surface =
-      typeof intro.getMenuSurface === 'function' ? intro.getMenuSurface() : 1;
+      typeof intro.syncMenuSurfaceFromLiveScreen === 'function'
+        ? intro.syncMenuSurfaceFromLiveScreen()
+        : typeof intro.getMenuSurface === 'function'
+          ? intro.getMenuSurface()
+          : 1;
     if (
       surface === 2 &&
       typeof intro.beginScreen2MenuSequence === 'function'

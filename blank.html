@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Canaan Brown — Blank</title>
+  <link href="https://fonts.cdnfonts.com/css/porca" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body data-blank-stage>
+  <!--
+    Blank stage page — password-gated. After unlock: page-shell + inert
+    9:16 Pixel FS resting grid (no boot, nav, ribbon, or interaction).
+  -->
+  <div class="blank-gate" id="blank-gate">
+    <form class="blank-gate__form" id="blank-gate-form" autocomplete="current-password">
+      <label class="blank-gate__label" for="blank-gate-password">Password</label>
+      <input
+        class="blank-gate__input"
+        id="blank-gate-password"
+        name="password"
+        type="password"
+        autocomplete="current-password"
+        spellcheck="false"
+        required
+      />
+      <button class="blank-gate__submit" type="submit">Enter</button>
+      <p class="blank-gate__error" id="blank-gate-error" hidden></p>
+    </form>
+  </div>
+
+  <div class="site-frame" id="site-frame" aria-hidden="true">
+    <div class="page-shell" id="home">
+      <div class="app-scroll" id="app-scroll">
+        <section
+          class="pixel-fs-screen"
+          id="pixel-fs-screen-1"
+          aria-label="Pixel FS blank stage"
+        >
+          <div class="stage">
+            <div class="stage__field" id="stage" aria-hidden="true">
+              <canvas id="heatmap" class="heatmap" aria-hidden="true"></canvas>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/blank-auth.js"></script>
+</body>
+</html>

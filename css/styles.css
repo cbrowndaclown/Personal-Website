@@ -2099,4 +2099,146 @@ body[data-motion="on"][data-bg-mode="lightning"] .lightning-cursor.is-in-field {
   }
 }
 
+/* ============================================================
+   BLANK STAGE PAGE — shell + one inert 9:16 field.
+   No topnav, ribbon, Screen 2, boot, or Pixel Engine.
+   Password gate unlocks the resting lattice for this session.
+   ============================================================ */
+body[data-blank-stage] .site-frame {
+  /* Homepage parks under the nav; this page has no nav. */
+  transform: none;
+  transition: none;
+  will-change: auto;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+body[data-blank-stage][data-blank-unlocked] .site-frame {
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.blank-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #FFFFFF;
+  font-family: var(--f-ui);
+}
+
+.blank-gate[hidden] {
+  display: none;
+}
+
+.blank-gate__form {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  width: min(280px, calc(100vw - 48px));
+}
+
+.blank-gate__label {
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(32, 26, 18, 0.48);
+}
+
+.blank-gate__input {
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid rgba(32, 26, 18, 0.14);
+  border-radius: 0;
+  background: #FFFFFF;
+  color: rgba(32, 26, 18, 0.88);
+  font-family: var(--f-ui);
+  font-size: 16px;
+  outline: none;
+}
+
+.blank-gate__input:focus {
+  border-color: rgba(32, 26, 18, 0.42);
+}
+
+.blank-gate__submit {
+  height: 44px;
+  border: 0;
+  background: rgba(32, 26, 18, 0.88);
+  color: #FFFFFF;
+  font-family: var(--f-ui);
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.blank-gate__submit:hover,
+.blank-gate__submit:focus-visible {
+  background: rgba(32, 26, 18, 1);
+}
+
+.blank-gate__error {
+  min-height: 1.2em;
+  margin: 0;
+  font-size: 13px;
+  color: rgb(var(--boot-accent-rgb));
+}
+
+.blank-gate__error[hidden] {
+  display: none;
+}
+
+body[data-blank-stage] .page-shell {
+  /* Equal chrome so the portrait panel sits in a white frame. */
+  padding: var(--shell-pad-y) var(--shell-pad-x);
+}
+
+body[data-blank-stage] .app-scroll {
+  inset: var(--shell-pad-y) var(--shell-pad-x);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  scroll-snap-type: none;
+  overscroll-behavior: none;
+  pointer-events: none;
+  touch-action: none;
+}
+
+body[data-blank-stage] .pixel-fs-screen {
+  /* Largest 9:16 box that fits the shell aperture. */
+  width: min(100%, calc(100cqh * 9 / 16));
+  height: auto;
+  aspect-ratio: 9 / 16;
+  max-height: 100%;
+  flex-shrink: 0;
+  scroll-snap-align: none;
+}
+
+body[data-blank-stage] .stage,
+body[data-blank-stage] .stage__field {
+  /* Closed portrait panel — not the homepage open-bottom Screen 1. */
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border-radius: var(--stage-radius);
+}
+
+body[data-blank-stage] .stage__field {
+  /* Match Pixel FS FIELD until / while the resting lattice paints. */
+  background-color: var(--heat-field);
+  pointer-events: none;
+  cursor: default;
+  user-select: none;
+  touch-action: none;
+}
+
+body[data-blank-stage] .heatmap {
+  pointer-events: none;
+}
+
 

@@ -89,7 +89,7 @@ export function createBootController(options) {
   let presetRefreshing = false;
   /**
    * Soft preset refresh — procedural menu assemble after recalibration
-   * (same beginDirectorySequence path as startup).
+   * (Screen 1 directory or Screen 2 menu for the screen in view).
    */
   let presetMenuRestoring = false;
   /**
@@ -534,8 +534,23 @@ export function createBootController(options) {
   }
 
   /**
-   * After soft recalibration: play the same procedural directory assemble used
-   * at startup. Interaction stays locked until pixeldirectoryhold.
+   * Resolve which menu the live screen should restore (Screen 1 directory vs
+   * Screen 2 menu). Prefers the visible app screen over a stale cache.
+   * @returns {1 | 2}
+   */
+  function resolveRestoreMenuSurface() {
+    if (typeof intro.syncMenuSurfaceFromLiveScreen === 'function') {
+      return intro.syncMenuSurfaceFromLiveScreen();
+    }
+    if (typeof intro.getMenuSurface === 'function') {
+      return intro.getMenuSurface();
+    }
+    return 1;
+  }
+
+  /**
+   * After soft recalibration: replay the menu for the screen in view.
+   * Interaction stays locked until pixeldirectoryhold.
    * @param {{ instant?: boolean }} [opts]
    */
   function restoreMenuAfterPresetRefresh(opts) {
@@ -550,8 +565,14 @@ export function createBootController(options) {
       return;
     }
 
+    const onScreen2 = resolveRestoreMenuSurface() === 2;
+
     /* Reduced motion — snap to hold (still goes through hold → unlock). */
     if (opts.instant || prefersReduced || !animConfig.motion) {
+      if (onScreen2 && typeof intro.beginScreen2MenuSequence === 'function') {
+        intro.beginScreen2MenuSequence({ instant: true });
+        return;
+      }
       if (typeof intro.skipToDirectoryHold === 'function') {
         intro.skipToDirectoryHold();
         return;
@@ -561,9 +582,14 @@ export function createBootController(options) {
     }
 
     /*
-      Exact startup menu path — bake + procedural assemble (DIR_TIMING).
+      Exact menu path for the screen in view — bake + procedural assemble.
       Do not use density-rebuild timing; presets reuse the post-boot sequence.
+      Screen 2 must never fall through to Screen 1 directory.
     */
+    if (onScreen2 && typeof intro.beginScreen2MenuSequence === 'function') {
+      intro.beginScreen2MenuSequence();
+      return;
+    }
     if (typeof intro.beginDirectorySequence === 'function') {
       intro.beginDirectorySequence();
       return;
@@ -624,8 +650,7 @@ export function createBootController(options) {
       return;
     }
 
-    const surface =
-      typeof intro.getMenuSurface === 'function' ? intro.getMenuSurface() : 1;
+    const surface = resolveRestoreMenuSurface();
     if (
       surface === 2 &&
       typeof intro.beginScreen2MenuSequence === 'function'
@@ -1624,11 +1649,9 @@ export function createBootController(options) {
       ensureFieldSize();
       field.fillPresence(1);
       jumpToReady({ instantDirectory: false });
-      /* Motion can be toggled from either screen — replay whichever menu the
-         shared typography buffers were holding. */
-      const onScreen2 =
-        typeof intro.getMenuSurface === 'function' &&
-        intro.getMenuSurface() === 2;
+      /* Motion can be toggled from either screen — restore the menu for the
+         screen currently in view (live app screen, not a stale cache). */
+      const onScreen2 = resolveRestoreMenuSurface() === 2;
       if (onScreen2 && typeof intro.beginScreen2MenuSequence === 'function') {
         intro.beginScreen2MenuSequence({ instant: true });
       } else {
