@@ -3,7 +3,6 @@
 import { createSection } from './section.js';
 import { bindAccordion } from './accordion.js';
 import { getSettingsCatalog } from './catalog.js';
-import { createSettingsExpander } from './expand.js';
 import { resetSettingsToDefaults } from './definitions/index.js';
 import { isAppStartup } from '../app-startup.js';
 
@@ -102,9 +101,6 @@ export function initSettings(api) {
   const syncFns = [];
   const softSyncFns = [];
   const sectionHandles = [];
-  /* Top level categories only — the full screen rail routes these into its
-     detail column, so it needs them apart from their nested subsections. */
-  const categorySections = [];
 
   function syncFromConfig() {
     if (suppressSyncDepth > 0) return;
@@ -140,15 +136,13 @@ export function initSettings(api) {
     },
   };
 
-  /* Motion is no longer a setting of its own — the full screen panel owns the
-     off state, and that panel never survives a reload. A persisted off would
-     leave a dead field with nothing left in the UI to revive it. */
+  /* Ensure motion is always on at init — a persisted off would leave a dead
+     field with nothing left in the UI to revive it. */
   if (typeof api.getMotion === 'function' && !api.getMotion()) {
     api.setMotion(true);
   }
 
-  /* Reset footer — data-driven via SETTINGS defaultValue. Built before the
-     catalog so the expander can move it with the body. */
+  /* Reset footer — loads the Default preset to restore factory settings. */
   const foot = document.createElement('div');
   foot.className = 'settings__foot';
   const resetBtn = document.createElement('button');
@@ -159,32 +153,11 @@ export function initSettings(api) {
   resetBtn.setAttribute('aria-label', 'Reset all settings to defaults');
   resetBtn.addEventListener('click', () => {
     resetSettingsToDefaults(api);
-    /* Defaults restore motion, but the field is the panel right now. */
-    if (expander && expander.isExpanded()) api.setMotion(false);
     syncFromConfig();
   });
   foot.appendChild(resetBtn);
 
-  const expander = createSettingsExpander({
-    panel,
-    body,
-    foot,
-    button: btn,
-    api,
-    categorySections,
-    sections: sectionHandles,
-    onExpand: () => setOpen(false),
-  });
-
-  /* Catalog-facing api — engine getters plus the panel's own surface control,
-     so a SettingDef can drive the expansion like any other setting. */
-  const uiApi = expander
-    ? Object.assign({}, api, {
-        expandSettings: () => expander.expand(),
-        collapseSettings: () => expander.collapse(),
-        isSettingsExpanded: () => expander.isExpanded(),
-      })
-    : api;
+  const uiApi = api;
 
   getSettingsCatalog(uiApi, syncGate).forEach((entry) => {
     const section = createSection({
@@ -206,7 +179,6 @@ export function initSettings(api) {
     });
     body.appendChild(section.root);
     sectionHandles.push(section);
-    categorySections.push(section);
   });
 
   bindAccordion({
@@ -266,11 +238,6 @@ export function initSettings(api) {
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     if (isAppStartup()) return;
-    /* The gear is the way back out of the full screen panel. */
-    if (expander && expander.isExpanded()) {
-      expander.collapse();
-      return;
-    }
     setOpen(!open);
   });
 
@@ -281,10 +248,6 @@ export function initSettings(api) {
 
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
-    if (expander && expander.isExpanded()) {
-      expander.collapse();
-      return;
-    }
     if (open) setOpen(false);
   });
 

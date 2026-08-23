@@ -4,19 +4,11 @@
 import { getStyleSegmentOptions } from './styles.js';
 import { scaledSliderSetting } from '../scale.js';
 import {
-  CURSOR_MODE_DEFAULT,
-  CURSOR_MODE_OPTIONS,
-} from '../../pixel-engine/cursor-mode.js';
-import {
   PERFORMANCE_DEFAULTS,
   FRAME_RATE_OPTIONS,
   PIXEL_DENSITY_MIN,
   PIXEL_DENSITY_MAX,
 } from '../../pixel-engine/performance-manager.js';
-import {
-  getBuiltinPresetOptions,
-  PRESET_CUSTOM_ID,
-} from '../presets/index.js';
 
 /**
  * @typedef {'segment' | 'rgb' | 'slider' | 'dropdown' | 'toggle' | 'color' | 'number' | 'button'} SettingType
@@ -73,37 +65,14 @@ export const EMPTY_SETTINGS_MESSAGE = 'No settings available yet';
  */
 export const SETTINGS_CATEGORIES = [
   {
-    id: 'presets',
-    title: 'Preset',
-    defaultOpen: true,
-  },
-  {
     id: 'pixel-behavior',
     title: 'Pixel Behavior',
     defaultOpen: false,
-    sections: [
-      {
-        id: 'heat',
-        title: 'Heat',
-        defaultOpen: true,
-        styleId: 'heat',
-      },
-    ],
   },
   {
     id: 'visual-effects',
     title: 'Visual Effects',
     defaultOpen: true,
-  },
-  {
-    id: 'animations',
-    title: 'Animations',
-    defaultOpen: true,
-  },
-  {
-    id: 'cursor-interaction',
-    title: 'Cursor Interaction',
-    defaultOpen: false,
   },
   {
     id: 'performance',
@@ -122,60 +91,6 @@ export const SETTINGS_CATEGORIES = [
  * @type {SettingDef[]}
  */
 export const SETTINGS = [
-  /* Preset — top of the inspector. Every named preset (including Default)
-     loads through the same transition pipeline. Custom is not selectable as a
-     target: it appears when live settings no longer match a loaded built-in.
-     Soft edits must refresh this row (syncOnSoft). */
-  {
-    id: 'pixel-preset',
-    label: 'Preset',
-    desc: 'Complete Pixel FS experience — refresh transition applies the load',
-    categoryId: 'presets',
-    type: 'dropdown',
-    defaultValue: 'default',
-    syncOnSoft: true,
-    disabledWhen: (api) =>
-      (typeof api.isPresetSystemActive === 'function' &&
-        !api.isPresetSystemActive()) ||
-      (typeof api.isPresetTransitionActive === 'function' &&
-        api.isPresetTransitionActive()) ||
-      (typeof api.isPixelDensityLocked === 'function' &&
-        api.isPixelDensityLocked()),
-    optionsFrom: (api) => {
-      const opts =
-        api && typeof api.getPresetOptions === 'function'
-          ? api.getPresetOptions()
-          : getBuiltinPresetOptions();
-      /* Built-ins first (Default included), Custom last for display only —
-         set() ignores Custom so it never overwrites a built-in definition. */
-      return [
-        ...opts,
-        { value: PRESET_CUSTOM_ID, label: 'Custom' },
-      ];
-    },
-    get: (api) => {
-      if (typeof api.getActivePresetId === 'function') {
-        return api.getActivePresetId() || PRESET_CUSTOM_ID;
-      }
-      return PRESET_CUSTOM_ID;
-    },
-    set: (api, value) => {
-      if (!value || value === PRESET_CUSTOM_ID) return;
-      if (
-        typeof api.isPresetSystemActive === 'function' &&
-        !api.isPresetSystemActive()
-      ) {
-        return;
-      }
-      if (
-        typeof api.isPresetTransitionActive === 'function' &&
-        api.isPresetTransitionActive()
-      ) {
-        return;
-      }
-      if (typeof api.loadPreset === 'function') api.loadPreset(value);
-    },
-  },
   /* Shared Pixel Behavior — category root; UI 0–10, engine native ranges.
      Physical properties of the Pixel FS. Future knobs (gravity, friction,
      turbulence, …) join this group; modes interpret them per energy model. */
@@ -231,37 +146,6 @@ export const SETTINGS = [
       internal: { min: 0.85, max: 0.995, default: 0.965 },
     },
   ),
-  /* Heat knobs — nested under Pixel Behavior → Heat; UI 0–10, engine native ranges. */
-  scaledSliderSetting(
-    {
-      id: 'heat-intensity',
-      label: 'Heat Intensity',
-      desc: 'How strongly pixels react to heat',
-      categoryId: 'pixel-behavior',
-      sectionId: 'heat',
-      styleId: 'heat',
-    },
-    {
-      get: (api) => api.getHeatIntensity(),
-      set: (api, value) => api.setHeatIntensity(value),
-      internal: { min: 0, max: 1, default: 0.92 },
-    },
-  ),
-  scaledSliderSetting(
-    {
-      id: 'heat-radius',
-      label: 'Heat Radius',
-      desc: 'Area around the cursor affected by heat',
-      categoryId: 'pixel-behavior',
-      sectionId: 'heat',
-      styleId: 'heat',
-    },
-    {
-      get: (api) => api.getHeatRadius(),
-      set: (api, value) => api.setHeatRadius(value),
-      internal: { min: 1, max: 30, default: 11.8 },
-    },
-  ),
   {
     id: 'style',
     label: 'Style',
@@ -293,38 +177,7 @@ export const SETTINGS = [
     get: (api) => api.getEffectColor(),
     set: (api, rgb, publish) => api.setEffectColor(rgb.r, rgb.g, rgb.b, publish),
   },
-  /* Replaces the old Motion on/off pair: switching the pixel field off now
-     hands that space to the inspector instead of leaving it blank. The panel
-     opens inside whichever screen is in view and restores motion on close. */
-  {
-    id: 'settings-surface',
-    label: 'Full Screen Settings',
-    desc: 'Turn the pixel field into a full size settings panel',
-    categoryId: 'animations',
-    type: 'button',
-    get: (api) =>
-      typeof api.isSettingsExpanded === 'function' && api.isSettingsExpanded()
-        ? 'Close'
-        : 'Open',
-    set: (api) => {
-      if (typeof api.isSettingsExpanded !== 'function') return;
-      if (api.isSettingsExpanded()) api.collapseSettings();
-      else api.expandSettings();
-    },
-    disabledWhen: (api) => typeof api.expandSettings !== 'function',
-  },
-  {
-    id: 'cursor-mode',
-    label: 'Cursor Mode',
-    desc: 'How the cursor interacts with the active Pixel FS style',
-    categoryId: 'cursor-interaction',
-    type: 'dropdown',
-    defaultValue: CURSOR_MODE_DEFAULT,
-    options: CURSOR_MODE_OPTIONS.slice(),
-    get: (api) => api.getCursorMode(),
-    set: (api, value) => api.setCursorMode(value),
-  },
-  /* Performance — density, quality, FPS, adaptive. Defaults preserve V1 look. */
+  /* Performance — density, FPS, adaptive. Defaults preserve V1 look. */
   {
     id: 'pixel-density',
     label: 'Pixel Density',
@@ -338,17 +191,6 @@ export const SETTINGS = [
     disabledWhen: (api) =>
       typeof api.isPixelDensityLocked === 'function' &&
       api.isPixelDensityLocked(),
-  },
-  {
-    id: 'effect-quality',
-    label: 'Effect Quality',
-    desc: 'Simulation quality, visual fidelity, and effect precision',
-    categoryId: 'performance',
-    type: 'slider',
-    defaultValue: PERFORMANCE_DEFAULTS.effectQuality,
-    range: { min: 0, max: 10, step: 1 },
-    get: (api) => api.getEffectQuality(),
-    set: (api, value) => api.setEffectQuality(value),
   },
   {
     id: 'frame-rate-target',
