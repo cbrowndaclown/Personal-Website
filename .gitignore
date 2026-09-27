@@ -14,3 +14,6 @@ Thumbs.db
 *.log
 .env
 .env.*
+
+# Local clone of a separate repo (not part of the site)
+storyscope/
