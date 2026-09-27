@@ -6,8 +6,6 @@ import { scaledSliderSetting } from '../scale.js';
 import {
   PERFORMANCE_DEFAULTS,
   FRAME_RATE_OPTIONS,
-  PIXEL_DENSITY_MIN,
-  PIXEL_DENSITY_MAX,
 } from '../../pixel-engine/performance-manager.js';
 
 /**
@@ -181,13 +179,23 @@ export const SETTINGS = [
   {
     id: 'pixel-density',
     label: 'Pixel Density',
-    desc: 'Pixel grid density preset. Lower values improve performance; higher values increase detail',
+    desc: 'Pixel grid density — lower values improve performance',
     categoryId: 'performance',
-    type: 'slider',
-    defaultValue: PERFORMANCE_DEFAULTS.pixelDensity,
-    range: { min: PIXEL_DENSITY_MIN, max: PIXEL_DENSITY_MAX, step: 1 },
-    get: (api) => api.getPixelDensity(),
-    set: (api, value) => api.setPixelDensity(value),
+    type: 'segment',
+    defaultValue: String(PERFORMANCE_DEFAULTS.pixelDensity),
+    options: [
+      { value: '1', label: 'Light' },
+      { value: '3', label: 'Medium' },
+      { value: '5', label: 'High' },
+    ],
+    get: (api) => String(api.getPixelDensity()),
+    set: (api, value) => api.setPixelDensity(Number(value)),
+    resolveValue: (api, selectable) => {
+      const d = api.getPixelDensity();
+      if (d <= 2) return '1';
+      if (d >= 4) return '5';
+      return '3';
+    },
     disabledWhen: (api) =>
       typeof api.isPixelDensityLocked === 'function' &&
       api.isPixelDensityLocked(),

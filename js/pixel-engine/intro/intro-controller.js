@@ -806,7 +806,7 @@ export function createIntroController(deps) {
   function fitIntroFont(octx, lines, maxWidth, startPx) {
     let fontPx = startPx;
     for (let attempt = 0; attempt < 14; attempt++) {
-      octx.font = `600 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
+      octx.font = `500 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
       let widest = 0;
       for (let L = 0; L < lines.length; L++) {
         widest = Math.max(widest, octx.measureText(lines[L].text).width);
@@ -917,11 +917,11 @@ export function createIntroController(deps) {
     let lineGap = fontPx * 1.55;
     while (lineGap * (lineCount - 1) > rows * 0.72 && fontPx > MIN_FONT) {
       fontPx -= 1;
-      octx.font = `600 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
+      octx.font = `500 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
       lineGap = fontPx * 1.55;
     }
     fontPx = fitIntroFont(octx, INTRO_LINES, cols * 0.90, fontPx);
-    octx.font = `600 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
+    octx.font = `500 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
     lineGap = fontPx * 1.55;
 
     const blockH = lineGap * (lineCount - 1);
@@ -1367,7 +1367,7 @@ export function createIntroController(deps) {
   }
 
   function lineLayoutWidth(octx, line, fontPx, arrowScale) {
-    octx.font = `600 ${fontPx}px ${DIR_FONT}`;
+    octx.font = `500 ${fontPx}px ${DIR_FONT}`;
     const textW = octx.measureText(line.text).width;
     if (!line.arrow) return textW;
     const arrowW = arrowSizeFor(fontPx, arrowScale) * 1.05;
@@ -1433,7 +1433,7 @@ export function createIntroController(deps) {
     octx.fillStyle = '#000';
     octx.fillRect(0, 0, cols, rows);
     octx.fillStyle = '#fff';
-    octx.font = `600 ${fontPx}px ${DIR_FONT}`;
+    octx.font = `500 ${fontPx}px ${DIR_FONT}`;
     octx.textAlign = 'left';
     octx.textBaseline = 'middle';
 
@@ -1539,7 +1539,7 @@ export function createIntroController(deps) {
       lineGap = fontPx * 1.85;
     }
     fontPx = fitDirFont(octx, DIR_LINES, cols * 0.90, fontPx);
-    octx.font = `600 ${fontPx}px ${DIR_FONT}`;
+    octx.font = `500 ${fontPx}px ${DIR_FONT}`;
     lineGap = fontPx * 1.85;
 
     const blockH = lineGap * (lineCount - 1);
@@ -1760,7 +1760,7 @@ export function createIntroController(deps) {
   function commandContext(fontPx) {
     const octx = superCanvas();
     if (!octx) return null;
-    octx.font = `600 ${fontPx > 0 ? fontPx : commandFontPx()}px ${DIR_FONT}`;
+    octx.font = `500 ${fontPx > 0 ? fontPx : commandFontPx()}px ${DIR_FONT}`;
     octx.textAlign = 'left';
     octx.textBaseline = 'middle';
     return octx;
@@ -1953,7 +1953,7 @@ export function createIntroController(deps) {
       octx,
       cmdChrome,
       (c) => {
-        c.font = `600 ${entryFont}px ${DIR_FONT}`;
+        c.font = `500 ${entryFont}px ${DIR_FONT}`;
         c.fillText('/', geo.promptX, geo.cy);
       },
       1,
@@ -1963,7 +1963,7 @@ export function createIntroController(deps) {
 
     const count = cmdOptions.length;
     const optFont = geo.optionFontPx;
-    octx.font = `600 ${optFont}px ${DIR_FONT}`;
+    octx.font = `500 ${optFont}px ${DIR_FONT}`;
     const rowStride = optFont * CMD_ROW_STRIDE;
     const bottomCy = geo.boxTop - optFont * CMD_LIST_GAP - optFont * 0.5;
     const nameX = geo.boxLeft + geo.padX;
@@ -1983,7 +1983,7 @@ export function createIntroController(deps) {
         octx,
         cmdChrome,
         (c) => {
-          c.font = `600 ${optFont}px ${DIR_FONT}`;
+          c.font = `500 ${optFont}px ${DIR_FONT}`;
           c.fillText(opt.name, nameX, cy);
         },
         1,
@@ -1996,7 +1996,7 @@ export function createIntroController(deps) {
           octx,
           cmdChrome,
           (c) => {
-            c.font = `600 ${optFont}px ${DIR_FONT}`;
+            c.font = `500 ${optFont}px ${DIR_FONT}`;
             c.fillText(opt.hint, nameX + nameCol, cy);
           },
           CMD_HINT_LEVEL,
@@ -2055,7 +2055,7 @@ export function createIntroController(deps) {
     cmdCaret.fill(0);
 
     const entryFont = geo.entryFontPx;
-    octx.font = `600 ${entryFont}px ${DIR_FONT}`;
+    octx.font = `500 ${entryFont}px ${DIR_FONT}`;
     const promptW = octx.measureText('/').width;
     const entryX = geo.promptX + promptW;
     const text = cmdText;
@@ -2065,7 +2065,7 @@ export function createIntroController(deps) {
         octx,
         cmdEntry,
         (c) => {
-          c.font = `600 ${entryFont}px ${DIR_FONT}`;
+          c.font = `500 ${entryFont}px ${DIR_FONT}`;
           c.fillText(text, entryX, geo.cy);
         },
         1,
@@ -2720,7 +2720,7 @@ export function createIntroController(deps) {
     const entryX = geo.boxLeft + padX;
     const cy = Math.round(geo.boxTop + geo.boxH * 0.5);
 
-    octx.font = `600 ${geo.fontPx}px ${DIR_FONT}`;
+    octx.font = `500 ${geo.fontPx}px ${DIR_FONT}`;
     const textW = text ? octx.measureText(text).width : 0;
 
     /* Content area = box interior minus left + right pad. */
@@ -2747,7 +2747,7 @@ export function createIntroController(deps) {
           c.beginPath();
           c.rect(geo.boxLeft + padX, geo.boxTop, contentW, geo.boxH);
           c.clip();
-          c.font = `600 ${geo.fontPx}px ${DIR_FONT}`;
+          c.font = `500 ${geo.fontPx}px ${DIR_FONT}`;
           c.fillText(text, entryX - txtScrollPx, cy);
           c.restore();
         },
@@ -3007,7 +3007,7 @@ export function createIntroController(deps) {
 
     let fontPx = Math.max(MIN_FONT, Math.floor(rows * 0.078));
     fontPx = fitDirFont(octx, S2_LINES, cols * 0.92, fontPx, S2_ARROW_SCALE);
-    octx.font = `600 ${fontPx}px ${DIR_FONT}`;
+    octx.font = `500 ${fontPx}px ${DIR_FONT}`;
 
     const lineGap = fontPx * 1.85;
     const insetY = Math.max(fontPx * 1.15, Math.round(rows * 0.07));
