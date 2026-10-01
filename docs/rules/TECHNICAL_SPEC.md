@@ -80,8 +80,6 @@ This role is established architecture.
 
 Responsibilities:
 
-• boot sequence
-
 • intro animation
 
 • navigation
@@ -176,7 +174,7 @@ Screen 2 + Navigation Open
 
 Screen 1 + Navigation Open
 
-Load / unlock park at Screen 1 + Navigation Closed so the pixel field stays flush through boot and intro. Navigation Open is one up-gesture away.
+Load / unlock park at Screen 1 + Navigation Closed so the pixel field stays flush through startup. Navigation Open is one up-gesture away.
 
 Reverse scrolling returns through the same states.
 
@@ -186,51 +184,19 @@ Unlock mirrors prior topnav gates: `pixeldirectory*` / `pixelbootready`.
 
 ---
 
-# Boot Sequence
+# Startup
 
-The boot sequence is one of the defining characteristics of Pixel FS.
+The startup boot animation (powering on → grid generation → calibration → typography construction → stabilizing) was removed at the user's request.
 
-It is considered a protected system.
+Page load waits for fonts, then lands directly on the ready state: the resting lattice with the Screen 1 directory ("Scroll up for menu / Scroll down for more") already in place, and the application shell unlocked.
 
-Unless explicitly requested, its behavior should remain unchanged.
-
-## Current boot pipeline
-
-The ordered Screen 1 boot pipeline is:
-
-1. `powering_on`
-
-2. `grid_generation`
-
-3. `calibration`
-
-4. `typography_construction`
-
-5. `stabilizing`
-
-6. `ready`
-
-Stage definitions live in `js/pixel-engine/boot/stages/`. The boot controller owns advancement, overlaps, interaction gating, and field compositing.
-
-The boot sequence establishes:
-
-• rendering
-
-• visual identity
-
-• transition into the application
-
-Future features should integrate with the boot pipeline rather than replacing it.
+The boot controller (`js/pixel-engine/boot/boot-controller.js`) still owns the shared lattice, interaction gating, density teardown / recalibration, and preset refresh.
 
 ---
 
 # Intro Animation
 
-The intro animation begins only after boot completion.
-
-The intro animation introduces the user to the website.
-
-It should feel welcoming while maintaining the project's visual style.
+The intro controller owns the directory and Screen 2 menu LED typography: assemble, Space-skip Magnetic Lock, idle float, and the Screen 2 command / text overlays.
 
 Future animations should complement rather than compete with it.
 
@@ -310,7 +276,7 @@ Screen 1 and Screen 2 expose display surfaces powered by one Pixel FS engine.
 
 The engine maintains one authoritative simulation, renderer, pixel state, settings model, interaction pipeline, animation system, rendering-mode registry, and performance configuration. The active screen surface displays that shared frame; it does not create a second renderer or parallel pixel engine.
 
-Boot and intro remain owned by Screen 1. Screen 2 receives the resulting interactive Pixel FS environment without duplicating boot or renderer state.
+Startup and intro remain owned by Screen 1. Screen 2 receives the resulting interactive Pixel FS environment without duplicating startup or renderer state.
 
 Screen 2 content is an independent overlay layer above the shared rendering surface. New content must not be coupled to the renderer or introduce a separate render pipeline.
 
@@ -424,10 +390,6 @@ Unless explicitly instructed otherwise, these systems should not be modified:
 
 • ribbon boundary architecture
 
-• boot pipeline
-
-• boot sequence
-
 • intro animation
 
 • ribbon banner
@@ -500,7 +462,7 @@ Before completing any task, verify:
 
 • navigation still functions
 
-• boot sequence still functions
+• startup lands on the ready directory without errors
 
 • ribbon banner still functions
 

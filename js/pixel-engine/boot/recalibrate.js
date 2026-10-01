@@ -7,10 +7,7 @@
 
 import { BOOT_ENERGY } from './constants.js';
 import { lockEnergy } from './energy.js';
-import {
-  cellRadialOrder,
-  applyOrganicRadialReveal,
-} from './organic-radial.js';
+import { applyOrganicRadialReveal } from './organic-radial.js';
 
 /** Timing + energy for density recalibration / generation (ops, not first boot). */
 export const RECALIBRATION = Object.freeze({
@@ -34,9 +31,6 @@ export const RECALIBRATION = Object.freeze({
   /** Soft edge of the sync front (order-space) — boot-like stickiness. */
   SOFT: 0.026,
 });
-
-/** @deprecated Prefer cellRadialOrder from organic-radial.js */
-export const cellSyncOrder = cellRadialOrder;
 
 /**
  * Center-out sticky activation. Cells only advance from inactive → synced;

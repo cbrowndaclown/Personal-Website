@@ -131,8 +131,6 @@ New work must integrate with these systems rather than replacing them.
 
 ## Boot, render, and interaction
 
-- Boot pipeline
-- Boot animation
 - Intro animation
 - Renderer integration between Screen 1 and Screen 2
 - Pixel renderer

@@ -96,9 +96,6 @@ export function createAnimConfig(options) {
     document.body.dataset.bgMode = animConfig.bgMode;
     const { r, g, b } = animConfig.effectColor;
     const root = document.documentElement;
-    root.style.setProperty('--accent-r', String(r));
-    root.style.setProperty('--accent-g', String(g));
-    root.style.setProperty('--accent-b', String(b));
     root.style.setProperty('--accent-rgb', `${r}, ${g}, ${b}`);
   }
 

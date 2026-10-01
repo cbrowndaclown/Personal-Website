@@ -17,7 +17,6 @@ export const PIXEL_FIELD_STYLES = Object.freeze({
   heat:         { implemented: true,  label: 'Heat' },
   wave:         { implemented: true,  label: 'Wave' },
   lightning:    { implemented: true,  label: 'Lightning' },
-  experimental: { implemented: false, label: 'Experimental' },
 });
 
 /** Named events used across the Pixel Engine. */

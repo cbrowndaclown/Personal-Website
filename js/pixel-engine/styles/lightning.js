@@ -344,8 +344,6 @@ export function createLightningStyle(deps) {
     let viewW = 0;
     let viewH = 0;
     let dpr = 1;
-    let stageLeft = 0;
-    let stageTop = 0;
     let running = false;
     let enabled = animConfig.motion && resolveActiveBgMode() === 'lightning';
     let ptrX = -1;
@@ -422,14 +420,7 @@ export function createLightningStyle(deps) {
         const root = document.documentElement;
         root.style.setProperty('--lightning-highlight', cssTriplet(theme.highlight));
         root.style.setProperty('--lightning-base', cssTriplet(theme.base));
-        root.style.setProperty('--lightning-bolt', cssTriplet(theme.bolt));
-        root.style.setProperty('--lightning-afterglow', cssTriplet(theme.afterglow));
-        root.style.setProperty('--lightning-mid', cssTriplet(theme.mid));
-        root.style.setProperty('--lightning-shadow', cssTriplet(theme.shadow));
         root.style.setProperty('--lightning-glow', cssTriplet(theme.glow));
-        root.style.setProperty('--lightning-flash', cssTriplet(theme.flashBright));
-        root.style.setProperty('--lightning-rain', cssTriplet(theme.rain));
-        root.style.setProperty('--lightning-cloud', cssTriplet(theme.cloud));
       }
 
       function sync() {
@@ -2168,17 +2159,20 @@ export function createLightningStyle(deps) {
 
     function syncStageRect() {
       const rect = stage.getBoundingClientRect();
-      stageLeft = rect.left;
-      stageTop = rect.top;
       return rect;
     }
 
-    function paintRest() {
+    /**
+     * @param {boolean} [deferPresent] — tick() presents once after the full frame
+     */
+    function paintRest(deferPresent) {
       /* Density sync generates over the powered gray panel — never a black cut. */
       ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
       ctx.fillRect(0, 0, viewW, viewH);
 
       const n = cols * rows;
+      /* Resting dots share one color — only re-set fillStyle when it changes. */
+      let lastFill = -1;
       for (let i = 0; i < n; i++) {
         const presence =
           typeof pixelField.presence === 'function' ? pixelField.presence(i) : 1;
@@ -2190,7 +2184,11 @@ export function createLightningStyle(deps) {
         const r = (FIELD[0] + (COOL[0] - FIELD[0]) * a) | 0;
         const g = (FIELD[1] + (COOL[1] - FIELD[1]) * a) | 0;
         const b = (FIELD[2] + (COOL[2] - FIELD[2]) * a) | 0;
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        const fill = (r << 16) | (g << 8) | b;
+        if (fill !== lastFill) {
+          ctx.fillStyle = `rgb(${r},${g},${b})`;
+          lastFill = fill;
+        }
         ctx.fillRect(
           x * CELL + CELL * 0.5 - size * 0.5,
           y * CELL + CELL * 0.5 - size * 0.5,
@@ -2198,6 +2196,7 @@ export function createLightningStyle(deps) {
           size
         );
       }
+      if (deferPresent) return;
       if (renderer && typeof renderer.present === 'function') renderer.present();
     }
 
@@ -2330,6 +2329,7 @@ export function createLightningStyle(deps) {
       const HI = densityOps ? COOL : lightningTheme.highlight;
       const n = cols * rows;
       let any = false;
+      let lastFill = -1;
 
       for (let i = 0; i < n; i++) {
         const introHv = pixelField.brightness(i);
@@ -2350,6 +2350,7 @@ export function createLightningStyle(deps) {
         /* Glyph migration leaves a resting lattice ghost; sub-pixel nudges do not. */
         if (introDrift && Math.hypot(introDX, introDY) > 2.5) {
           ctx.fillStyle = `rgb(${COOL[0]},${COOL[1]},${COOL[2]})`;
+          lastFill = -1;
           ctx.fillRect(homeX - DOT * 0.5, homeY - DOT * 0.5, DOT, DOT);
         }
 
@@ -2372,6 +2373,7 @@ export function createLightningStyle(deps) {
           ctx.fillRect(cx - sOuter * 0.5, cy - sOuter * 0.5, sOuter, sOuter);
           ctx.fillStyle = `rgba(${br},${bg},${bb},${bEase * bloomStrength * 0.55})`;
           ctx.fillRect(cx - sInner * 0.5, cy - sInner * 0.5, sInner, sInner);
+          lastFill = -1;
         }
 
         let r = COOL[0] + (HOT[0] - COOL[0]) * tint;
@@ -2384,7 +2386,14 @@ export function createLightningStyle(deps) {
           b += (HI[2] - b) * lift * 0.9;
         }
 
-        ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+        const ri = r | 0;
+        const gi = g | 0;
+        const bi = b | 0;
+        const fill = (ri << 16) | (gi << 8) | bi;
+        if (fill !== lastFill) {
+          ctx.fillStyle = `rgb(${ri},${gi},${bi})`;
+          lastFill = fill;
+        }
         ctx.fillRect(cx - size * 0.5, cy - size * 0.5, size, size);
       }
 
@@ -2431,7 +2440,7 @@ export function createLightningStyle(deps) {
         typeof pixelField.teardownActive === 'function' &&
         pixelField.teardownActive();
 
-      paintRest();
+      paintRest(true);
 
       /* Weather is a live mode effect — hold it during density teardown / sync. */
       if (!densityOps) {

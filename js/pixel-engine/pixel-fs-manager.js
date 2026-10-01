@@ -46,14 +46,6 @@ export function createPixelFSManager(options) {
     return Array.from(plugins.values());
   }
 
-  function getActiveId() {
-    return activeId;
-  }
-
-  function getActive() {
-    return activeId ? plugins.get(activeId) || null : null;
-  }
-
   /**
    * Record the active style id. V1 styles still self-enable via bgmodechange;
    * this keeps engine-level truth in sync for future transitions.
@@ -101,8 +93,6 @@ export function createPixelFSManager(options) {
     register,
     get,
     list,
-    getActiveId,
-    getActive,
     setActive,
     syncFromConfig,
     mountAll,

@@ -1,4 +1,4 @@
-/* Shared math helpers for boot stages. */
+/* Shared math helpers for density lattice reveals. */
 
 export function hash01(i, salt) {
   let x = Math.imul(i ^ (salt | 0), 0x27d4eb2d);
@@ -13,26 +13,7 @@ export function clamp01(u) {
   return u;
 }
 
-export function smoothstep(u) {
-  const t = clamp01(u);
-  return t * t * (3 - 2 * t);
-}
-
 export function smootherstep(u) {
   const t = clamp01(u);
   return t * t * t * (t * (t * 6 - 15) + 10);
-}
-
-export function easeOutCubic(u) {
-  const t = 1 - clamp01(u);
-  return 1 - t * t * t;
-}
-
-export function easeInOutCubic(u) {
-  const t = clamp01(u);
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-}
-
-export function easeOutSine(u) {
-  return Math.sin((clamp01(u) * Math.PI) / 2);
 }

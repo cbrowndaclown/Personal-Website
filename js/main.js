@@ -38,7 +38,7 @@ import { initCommandPalette } from './command-palette/index.js';
   if (appScroll) window.appScroll = appScroll;
 
   /* ─────────────────────────────────────────────────────────────────────────
-     Pixel Engine — grid, state, render, interaction, animation, Pixel FS
+     Pixel Engine — grid, render, interaction, animation, Pixel FS
   ───────────────────────────────────────────────────────────────────────── */
   const engine = createPixelEngine({
     surfaces: [

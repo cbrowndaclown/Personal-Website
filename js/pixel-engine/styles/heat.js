@@ -59,32 +59,6 @@ export function createHeatStyle(deps) {
   /* Flat field · white pixels → coral heat under pressure */
   const FIELD = [210, 210, 210];
   const COOL  = [255, 255, 255];
-  /* Boot indicator accent — restrained red, independent of Settings HOT */
-  const BOOT_RED = [214, 46, 46];
-
-  function latticeBootActive() {
-    if (typeof pixelField.latticeBootActive === 'function') {
-      return pixelField.latticeBootActive();
-    }
-    const p = document.body.dataset.boot;
-    return (
-      p === 'powering_on' ||
-      p === 'grid_generation' ||
-      p === 'calibration' ||
-      p === 'display_clear' ||
-      p === 'self_test' ||
-      p === 'typography_construction' ||
-      p === 'typography'
-    );
-  }
-
-  /**
-   * Startup lattice build only — black clear + FIELD claim as cells generate.
-   * Density rebuild must never use this path (powered gray panel stays lit).
-   */
-  function bootMaterializeActive() {
-    return latticeBootActive();
-  }
 
   /** Density sync — pixels materialize over an already-powered gray panel. */
   function densitySyncActive() {
@@ -92,11 +66,6 @@ export function createHeatStyle(deps) {
       typeof pixelField.recalibrationActive === 'function' &&
       pixelField.recalibrationActive()
     );
-  }
-
-  /** Progressive lattice claim (boot black→FIELD, or density gray→pixels). */
-  function latticeMaterializeActive() {
-    return bootMaterializeActive() || densitySyncActive();
   }
 
   /** Density teardown — gray panel shows through as pixels retire (not black). */
@@ -120,27 +89,6 @@ export function createHeatStyle(deps) {
       (typeof pixelField.recalibrationActive === 'function' &&
         pixelField.recalibrationActive())
     );
-  }
-
-  function exclusiveBootActive() {
-    if (typeof pixelField.exclusiveBootActive === 'function') {
-      return pixelField.exclusiveBootActive();
-    }
-    const p = document.body.dataset.boot;
-    return (
-      p === 'powering_on' ||
-      p === 'grid_generation' ||
-      p === 'calibration' ||
-      p === 'display_clear' ||
-      p === 'self_test'
-    );
-  }
-
-  function indicatorAccentActive() {
-    if (typeof pixelField.indicatorAccentActive === 'function') {
-      return pixelField.indicatorAccentActive();
-    }
-    return exclusiveBootActive();
   }
 
   /* ── Spring (silicone / fabric) ─────────────────────────────────────────
@@ -306,12 +254,6 @@ export function createHeatStyle(deps) {
      Each entry: { x, y, w } — w is relative strength (1 at tip). */
   const trail = [];
 
-  function smoothstep(t) {
-    if (t <= 0) return 0;
-    if (t >= 1) return 1;
-    return t * t * (3 - 2 * t);
-  }
-
   /* Ken Perlin smootherstep — C2 continuous, no harsh shoulders */
   function smootherstep(t) {
     if (t <= 0) return 0;
@@ -436,13 +378,8 @@ export function createHeatStyle(deps) {
   }
 
   function paintRest() {
-    const bootMaterialize = bootMaterializeActive();
-    /* Boot: ungenerated cells stay black. Density sync: gray panel stays lit. */
-    if (bootMaterialize) {
-      ctx.fillStyle = '#000000';
-    } else {
-      ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
-    }
+    /* Density sync: gray panel stays lit beneath ungenerated cells. */
+    ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
     ctx.fillRect(0, 0, viewW, viewH);
 
     const n = cols * rows;
@@ -452,11 +389,6 @@ export function createHeatStyle(deps) {
       if (presence <= 0.001) continue;
       const x = i % cols;
       const y = (i / cols) | 0;
-      if (bootMaterialize) {
-        /* Permanently initialize this cell's resting Pixel FS background */
-        ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
-        ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
-      }
       const size = DOT * Math.min(1, 0.35 + presence * 0.65);
       const a = Math.min(1, presence);
       /* Same FIELD → COOL resting formula used during normal operation */
@@ -547,6 +479,40 @@ export function createHeatStyle(deps) {
     }
   }
 
+  /* Resting lattice cache — every dot at rest (presence 1, no heat, no
+     offset) drawn once. Rebuilt when grid geometry changes. */
+  let latticeCanvas = null;
+  let latticeKey = '';
+  /** @type {Int32Array|null} cells to repaint this frame */
+  let drawList = null;
+
+  function getRestingLattice() {
+    if (cols <= 0 || rows <= 0 || viewW <= 0 || viewH <= 0) return null;
+    const key = cols + 'x' + rows + '@' + CELL + ':' + DOT + '/' + dpr + ':' + viewW + 'x' + viewH;
+    if (latticeCanvas && latticeKey === key) return latticeCanvas;
+    if (!latticeCanvas) latticeCanvas = document.createElement('canvas');
+    latticeCanvas.width = Math.round(viewW * dpr);
+    latticeCanvas.height = Math.round(viewH * dpr);
+    const lctx = latticeCanvas.getContext('2d', { alpha: false });
+    if (!lctx) return null;
+    lctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    lctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
+    lctx.fillRect(0, 0, viewW, viewH);
+    lctx.fillStyle = `rgb(${COOL[0]},${COOL[1]},${COOL[2]})`;
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        lctx.fillRect(x * CELL + CELL * 0.5 - DOT * 0.5, y * CELL + CELL * 0.5 - DOT * 0.5, DOT, DOT);
+      }
+    }
+    latticeKey = key;
+    return latticeCanvas;
+  }
+
+  /* Cover one cached resting dot with the panel colour (fillStyle preset). */
+  function eraseLatticeDot(x, y) {
+    ctx.fillRect(x * CELL + CELL * 0.5 - DOT * 0.5, y * CELL + CELL * 0.5 - DOT * 0.5, DOT, DOT);
+  }
+
   function tick() {
     if (!running || !enabled) {
       running = false;
@@ -596,11 +562,8 @@ export function createHeatStyle(deps) {
     const bloomStrength = BLOOM_STRENGTH * q;
     const bloomThreshold = BLOOM_THRESHOLD + (1 - q) * 0.12;
     const introAlive = pixelField.update(nowMs);
-    const latticeBoot = latticeBootActive();
-    const materialize = latticeMaterializeActive();
+    const materialize = densitySyncActive();
     const tearingDown = teardownActive();
-    const exclusiveBoot = exclusiveBootActive();
-    const indicatorAccent = indicatorAccentActive();
     const applyCursorMod =
       cursorMode && typeof cursorMode.applyHeatCursorMode === 'function'
         ? cursorMode.applyHeatCursorMode
@@ -622,8 +585,7 @@ export function createHeatStyle(deps) {
       }
     }
 
-    /* Pointer is always tracked; only exclusive boot suppresses heat forces */
-    const active = pointerIn && smX >= 0 && !exclusiveBoot;
+    const active = pointerIn && smX >= 0;
     if (active) {
       updateTrail(smX / CELL, smY / CELL, true);
     } else {
@@ -665,24 +627,32 @@ export function createHeatStyle(deps) {
       alive = true;
     }
 
-    /* Boot materialize clears black; density sync / ops keep the gray panel lit. */
-    if (bootMaterializeActive()) {
-      ctx.fillStyle = '#000000';
-    } else {
-      ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
-    }
-    ctx.fillRect(0, 0, viewW, viewH);
-
     const nCells = cols * rows;
-    /* Exclusive boot owns the frame; typography+ composites cursor heat with intro LEDs.
-       Teardown gates per-cell via cellInteractive + presence clear. */
-    const allowHeat = !exclusiveBoot;
+    /* Resting lattice is blitted from a cache; only cells that differ are
+       repainted. Density sync / teardown repaint every cell as before. */
+    const lattice =
+      materialize || tearingDown || densityOps ? null : getRestingLattice();
+    const useLattice = !!lattice;
+    if (useLattice) {
+      ctx.drawImage(lattice, 0, 0, viewW, viewH);
+      ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
+    } else {
+      /* Density sync / ops keep the gray panel lit. */
+      ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
+      ctx.fillRect(0, 0, viewW, viewH);
+    }
+    if (!drawList || drawList.length < nCells) drawList = new Int32Array(nCells);
+    let drawCount = 0;
+    /* Resting dots share one color — only re-set fillStyle when it changes
+       (string build + CSS color parse per dot was the frame's hottest cost). */
+    let lastFill = -1;
+    /* Teardown gates per-cell via cellInteractive + presence clear. */
     const freezeMode = activeCursorMode === 'freeze';
 
     /* Menu Impact phase — resolve once per frame (Space-skip lattice flex) */
     let impactAge = -1;
     let impactPhase = null;
-    if (menuImpact && allowHeat) {
+    if (menuImpact) {
       impactAge = nowMs - menuImpact.born;
       const life = menuImpact.compressMs + menuImpact.shockMs;
       if (impactAge < 0) {
@@ -708,7 +678,7 @@ export function createHeatStyle(deps) {
       let pressure = 0;
       let heatHold = 1;
 
-      if (allowHeat && hasTrail && x >= x0 && x <= x1 && y >= y0 && y <= y1) {
+      if (hasTrail && x >= x0 && x <= x1 && y >= y0 && y <= y1) {
         let fx = 0;
         let fy = 0;
         /* Soft-OR blend across history — one liquid lobe, not stacked rings */
@@ -814,39 +784,37 @@ export function createHeatStyle(deps) {
 
       /* Color follows pressure — ease both ways, no stepped tint */
       const h = heat[i];
-      if (allowHeat) {
-        const outRate = qualityHeatOut * heatHold;
-        if (pressure > h) {
-          heat[i] = h + (pressure - h) * HEAT_IN;
-        } else {
-          heat[i] = h + (0 - h) * outRate;
-          if (heat[i] < EPS) heat[i] = 0;
-        }
-      } else if (heat[i] !== 0) {
-        heat[i] = 0;
+      const outRate = qualityHeatOut * heatHold;
+      if (pressure > h) {
+        heat[i] = h + (pressure - h) * HEAT_IN;
+      } else {
+        heat[i] = h + (0 - h) * outRate;
+        if (heat[i] < EPS) heat[i] = 0;
       }
 
-      /* Spring-damper: pressure displaces, then soft fabric return to rest */
-      if (allowHeat) {
-        if (freezeMode && pressure > 0.02) {
-          /* Stabilize under cursor — kill velocity, ease toward rest */
-          springAxis(ox[i], vx[i] * 0.35, 0);
-          ox[i] = _s.pos; vx[i] = _s.vel * 0.4;
-          springAxis(oy[i], vy[i] * 0.35, 0);
-          oy[i] = _s.pos; vy[i] = _s.vel * 0.4;
-        } else {
-          springAxis(ox[i], vx[i], targetX);
-          ox[i] = _s.pos; vx[i] = _s.vel;
-          springAxis(oy[i], vy[i], targetY);
-          oy[i] = _s.pos; vy[i] = _s.vel;
-        }
+      /* Spring-damper: pressure displaces, then soft fabric return to rest.
+         A cell already at rest with no force stays at rest — skip the solve. */
+      if (
+        targetX === 0 && targetY === 0 &&
+        ox[i] === 0 && oy[i] === 0 && vx[i] === 0 && vy[i] === 0
+      ) {
+        /* at rest */
+      } else if (freezeMode && pressure > 0.02) {
+        /* Stabilize under cursor — kill velocity, ease toward rest */
+        springAxis(ox[i], vx[i] * 0.35, 0);
+        ox[i] = _s.pos; vx[i] = _s.vel * 0.4;
+        springAxis(oy[i], vy[i] * 0.35, 0);
+        oy[i] = _s.pos; vy[i] = _s.vel * 0.4;
       } else {
-        ox[i] = oy[i] = vx[i] = vy[i] = 0;
+        springAxis(ox[i], vx[i], targetX);
+        ox[i] = _s.pos; vx[i] = _s.vel;
+        springAxis(oy[i], vy[i], targetY);
+        oy[i] = _s.pos; vy[i] = _s.vel;
       }
 
       const introHv = pixelField.brightness(i);
-      const introDX = latticeBoot && indicatorAccent ? 0 : pixelField.offsetX(i);
-      const introDY = latticeBoot && indicatorAccent ? 0 : pixelField.offsetY(i);
+      const introDX = pixelField.offsetX(i);
+      const introDY = pixelField.offsetY(i);
       const introDrift = introDX !== 0 || introDY !== 0;
       const presence =
         typeof pixelField.presence === 'function' ? pixelField.presence(i) : 1;
@@ -865,7 +833,10 @@ export function createHeatStyle(deps) {
       if (presence <= 0.001) {
         heat[i] = 0;
         ox[i] = oy[i] = vx[i] = vy[i] = 0;
-        if (introHv <= 0 && !introDrift) continue;
+        if (introHv <= 0 && !introDrift) {
+          if (useLattice) eraseLatticeDot(x, y);
+          continue;
+        }
       }
 
       /* Microscopic sleep only — never hard-stop a visible settle */
@@ -892,19 +863,49 @@ export function createHeatStyle(deps) {
         alive = true;
       }
 
+      /* Resting dot — the cached lattice already shows it exactly. */
+      if (
+        useLattice &&
+        presence >= 1 &&
+        introHv === 0 &&
+        !introDrift &&
+        heat[i] === 0 &&
+        Math.abs(ox[i]) < EPS &&
+        Math.abs(oy[i]) < EPS &&
+        Math.abs(vx[i]) < EPS &&
+        Math.abs(vy[i]) < EPS
+      ) {
+        continue;
+      }
+      /* Lifted / moving / lit — clear its cached dot now, paint in pass 2 so
+         blooms layer in the same cell order as a full repaint. */
+      if (useLattice) eraseLatticeDot(x, y);
+      drawList[drawCount++] = i;
+    }
+    if (useLattice) lastFill = -1;
+
+    /* Pass 2 — paint only the cells that differ from the resting lattice. */
+    for (let k = 0; k < drawCount; k++) {
+      const i = drawList[k];
+      const x = i % cols;
+      const y = (i / cols) | 0;
+      const introHv = pixelField.brightness(i);
+      const introDX = pixelField.offsetX(i);
+      const introDY = pixelField.offsetY(i);
+      const introDrift = introDX !== 0 || introDY !== 0;
+      const presence =
+        typeof pixelField.presence === 'function' ? pixelField.presence(i) : 1;
+
       /*
         Shared BootField presence drives the live Pixel FS:
-        - Boot: each generated cell initializes FIELD bg + FIELD→COOL dots
-        - Indicator: boot brightness tints with BOOT_RED
         - Density teardown / sync: neutral COOL lift only (no Settings RGB)
         - Intro+: Settings HOT tints LED brightness on the same resting lattice
       */
-      const bootSignal = indicatorAccent ? introHv : 0;
-      const typeSignal = indicatorAccent ? 0 : introHv;
+      const typeSignal = introHv;
       /* Intro LEDs share the same energy→tint path as cursor heat (Settings HOT) */
-      let hv = Math.max(heat[i], introDrift ? 0 : bootSignal);
+      let hv = heat[i];
       if (!introDrift && typeSignal > hv) hv = typeSignal;
-      const accent = indicatorAccent ? BOOT_RED : HOT;
+      const accent = HOT;
       const eased = hv * hv * (3 - 2 * hv);
       const tint  = Math.min(1, Math.pow(eased, COLOR_FALLOFF) * GLOW_OPACITY);
 
@@ -922,13 +923,6 @@ export function createHeatStyle(deps) {
       const cx = homeX + introDX;
       const cy = homeY + introDY;
 
-      /* Claim resting FIELD background only while boot paints over black.
-         Density sync already clears to gray — pixels materialize on top. */
-      if (bootMaterializeActive() && presence > 0.001) {
-        ctx.fillStyle = `rgb(${FIELD[0]},${FIELD[1]},${FIELD[2]})`;
-        ctx.fillRect(x * CELL, y * CELL, CELL, CELL);
-      }
-
       /* While a glyph LED drifts away, restore the idle resting dot at home.
          Sub-pixel lattice nudges (Menu Impact compress/reverb) move in place. */
       if (
@@ -941,6 +935,7 @@ export function createHeatStyle(deps) {
         const pg = (FIELD[1] + (COOL[1] - FIELD[1]) * presence) | 0;
         const pb = (FIELD[2] + (COOL[2] - FIELD[2]) * presence) | 0;
         ctx.fillStyle = `rgb(${pr},${pg},${pb})`;
+        lastFill = -1;
         ctx.fillRect(homeX - DOT * 0.5 * presenceScale, homeY - DOT * 0.5 * presenceScale, DOT * presenceScale, DOT * presenceScale);
       }
 
@@ -950,16 +945,15 @@ export function createHeatStyle(deps) {
         ? Math.min(1, Math.pow(typeSignal * typeSignal * (3 - 2 * typeSignal), COLOR_FALLOFF) * GLOW_OPACITY)
         : tint;
 
-      if (q > 0.08 && drawTint > bloomThreshold && (indicatorAccent || typeSignal > 0.001 || heat[i] > EPS)) {
+      if (q > 0.08 && drawTint > bloomThreshold && (typeSignal > 0.001 || heat[i] > EPS)) {
         const bloom = smootherstep(
           (drawTint - bloomThreshold) / (1 - bloomThreshold)
         );
         const br = (accent[0] + (255 - accent[0]) * 0.58) | 0;
         const bg = (accent[1] + (255 - accent[1]) * 0.58) | 0;
         const bb = (accent[2] + (255 - accent[2]) * 0.58) | 0;
-        const bloomGain = indicatorAccent ? 0.85 : 1;
-        const aOuter = bloom * bloomStrength * 0.32 * bloomGain;
-        const aInner = bloom * bloomStrength * 0.55 * bloomGain;
+        const aOuter = bloom * bloomStrength * 0.32;
+        const aInner = bloom * bloomStrength * 0.55;
         const sOuter = size + DOT * BLOOM_SPREAD * 0.75;
         const sInner = size + DOT * BLOOM_SPREAD * 0.35;
 
@@ -967,9 +961,10 @@ export function createHeatStyle(deps) {
         ctx.fillRect(cx - sOuter * 0.5, cy - sOuter * 0.5, sOuter, sOuter);
         ctx.fillStyle = `rgba(${br},${bg},${bb},${aInner})`;
         ctx.fillRect(cx - sInner * 0.5, cy - sInner * 0.5, sInner, sInner);
+        lastFill = -1;
       }
 
-      /* Boot + intro + ops: FIELD → COOL → accent (BOOT_RED / neutral COOL / Settings HOT) */
+      /* Intro + ops: FIELD → COOL → accent (neutral COOL / Settings HOT) */
       let r = FIELD[0] + (COOL[0] - FIELD[0]) * Math.min(1, presence);
       let g = FIELD[1] + (COOL[1] - FIELD[1]) * Math.min(1, presence);
       let b = FIELD[2] + (COOL[2] - FIELD[2]) * Math.min(1, presence);
@@ -983,7 +978,14 @@ export function createHeatStyle(deps) {
         b += (250 - b) * lift;
       }
 
-      ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+      const ri = r | 0;
+      const gi = g | 0;
+      const bi = b | 0;
+      const fill = (ri << 16) | (gi << 8) | bi;
+      if (fill !== lastFill) {
+        ctx.fillStyle = `rgb(${ri},${gi},${bi})`;
+        lastFill = fill;
+      }
       ctx.fillRect(cx - size * 0.5, cy - size * 0.5, size, size);
     }
 
@@ -1118,8 +1120,8 @@ export function createHeatStyle(deps) {
     ro.observe(stage);
   }
 
-  /* Shared InteractionManager pointer stream — always sample; heat application
-     is gated in tick via exclusiveBoot only (intro does not pause tracking). */
+  /* Shared InteractionManager pointer stream — always sample (intro does not
+     pause tracking). */
   function applyPointerSample(x, y, inside) {
     if (!enabled) return;
     if (inside) {

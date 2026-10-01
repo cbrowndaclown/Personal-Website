@@ -1,5 +1,5 @@
 /* Pixel Engine — Version 1 architecture shell.
-   Composes grid, state, render, interaction, animation, Pixel FS, and events.
+   Composes grid, render, interaction, animation, Pixel FS, and events.
    Visual behavior is preserved by mounting the existing Heat / Wave / Lightning
    implementations as plugins. */
 
@@ -8,7 +8,6 @@ import { createAnimConfig } from './config.js';
 import { createPixelBehaviorSystem } from './pixel-behavior.js';
 import { createCursorModeSystem } from './cursor-mode.js';
 import { createGridManager } from './grid-manager.js';
-import { createPixelStateManager } from './pixel-state.js';
 import { createRenderer } from './renderer.js';
 import { createInteractionManager } from './interaction-manager.js';
 import { createAnimationManager } from './animation-manager.js';
@@ -20,7 +19,6 @@ import { restoreSettings } from '../settings/persist.js';
 import { createHeatStyle } from './styles/heat.js';
 import { createWaveStyle } from './styles/wave.js';
 import { createLightningStyle } from './styles/lightning.js';
-import { createExperimentalStyle } from './styles/experimental.js';
 
 /**
  * @param {object} [options]
@@ -74,7 +72,6 @@ export function createPixelEngine(options = {}) {
     events,
   });
   const grid = createGridManager({ stage, hitBounds, events, cell: CELL });
-  const state = createPixelStateManager({ grid, events });
   const renderer = createRenderer({ canvas, canvases, grid });
   const interaction = createInteractionManager({
     stage,
@@ -114,7 +111,6 @@ export function createPixelEngine(options = {}) {
     pixelIntro: animation.pixelIntro,
     events,
     grid,
-    state,
     renderer,
     interaction,
     performance,
@@ -123,7 +119,6 @@ export function createPixelEngine(options = {}) {
   pixelFS.register(createHeatStyle(styleDeps));
   pixelFS.register(createWaveStyle(styleDeps));
   pixelFS.register(createLightningStyle(styleDeps));
-  pixelFS.register(createExperimentalStyle(styleDeps));
 
   /* Grid + interaction infrastructure (styles still self-manage V1 resize loops). */
   grid.start();
@@ -137,7 +132,6 @@ export function createPixelEngine(options = {}) {
     pixelBehavior,
     cursorMode,
     grid,
-    state,
     renderer,
     interaction,
     animation,
@@ -206,7 +200,6 @@ export function createPixelEngine(options = {}) {
       animation.destroy();
       interaction.destroy();
       grid.destroy();
-      state.destroy();
       performance.destroy();
       events.destroy();
     },
@@ -214,7 +207,7 @@ export function createPixelEngine(options = {}) {
 }
 
 export { PixelEvents, CELL } from './constants.js';
-export { BootPhase, BOOT_TIMING, BOOT_ENERGY } from './boot/constants.js';
+export { BootPhase, BOOT_ENERGY } from './boot/constants.js';
 export { createEventSystem } from './events.js';
 export {
   createPixelBehaviorSystem,

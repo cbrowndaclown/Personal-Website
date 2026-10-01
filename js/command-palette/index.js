@@ -197,8 +197,6 @@ export function initCommandPalette(options) {
     if (open) return false;
     if (document.body.hasAttribute('data-app-startup')) return false;
     if (document.body.hasAttribute('data-boot')) return false;
-    /* The stage is the settings panel — there is no lattice to grow out of. */
-    if (document.body.hasAttribute('data-settings-stage')) return false;
     if (!onScreen2()) return false;
     const ctrl = resolveIntro();
     if (!ctrl || typeof ctrl.getScreen2LineMetrics !== 'function') return false;

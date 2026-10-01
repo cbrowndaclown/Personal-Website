@@ -30,7 +30,6 @@ export function createAnimationManager(options) {
   const bootController = createBootController({
     animConfig: options.animConfig,
     prefersReduced: options.prefersReduced,
-    resolveActiveBgMode: options.resolveActiveBgMode,
     events,
     grid,
     intro: introController,
@@ -53,10 +52,12 @@ export function createAnimationManager(options) {
 
   /* Compatibility surface — Heat / Wave / Lightning talk to pixelField + schedule */
   const pixelField = {
-    brightness: function (i) { return bootController.brightness(i); },
-    offsetX: function (i) { return bootController.offsetX(i); },
-    offsetY: function (i) { return bootController.offsetY(i); },
-    presence: function (i) { return bootController.presence(i); },
+    /* Per-cell reads run for every pixel every frame — bind the controller's
+       closures directly instead of adding a forwarding call per cell. */
+    brightness: bootController.brightness,
+    offsetX: bootController.offsetX,
+    offsetY: bootController.offsetY,
+    presence: bootController.presence,
     update: function (now) { return bootController.update(now); },
     isActive: function () { return bootController.isActive(); },
     isReady: function () { return bootController.isReady(); },
@@ -132,15 +133,6 @@ export function createAnimationManager(options) {
         return bootController.getDensityAuthority();
       }
       return null;
-    },
-    exclusiveBootActive: function () {
-      return bootController.exclusiveBootActive();
-    },
-    latticeBootActive: function () {
-      return bootController.latticeBootActive();
-    },
-    indicatorAccentActive: function () {
-      return bootController.indicatorAccentActive();
     },
     onResize: function (c, r) { bootController.onResize(c, r); },
     rebuildForDensity: function (c, r) {
@@ -254,14 +246,13 @@ export function createAnimationManager(options) {
     });
   }
 
-  /* Space skips intro only — exclusive boot (loading ring) is never skippable */
+  /* Space skips the intro menu assemble */
   window.addEventListener('keydown', function (e) {
     if (e.code !== 'Space' && e.key !== ' ') return;
     if (e.repeat) return;
     const tag = e.target && e.target.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
     if (e.target && e.target.isContentEditable) return;
-    if (bootController.exclusiveBootActive()) return;
     if (bootController.isReady() && !introController.isControllable()) return;
     if (bootController.getPhase() === 'skipped') return;
     e.preventDefault();

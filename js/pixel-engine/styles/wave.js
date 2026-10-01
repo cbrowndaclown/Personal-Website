@@ -262,6 +262,9 @@ export function createWaveStyle(deps) {
   let rows = 0;
   let u = null; /* displacement (height) */
   let v = null; /* velocity (energy) */
+  /* True when every u / v ended the last frame at exactly 0 and nothing has
+     disturbed the field since — the neighbor pass is then a no-op to skip. */
+  let fieldQuiet = false;
   let viewW = 0;
   let viewH = 0;
   let dpr = 1;
@@ -529,6 +532,7 @@ export function createWaveStyle(deps) {
    */
   function applyWaveBrush(fx, fy, radius, strength, weight) {
     if (!v || weight < 0.02) return;
+    fieldQuiet = false;
     const x0 = Math.max(0, Math.floor(fx - radius));
     const x1 = Math.min(cols - 1, Math.ceil(fx + radius));
     const y0 = Math.max(0, Math.floor(fy - radius));
@@ -678,8 +682,9 @@ export function createWaveStyle(deps) {
       if (paintTrail.length) alive = true;
     }
 
-    /* Pass 1 — neighbor exchange (4-way + soft diagonals), shoreline damp */
-    for (let i = 0; i < n; i++) {
+    /* Pass 1 — neighbor exchange (4-way + soft diagonals), shoreline damp.
+       A fully still field stays still, so skip it until something disturbs it. */
+    for (let i = 0; i < n && (!fieldQuiet || freezeHold); i++) {
       const x = i % cols;
       const y = (i / cols) | 0;
       const ui = u[i];
@@ -700,8 +705,18 @@ export function createWaveStyle(deps) {
         continue;
       }
 
-      /* Cardinal + half-weight diagonals → broader, more continuous ripples */
-      const lap = useDiagonals
+      /* Cardinal + half-weight diagonals → broader, more continuous ripples.
+         Interior cells read neighbors directly (same sum order as heightAt). */
+      let lap;
+      if (x > 0 && y > 0 && x < cols - 1 && y < rows - 1) {
+        const up = i - cols;
+        const dn = i + cols;
+        lap = useDiagonals
+          ? u[i - 1] + u[i + 1] + u[up] + u[dn] +
+            0.5 * (u[up - 1] + u[up + 1] + u[dn - 1] + u[dn + 1]) -
+            6 * ui
+          : u[i - 1] + u[i + 1] + u[up] + u[dn] - 4 * ui;
+      } else lap = useDiagonals
         ? heightAt(x - 1, y) +
           heightAt(x + 1, y) +
           heightAt(x, y - 1) +
@@ -743,6 +758,14 @@ export function createWaveStyle(deps) {
 
     const invU = 1 / (U_MAX * 0.72);
     const invV = 1 / (V_MAX * 1.15);
+    /* Resolved once per frame — the per-cell check only needs the cell gate. */
+    const tearingDown =
+      typeof pixelField.teardownActive === 'function' &&
+      pixelField.teardownActive() &&
+      typeof pixelField.cellInteractive === 'function';
+    /* Resting dots share one color — only re-set fillStyle when it changes. */
+    let lastFill = -1;
+    let moving = false;
 
     for (let i = 0; i < n; i++) {
       const x = i % cols;
@@ -774,6 +797,7 @@ export function createWaveStyle(deps) {
         v[i] = 0;
       } else {
         alive = true;
+        moving = true;
       }
       u[i] = disp;
 
@@ -787,12 +811,7 @@ export function createWaveStyle(deps) {
       const introDrift = introDX !== 0 || introDY !== 0;
       const presence =
         typeof pixelField.presence === 'function' ? pixelField.presence(i) : 1;
-      if (
-        typeof pixelField.teardownActive === 'function' &&
-        pixelField.teardownActive() &&
-        typeof pixelField.cellInteractive === 'function' &&
-        !pixelField.cellInteractive(i)
-      ) {
+      if (tearingDown && !pixelField.cellInteractive(i)) {
         u[i] = 0;
         v[i] = 0;
         disp = 0;
@@ -827,6 +846,7 @@ export function createWaveStyle(deps) {
         const pg = (FIELD[1] + (COOL[1] - FIELD[1]) * presence) | 0;
         const pb = (FIELD[2] + (COOL[2] - FIELD[2]) * presence) | 0;
         ctx.fillStyle = `rgb(${pr},${pg},${pb})`;
+        lastFill = -1;
         ctx.fillRect(homeX - DOT * 0.5 * presenceScale, homeY - DOT * 0.5 * presenceScale, DOT * presenceScale, DOT * presenceScale);
       }
 
@@ -847,6 +867,7 @@ export function createWaveStyle(deps) {
         ctx.fillRect(cx - sOuter * 0.5, cy - sOuter * 0.5, sOuter, sOuter);
         ctx.fillStyle = `rgba(${br},${bg},${bb},${bEase * bloomStrength * 0.55})`;
         ctx.fillRect(cx - sInner * 0.5, cy - sInner * 0.5, sInner, sInner);
+        lastFill = -1;
       }
 
       let r = FIELD[0] + (COOL[0] - FIELD[0]) * Math.min(1, presence);
@@ -862,9 +883,17 @@ export function createWaveStyle(deps) {
         b += (240 - b) * lift * 0.45;
       }
 
-      ctx.fillStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
+      const ri = r | 0;
+      const gi = g | 0;
+      const bi = b | 0;
+      const fill = (ri << 16) | (gi << 8) | bi;
+      if (fill !== lastFill) {
+        ctx.fillStyle = `rgb(${ri},${gi},${bi})`;
+        lastFill = fill;
+      }
       ctx.fillRect(cx - size * 0.5, cy - size * 0.5, size, size);
     }
+    fieldQuiet = !moving;
 
     if (renderer && typeof renderer.present === 'function') renderer.present();
     if (perfMgr && typeof perfMgr.endFrame === 'function') {

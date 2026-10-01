@@ -225,31 +225,6 @@ export function initPage2Menu(options) {
   syncFromScreen(readFrameScreen());
 
   return {
-    getVisibility: () => visibility,
-    hasRevealed: () => revealed,
-    getScreen: () => screen,
-    isVisible: () => visibility === Page2MenuVisibility.VISIBLE,
-    hasPlayedReveal: () => {
-      const ctrl = resolveIntro();
-      return (
-        revealStarted ||
-        !!(
-          ctrl &&
-          typeof ctrl.hasPlayedScreen2Menu === 'function' &&
-          ctrl.hasPlayedScreen2Menu()
-        )
-      );
-    },
-    isRevealPlaying: () => {
-      const ctrl = resolveIntro();
-      return !!(
-        ctrl &&
-        typeof ctrl.getMenuSurface === 'function' &&
-        ctrl.getMenuSurface() === 2 &&
-        typeof ctrl.getPhase === 'function' &&
-        ctrl.getPhase() === 'directory'
-      );
-    },
     setIntro(nextIntro) {
       intro = nextIntro || null;
     },

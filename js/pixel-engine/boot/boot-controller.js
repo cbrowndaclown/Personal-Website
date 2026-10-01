@@ -1,15 +1,8 @@
 /* Boot Controller — state-driven Pixel Engine lifecycle.
    Owns stage advancement, overlaps, interaction gating, and field compositing. */
 
-import {
-  BootPhase,
-  isExclusiveBootPhase,
-  isLatticeBootPhase,
-  isIndicatorAccentPhase,
-} from './constants.js';
+import { BootPhase, OPENING_BOUNCE, OPENING_INTRO } from './constants.js';
 import { createBootField } from './boot-field.js';
-import { createBootIndicator } from './indicator.js';
-import { createBootStageDefs } from './stages/index.js';
 import {
   RECALIBRATION,
   applyOrganicSyncReveal,
@@ -35,7 +28,6 @@ import { clearAppStartup } from '../../app-startup.js';
  * @param {object} options
  * @param {object} options.animConfig
  * @param {boolean} options.prefersReduced
- * @param {() => string|null} options.resolveActiveBgMode
  * @param {import('../events.js').EventSystem} options.events
  * @param {object} [options.grid]
  * @param {object} options.intro — intro content service (typography + directory)
@@ -43,14 +35,11 @@ import { clearAppStartup } from '../../app-startup.js';
 export function createBootController(options) {
   const animConfig = options.animConfig;
   const prefersReduced = options.prefersReduced;
-  const resolveActiveBgMode = options.resolveActiveBgMode;
   const events = options.events;
   const intro = options.intro;
   const sharedGrid = options.grid || null;
 
   const field = createBootField();
-  const indicator = createBootIndicator();
-  const stageDefs = createBootStageDefs({ intro });
 
   let phase = BootPhase.OFF;
   let started = false;
@@ -60,10 +49,9 @@ export function createBootController(options) {
   let rafId = 0;
   let lastNow = 0;
 
-  /** @type {{ def: object, instance: object, startedAt: number, done: boolean }[]} */
-  let active = [];
-  let nextIndex = 0;
-  let primaryPhase = BootPhase.OFF;
+  /* Opening bounce — page-load lattice pop-in before the intro menu */
+  let bouncing = false;
+  let bounceStartedAt = 0;
 
   /* Density recalibration — center-out sync after PixelDensityChanged */
   let recalibrating = false;
@@ -75,7 +63,6 @@ export function createBootController(options) {
   let tearingDown = false;
   let teardownStartedAt = 0;
   let teardownSeed = 0xd04e;
-  let teardownLastNow = 0;
   /** True after teardown finishes until density generation begins. */
   let awaitingDensityRebuild = false;
   /** True while post-teardown center-out generation is running. */
@@ -111,29 +98,8 @@ export function createBootController(options) {
     else delete document.body.dataset.boot;
   }
 
-  function emitPhase(next) {
-    primaryPhase = next;
-    phase = next;
-    if (events) {
-      events.emit(PixelEvents.BootPhaseChanged, { phase: next });
-    }
-    /* Wake style rAF loops */
-    window.dispatchEvent(new CustomEvent('pixelintrostart', { detail: { phase: next } }));
-  }
-
   function setInteractive(on) {
     interactive = !!on;
-  }
-
-  function emitReady() {
-    /* Exclusive boot is done — PE releases data-boot. Shell unlock waits until
-       intro/directory is enabled so Screen 2 does not resize the lattice mid-handoff. */
-    setBootAttr(null);
-    if (events) {
-      events.emit(PixelEvents.BootReady, { phase: BootPhase.READY });
-      events.emit(PixelEvents.AnimationFinished, { name: 'boot' });
-    }
-    window.dispatchEvent(new CustomEvent('pixelbootready'));
   }
 
   function bindDensityRebuild(pipeline) {
@@ -195,89 +161,6 @@ export function createBootController(options) {
     return cols >= 12 && rows >= 8;
   }
 
-  function makeCtx(now) {
-    return {
-      now,
-      field,
-      indicator,
-      intro,
-      phase: primaryPhase,
-      setPhase: emitPhase,
-      setInteractive,
-      emitReady,
-      interactive,
-      /* Exclusive boot chrome — calibration ring only. */
-      paintChrome(targetField, t) {
-        const f = targetField || field;
-        const at = t != null ? t : now;
-        if (indicator) indicator.paint(f, at);
-      },
-    };
-  }
-
-  function startNextStage(now) {
-    if (nextIndex >= stageDefs.length) return false;
-    const def = stageDefs[nextIndex];
-    nextIndex += 1;
-    const instance = def.create();
-    emitPhase(def.phase);
-    if (def.phase !== BootPhase.READY) {
-      setBootAttr(def.phase);
-    }
-    instance.enter(makeCtx(now));
-    active.push({
-      def,
-      instance,
-      startedAt: now,
-      done: false,
-    });
-    return true;
-  }
-
-  function pruneActive() {
-    active = active.filter((entry) => !entry.done);
-  }
-
-  function advancePipeline(now) {
-    if (!active.length && nextIndex < stageDefs.length) {
-      startNextStage(now);
-      return;
-    }
-
-    /* Overlap: when the leading unfinished stage is far enough along, spawn next */
-    const lead = active.find((e) => !e.done);
-    if (!lead) return;
-
-    if (lead.instance.durationMs == null) {
-      /* Duration unknown (typography) — wait for done before starting next */
-      return;
-    }
-
-    const overlap = lead.instance.overlapMs || 0;
-    /*
-      Zero-overlap stages (energy ladder) must finish every pixel before the
-      next stage starts — never spawn early and lockEnergy over unfinished cells.
-    */
-    if (overlap <= 0) return;
-
-    const elapsed = now - lead.startedAt;
-    const threshold = Math.max(0, lead.instance.durationMs - overlap);
-    if (elapsed >= threshold && nextIndex < stageDefs.length) {
-      const nextDef = stageDefs[nextIndex];
-      /* Don't overlap into READY — finish stabilizing cleanly first */
-      if (nextDef.phase === BootPhase.READY) return;
-      /* Post-calibration story beats must run sequentially */
-      if (
-        nextDef.phase === BootPhase.DISPLAY_CLEAR ||
-        nextDef.phase === BootPhase.SELF_TEST ||
-        nextDef.phase === BootPhase.TYPOGRAPHY_CONSTRUCTION
-      ) {
-        return;
-      }
-      startNextStage(now);
-    }
-  }
-
   function emitDensityLockChange() {
     window.dispatchEvent(
       new CustomEvent('pixeldensitylockchange', {
@@ -291,7 +174,6 @@ export function createBootController(options) {
     const was = tearingDown;
     if (!was && !opts.force) return;
     tearingDown = false;
-    teardownLastNow = 0;
     if (opts.snap !== false) finishTeardownLattice(field);
     if (!was) return;
 
@@ -331,7 +213,6 @@ export function createBootController(options) {
     tearingDown = true;
     awaitingDensityRebuild = false;
     teardownStartedAt = performance.now();
-    teardownLastNow = teardownStartedAt;
     teardownSeed =
       (Math.imul(teardownSeed ^ (teardownStartedAt | 0), 0x27d4eb2d) >>> 0) ||
       0xd04e;
@@ -359,7 +240,6 @@ export function createBootController(options) {
   function tickTeardown(now) {
     if (!tearingDown) return false;
 
-    teardownLastNow = now;
     const elapsed = Math.max(0, now - teardownStartedAt);
     const u = elapsed / TEARDOWN.DURATION_MS;
     const settled = applyOrganicTeardown(
@@ -429,7 +309,6 @@ export function createBootController(options) {
       awaitingDensityRebuild = false;
       setInteractive(true);
       phase = BootPhase.READY;
-      primaryPhase = BootPhase.READY;
       setBootAttr(null);
       window.dispatchEvent(
         new CustomEvent('pixelintrostart', {
@@ -688,20 +567,6 @@ export function createBootController(options) {
     endRecalibration({ force: true, snap: false, restoreMenu: false });
     endTeardown({ force: true, snap: false, rebuild: false });
 
-    const nowMs =
-      typeof performance !== 'undefined' && performance.now
-        ? performance.now()
-        : Date.now();
-    active.forEach((e) => {
-      try {
-        e.instance.exit(makeCtx(nowMs));
-      } catch (_) {
-        /* ignore */
-      }
-    });
-    active = [];
-    nextIndex = stageDefs.length;
-    indicator.reset();
     killed = false;
     started = true;
 
@@ -714,7 +579,6 @@ export function createBootController(options) {
     presetRefreshing = false;
     presetMenuRestoring = false;
     recalibLastNow = 0;
-    teardownLastNow = 0;
     recalibSeed = 0xc41b;
     teardownSeed = 0xd04e;
 
@@ -784,7 +648,6 @@ export function createBootController(options) {
     }
 
     phase = BootPhase.READY;
-    primaryPhase = BootPhase.READY;
     setBootAttr(null);
     emitDensityLockChange();
   }
@@ -813,14 +676,7 @@ export function createBootController(options) {
    */
   function startupBlocksPresetEffects() {
     if (!presetEffectsAllowed) return true;
-    if (isExclusiveBootPhase(phase)) return true;
-    if (
-      phase === BootPhase.TYPOGRAPHY_CONSTRUCTION ||
-      phase === BootPhase.STABILIZING ||
-      phase === BootPhase.OFF
-    ) {
-      return true;
-    }
+    if (phase === BootPhase.OFF) return true;
     if (intro && typeof intro.getPhase === 'function') {
       const ip = intro.getPhase();
       if (
@@ -1001,7 +857,6 @@ export function createBootController(options) {
       awaitingDensityRebuild = false;
       setInteractive(true);
       phase = BootPhase.READY;
-      primaryPhase = BootPhase.READY;
       setBootAttr(null);
       densityMenuRestoring = true;
       window.dispatchEvent(
@@ -1063,6 +918,155 @@ export function createBootController(options) {
     return true;
   }
 
+  /* ── Opening sequence ─────────────────────────────────────────────────
+     bounce → hero typography ("Hey there, my name is Canaan…") → hold →
+     directory menu assemble. Driven from the boot rAF loop. */
+
+  /** @type {Float32Array|null} normalised centre distance per cell */
+  let bounceDist = null;
+  let bounceDistCols = 0;
+  let bounceDistRows = 0;
+
+  function bounceDistances(cols, rows) {
+    if (bounceDist && bounceDistCols === cols && bounceDistRows === rows) {
+      return bounceDist;
+    }
+    const midX = (cols - 1) * 0.5;
+    const midY = (rows - 1) * 0.5;
+    const maxR = Math.hypot(midX, midY) || 1;
+    bounceDist = new Float32Array(cols * rows);
+    for (let y = 0; y < rows; y++) {
+      const dy = y - midY;
+      for (let x = 0; x < cols; x++) {
+        bounceDist[y * cols + x] = Math.hypot(x - midX, dy) / maxR;
+      }
+    }
+    bounceDistCols = cols;
+    bounceDistRows = rows;
+    return bounceDist;
+  }
+
+  function tickOpeningBounce(now) {
+    if (!bouncing) return false;
+    if (!bounceStartedAt) bounceStartedAt = now;
+    const elapsed = now - bounceStartedAt;
+    const presenceBuf = field.presence;
+    const oy = field.oy;
+    const cols = field.cols;
+    const rows = field.rows;
+    if (!presenceBuf || !oy || cols <= 0 || rows <= 0) return true;
+
+    const { SPREAD_MS, POP_MS, HOP_PX, BOUNCES } = OPENING_BOUNCE;
+    const dist = bounceDistances(cols, rows);
+    const n = cols * rows;
+    const invPop = 1 / POP_MS;
+    const bounceFreq = Math.PI * BOUNCES;
+
+    for (let i = 0; i < n; i++) {
+      const local = (elapsed - dist[i] * SPREAD_MS) * invPop;
+      if (local <= 0) {
+        presenceBuf[i] = 0;
+        oy[i] = 0;
+      } else if (local >= 1) {
+        presenceBuf[i] = 1;
+        oy[i] = 0;
+      } else {
+        /* Quick ease-out grow, then damped hops off the resting position */
+        const g = local < 0.4 ? 1 - local * 2.5 : 0;
+        presenceBuf[i] = 1 - g * g * g;
+        const decay = (1 - local) * (1 - local);
+        oy[i] = -HOP_PX * Math.abs(Math.sin(local * bounceFreq)) * decay;
+      }
+    }
+
+    if (elapsed >= SPREAD_MS + POP_MS) {
+      endOpeningBounce();
+      /* Hand off on the next frame so the bake does not land on the bounce's
+         last paint. */
+      openingStep = 'typography-start';
+      return true;
+    }
+    return true;
+  }
+
+  function endOpeningBounce() {
+    if (!bouncing) return;
+    bouncing = false;
+    bounceStartedAt = 0;
+    bounceDist = null;
+    field.fillPresence(1);
+    field.clearMotion();
+  }
+
+  /** @type {null|'typography-start'|'typography'|'hold'} */
+  let openingStep = null;
+  let openingDeadline = 0;
+
+  function clearOpeningSequence() {
+    openingStep = null;
+    openingDeadline = 0;
+  }
+
+  function tickOpeningSequence(now) {
+    if (bouncing) return tickOpeningBounce(now);
+    if (!openingStep) return false;
+
+    if (openingStep === 'typography-start') {
+      intro.beginTypographyConstruction({ seedCells: null });
+      const ledMs =
+        typeof intro.getTypographyDurationMs === 'function'
+          ? intro.getTypographyDurationMs()
+          : 0;
+      openingDeadline =
+        now + Math.max(OPENING_INTRO.TYPOGRAPHY_MIN_MS, ledMs) +
+        OPENING_INTRO.TYPOGRAPHY_SETTLE_PAD_MS;
+      openingStep = 'typography';
+      return true;
+    }
+
+    /* Space skip / density rebuild / motion off took over the intro. */
+    if (intro.getPhase() !== 'typography') {
+      clearOpeningSequence();
+      return false;
+    }
+
+    if (openingStep === 'typography') {
+      if (intro.isTypographySettled() || now >= openingDeadline) {
+        intro.holdTypography();
+        openingStep = 'hold';
+        openingDeadline = now + OPENING_INTRO.HOLD_MS;
+      }
+      return true;
+    }
+
+    if (openingStep === 'hold' && now >= openingDeadline) {
+      clearOpeningSequence();
+      intro.beginDirectorySequence();
+    }
+    return true;
+  }
+
+  /* Page load: lattice pops in from the centre, then the intro plays. */
+  function startOpening() {
+    ensureFieldSize();
+    field.clear();
+    setInteractive(true);
+    phase = BootPhase.READY;
+    started = true;
+    setBootAttr(null);
+    if (events) {
+      events.emit(PixelEvents.BootPhaseChanged, { phase: BootPhase.READY });
+      events.emit(PixelEvents.BootReady, { phase: BootPhase.READY });
+    }
+    window.dispatchEvent(new CustomEvent('pixelbootready'));
+    clearOpeningSequence();
+    bouncing = true;
+    bounceStartedAt = 0;
+    startLoop();
+    /* Wake style rAF loops so they paint the bounce */
+    window.dispatchEvent(new CustomEvent('pixelintrostart'));
+  }
+
   function tick(now) {
     if (!running || killed) {
       running = false;
@@ -1075,59 +1079,22 @@ export function createBootController(options) {
 
     const teardownAlive = tickTeardown(now);
     const recalibAlive = teardownAlive ? false : tickRecalibration(now);
-
-    const ctx = makeCtx(now);
-
-    for (let i = 0; i < active.length; i++) {
-      const entry = active[i];
-      if (entry.done) continue;
-      const result = entry.instance.update(ctx) || {};
-      if (result.done && !result.terminal) {
-        entry.done = true;
-        entry.instance.exit(ctx);
-      }
-    }
-
-    pruneActive();
-
-    /* Sequential story beats after energy boot — no overlap */
-    if (!active.length && nextIndex < stageDefs.length) {
-      const nextPhase = stageDefs[nextIndex].phase;
-      if (
-        nextPhase === BootPhase.DISPLAY_CLEAR ||
-        nextPhase === BootPhase.SELF_TEST ||
-        nextPhase === BootPhase.TYPOGRAPHY_CONSTRUCTION ||
-        nextPhase === BootPhase.STABILIZING ||
-        nextPhase === BootPhase.READY
-      ) {
-        startNextStage(now);
-      } else {
-        advancePipeline(now);
-      }
-    } else {
-      advancePipeline(now);
-    }
+    const openingAlive = tickOpeningSequence(now);
 
     /*
       Content LED clock is advanced from style paint via update().
-      This loop only drives stage transitions + keeps rAF alive.
+      This loop only drives density transitions + keeps rAF alive.
     */
     const alive =
       teardownAlive ||
       recalibAlive ||
+      openingAlive ||
       (phase !== BootPhase.SKIPPED &&
         (phase !== BootPhase.READY ||
           intro.isActive() ||
-          active.length > 0 ||
           (!interactive && !awaitingDensityRebuild && !tearingDown)));
 
-    if (
-      alive ||
-      active.length > 0 ||
-      nextIndex < stageDefs.length ||
-      recalibrating ||
-      tearingDown
-    ) {
+    if (alive || recalibrating || tearingDown) {
       rafId = requestAnimationFrame(tick);
     } else {
       running = false;
@@ -1159,10 +1126,9 @@ export function createBootController(options) {
     presetRefreshing = false;
     presetMenuRestoring = false;
     endRecalibration({ force: true, snap: true, restoreMenu: false });
+    endOpeningBounce();
+    clearOpeningSequence();
     stopLoop();
-    active = [];
-    nextIndex = stageDefs.length;
-    indicator.reset();
     field.allocate(field.cols || 1, field.rows || 1);
     ensureFieldSize();
     field.fillPresence(1);
@@ -1170,7 +1136,6 @@ export function createBootController(options) {
     field.clearMotion();
     setInteractive(true);
     phase = BootPhase.READY;
-    primaryPhase = BootPhase.READY;
     const settleMenu = !!(opts.settle && animConfig.motion && !prefersReduced);
     /* data-boot never owns shell layout. Instant paths unlock the shell now;
        Magnetic Lock / directory settle keeps startup locked until hold. */
@@ -1215,113 +1180,54 @@ export function createBootController(options) {
     presetRefreshing = false;
     presetMenuRestoring = false;
     endRecalibration({ force: true, snap: false, restoreMenu: false });
+    bouncing = false;
+    bounceStartedAt = 0;
+    clearOpeningSequence();
     stopLoop();
-    active.forEach((e) => {
-      try {
-        e.instance.exit(makeCtx(performance.now()));
-      } catch (_) {
-        /* ignore */
-      }
-    });
-    active = [];
-    nextIndex = 0;
-    indicator.reset();
     intro.cancel();
     field.clear();
     interactive = false;
     phase = BootPhase.SKIPPED;
-    primaryPhase = BootPhase.SKIPPED;
     started = false;
     setBootAttr(null);
     clearAppStartup();
   }
 
   function skip() {
-    /* Exclusive boot (loading ring) cannot be skipped */
-    if (isExclusiveBootPhase(phase)) return;
-
-    if (phase === BootPhase.READY || phase === BootPhase.SKIPPED) {
-      intro.skip();
+    /* Space during the opening bounce — land the lattice and settle the menu. */
+    if (bouncing || openingStep === 'typography-start') {
+      jumpToReady({ settle: true });
       return;
     }
-    killed = false;
-    /* Tear down in-flight stages cleanly (typography / stabilizing → directory) */
-    active.forEach((e) => {
-      try {
-        e.instance.exit(makeCtx(performance.now()));
-      } catch (_) {
-        /* ignore */
-      }
-    });
-    active = [];
-    jumpToReady({ instantDirectory: true, settle: true });
-  }
-
-  function buildAndStart() {
-    killed = false;
-    interactive = false;
-    active = [];
-    nextIndex = 0;
-    indicator.reset();
-    field.clear();
-    endTeardown({ force: true, snap: false, rebuild: false });
-    awaitingDensityRebuild = false;
-    densityGenerating = false;
-    densityMenuRestoring = false;
-    presetRefreshing = false;
-    presetMenuRestoring = false;
-    endRecalibration({ force: true, snap: false, restoreMenu: false });
-
-    /* Exclusive ownership of the PE canvas — no leftover directory / type LEDs */
-    if (intro && typeof intro.suppressContent === 'function') {
-      intro.suppressContent();
+    /* Space during the name intro — the intro's own skip settles the menu. */
+    clearOpeningSequence();
+    /* Before fonts land there is nothing to skip — schedule() lands on ready. */
+    if (phase === BootPhase.READY || phase === BootPhase.SKIPPED) {
+      intro.skip();
     }
-
-    if (prefersReduced || !animConfig.motion) {
-      phase = BootPhase.SKIPPED;
-      jumpToReady({ instantDirectory: true });
-      return false;
-    }
-
-    if (!ensureFieldSize()) {
-      phase = BootPhase.SKIPPED;
-      jumpToReady({ instantDirectory: true });
-      return false;
-    }
-
-    /* Exclusive boot always runs when motion is on. Restored settings
-       (including non-Heat styles from a saved preset) stay on animConfig —
-       they must not skip the startup sequence or trigger refresh. */
-
-    started = true;
-    phase = BootPhase.OFF;
-    setInteractive(false);
-    emitPhase(BootPhase.POWERING_ON);
-    setBootAttr(BootPhase.POWERING_ON);
-    startNextStage(performance.now());
-    startLoop();
-    return true;
   }
 
   function schedule() {
     if (started) return;
 
     /* Lock content immediately — before fonts.ready — so early grid resize
-       cannot bake "Scroll up/down" LEDs into the field ahead of boot. */
+       cannot bake "Scroll up/down" LEDs before the directory is ready. */
     if (intro && typeof intro.suppressContent === 'function') {
       intro.suppressContent();
     }
 
-    if (prefersReduced || !animConfig.motion) {
-      ensureFieldSize();
-      phase = BootPhase.SKIPPED;
-      jumpToReady({ instantDirectory: true });
-      return;
-    }
-
+    /* Opening bounce → intro menu assemble. Reduced motion / motion off land
+       straight on the resting lattice + directory. Wait for fonts so the LED
+       type bakes in Josefin Sans, not a fallback. */
     const kick = function () {
       if (started || killed) return;
-      buildAndStart();
+      if (prefersReduced || !animConfig.motion) {
+        ensureFieldSize();
+        phase = BootPhase.SKIPPED;
+        jumpToReady({ instantDirectory: true });
+        return;
+      }
+      startOpening();
     };
 
     if (document.fonts && document.fonts.ready) {
@@ -1384,27 +1290,6 @@ export function createBootController(options) {
     presetRefreshing = false;
     presetMenuRestoring = false;
 
-    /* Exclusive energy ladder owns presence — still continue into generation
-       (generation aborts the boot pipeline and remounts the lattice). */
-    if (isExclusiveBootPhase(phase)) {
-      if (typeof intro.suppressContent === 'function') {
-        intro.suppressContent();
-      }
-      endTeardown({ force: true, snap: false, rebuild: false });
-      endRecalibration({ force: true, snap: false, restoreMenu: false });
-      awaitingDensityRebuild = true;
-      if (events) {
-        events.emit(PixelEvents.PixelDensityTeardownEnd, {
-          cols: field.cols,
-          rows: field.rows,
-          fromExclusiveBoot: true,
-        });
-      }
-      window.dispatchEvent(new CustomEvent('pixeldensityteardownend'));
-      emitDensityLockChange();
-      return;
-    }
-
     /* Already tearing down — don't stack. */
     if (tearingDown) return;
 
@@ -1453,8 +1338,8 @@ export function createBootController(options) {
 
   function brightness(i) {
     const boot = field.getBrightness(i);
-    /* Exclusive energy / density sync / teardown: only lattice may light cells */
-    if (isExclusiveBootPhase(phase) || recalibrating || tearingDown) {
+    /* Density sync / teardown: only lattice may light cells */
+    if (recalibrating || tearingDown) {
       return boot;
     }
     const led = intro.brightness(i);
@@ -1462,7 +1347,7 @@ export function createBootController(options) {
   }
 
   function offsetX(i) {
-    if (isExclusiveBootPhase(phase) || recalibrating || tearingDown) {
+    if (recalibrating || tearingDown) {
       return field.getOffsetX(i);
     }
     const boot = field.getOffsetX(i);
@@ -1471,7 +1356,7 @@ export function createBootController(options) {
   }
 
   function offsetY(i) {
-    if (isExclusiveBootPhase(phase) || recalibrating || tearingDown) {
+    if (recalibrating || tearingDown) {
       return field.getOffsetY(i);
     }
     const boot = field.getOffsetY(i);
@@ -1489,11 +1374,9 @@ export function createBootController(options) {
       startLoop();
     }
     if (!running && (recalibrating || tearingDown)) startLoop();
-    /* Suppress intro clocks during exclusive boot, density sync, and teardown */
+    /* Suppress intro clocks during density sync and teardown */
     const contentAlive =
-      isExclusiveBootPhase(phase) || recalibrating || tearingDown
-        ? false
-        : intro.update(now);
+      recalibrating || tearingDown ? false : intro.update(now);
     return (
       contentAlive ||
       recalibrating ||
@@ -1501,8 +1384,7 @@ export function createBootController(options) {
       (phase !== BootPhase.READY &&
         phase !== BootPhase.SKIPPED &&
         phase !== BootPhase.OFF) ||
-      running ||
-      active.length > 0
+      running
     );
   }
 
@@ -1521,7 +1403,7 @@ export function createBootController(options) {
   }
 
   function interactionsEnabled() {
-    /* Cursor tracking stays live; exclusive boot / teardown still blocks forces.
+    /* Cursor tracking stays live; teardown still blocks forces.
        During recalibration, styles gate per-cell via cellInteractive(). */
     if (tearingDown) return true; /* per-cell gate via cellInteractive */
     if (interactive) return true;
@@ -1529,7 +1411,7 @@ export function createBootController(options) {
     if (phase === BootPhase.OFF || phase === BootPhase.SKIPPED) {
       return recalibrating;
     }
-    return !isExclusiveBootPhase(phase);
+    return true;
   }
 
   /**
@@ -1557,29 +1439,7 @@ export function createBootController(options) {
   }
 
   function isControllable() {
-    return (
-      phase === BootPhase.POWERING_ON ||
-      phase === BootPhase.GRID_GENERATION ||
-      phase === BootPhase.CALIBRATION ||
-      phase === BootPhase.DISPLAY_CLEAR ||
-      phase === BootPhase.SELF_TEST ||
-      phase === BootPhase.TYPOGRAPHY_CONSTRUCTION ||
-      phase === BootPhase.STABILIZING ||
-      intro.isControllable()
-    );
-  }
-
-  function exclusiveBootActive() {
-    return isExclusiveBootPhase(phase);
-  }
-
-  function latticeBootActive() {
-    /* Exclusive + lattice phases only — intro never writes data-boot. */
-    return isLatticeBootPhase(phase);
-  }
-
-  function indicatorAccentActive() {
-    return isIndicatorAccentPhase(phase);
+    return intro.isControllable();
   }
 
   function recalibrationActive() {
@@ -1629,7 +1489,7 @@ export function createBootController(options) {
     rebuildForDensity(field.cols, field.rows);
   }
 
-  /* FF / skip inputs during boot */
+  /* FF / skip inputs during the intro */
   function beginFastForward() {
     if (!isControllable()) return;
     intro.beginFastForward();
@@ -1704,9 +1564,6 @@ export function createBootController(options) {
     presetRefreshActive,
     getPhase,
     isControllable,
-    exclusiveBootActive,
-    latticeBootActive,
-    indicatorAccentActive,
     field,
     destroy() {
       cancel();

@@ -5,7 +5,7 @@
  * @typedef {object} PixelFsStyleDef
  * @property {string} id — matches animConfig.bgMode / engine keys
  * @property {string} label — display name in Style control + style settings header
- * @property {boolean} [disabled] — shown as unavailable placeholder in Style control
+ * @property {boolean} [disabled] — hidden from the Style control
  * @property {boolean} [implemented]
  */
 
@@ -14,7 +14,6 @@ export const PIXEL_FS_STYLES = [
   { id: 'heat', label: 'Heat', implemented: true },
   { id: 'wave', label: 'Wave', implemented: true },
   { id: 'lightning', label: 'Lightning', implemented: true },
-  { id: 'experimental', label: 'Experimental', implemented: false, disabled: true },
 ];
 
 /**

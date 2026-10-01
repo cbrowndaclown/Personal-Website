@@ -109,21 +109,6 @@ export function renderSetting(body, def, api, syncGate) {
     });
     row.body.appendChild(seg.root);
 
-    /* Disabled options render as separate placeholders (preserves Style → Experimental). */
-    allOptions
-      .filter((o) => o.disabled)
-      .forEach((opt) => {
-        const placeholder = document.createElement('button');
-        placeholder.type = 'button';
-        placeholder.className = 'settings__seg-placeholder';
-        placeholder.dataset.value = opt.value;
-        placeholder.textContent = opt.label;
-        placeholder.disabled = true;
-        placeholder.setAttribute('aria-disabled', 'true');
-        placeholder.title = 'Coming soon';
-        row.body.appendChild(placeholder);
-      });
-
     syncControl = () => {
       const value = def.resolveValue
         ? def.resolveValue(api, selectable)

@@ -377,17 +377,11 @@ export function initAppScroll(options) {
       target &&
       target.closest &&
       (target.closest('.settings') ||
-        target.closest('.settings-stage') ||
         target.closest('input') ||
         target.closest('textarea') ||
         target.closest('select') ||
         target.closest('[contenteditable="true"]'))
     );
-  }
-
-  /* Full screen settings owns the display — no screen / nav steps until it leaves. */
-  function settingsStageOpen() {
-    return document.body.hasAttribute('data-settings-stage');
   }
 
   /* ── Wheel — one state edge per trackpad/mouse series (not per delta) ───
@@ -422,7 +416,7 @@ export function initAppScroll(options) {
   window.addEventListener(
     'wheel',
     (e) => {
-      if (!interactive || settingsStageOpen()) return;
+      if (!interactive) return;
       if (ignoredTarget(e.target)) return;
 
       const direction = Math.sign(e.deltaY);
@@ -485,7 +479,6 @@ export function initAppScroll(options) {
     (e) => {
       if (
         !interactive ||
-        settingsStageOpen() ||
         e.touches.length !== 1 ||
         ignoredTarget(e.target)
       ) {
@@ -564,7 +557,7 @@ export function initAppScroll(options) {
   window.addEventListener(
     'keydown',
     (e) => {
-      if (!interactive || settingsStageOpen() || isBusy()) return;
+      if (!interactive || isBusy()) return;
       if (ignoredTarget(e.target)) return;
 
       let direction = 0;
@@ -621,7 +614,7 @@ export function initAppScroll(options) {
   if (homeBtn) {
     homeBtn.addEventListener('click', (e) => {
       e.preventDefault();
-      if (!interactive || settingsStageOpen()) return;
+      if (!interactive) return;
       void goHome();
     });
   }
@@ -645,11 +638,9 @@ export function initAppScroll(options) {
 
   return {
     getStep: currentStep,
-    getScreenCount: () => screenCount,
     goTo,
     goHome,
     unlock,
     isInteractive: () => interactive,
-    isAnimating: () => isBusy(),
   };
 }

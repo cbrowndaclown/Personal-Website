@@ -143,27 +143,6 @@ export function createPresetManager(options) {
   }
 
   /**
-   * @param {string} id
-   * @returns {boolean}
-   */
-  function unregister(id) {
-    if (!registry.has(id)) return false;
-    registry.delete(id);
-    const idx = order.indexOf(id);
-    if (idx !== -1) order.splice(idx, 1);
-    if (activePresetId === id) setActivePresetId(null);
-    return true;
-  }
-
-  /**
-   * @param {string} id
-   * @returns {import('./define.js').PixelPreset|null}
-   */
-  function getPreset(id) {
-    return registry.get(id) || null;
-  }
-
-  /**
    * @returns {import('./define.js').PixelPreset[]}
    */
   function listPresets() {
@@ -173,20 +152,6 @@ export function createPresetManager(options) {
       if (preset) out.push(preset);
     }
     return out;
-  }
-
-  /**
-   * @returns {Array<{ value: string, label: string }>}
-   */
-  function getPresetOptions() {
-    return listPresets().map((preset) => ({
-      value: preset.id,
-      label: preset.label,
-    }));
-  }
-
-  function getActivePresetId() {
-    return activePresetId;
   }
 
   /**
@@ -422,22 +387,6 @@ export function createPresetManager(options) {
     return true;
   }
 
-  function isTransitionActive() {
-    return transition.isActive();
-  }
-
-  /**
-   * Snapshot of the fully resolved settings for a preset (does not apply).
-   * @param {string} id
-   * @returns {object|null}
-   */
-  function peekPresetSettings(id) {
-    const preset = registry.get(id);
-    if (!preset) return null;
-    const validated = resolvePresetSettings(preset);
-    return validated ? snapshotSettings(validated) : null;
-  }
-
   /** Clear active preset when the user edits settings outside loadPreset. */
   function onSettingsChanged() {
     if (applying) return;
@@ -476,16 +425,10 @@ export function createPresetManager(options) {
 
   return {
     register,
-    unregister,
-    getPreset,
     listPresets,
-    getPresetOptions,
-    getActivePresetId,
     loadPreset,
     activate,
     isInteractive,
-    isTransitionActive,
-    peekPresetSettings,
     resolvePresetSettings,
     reconcileActivePreset,
     findMatchingPresetId,

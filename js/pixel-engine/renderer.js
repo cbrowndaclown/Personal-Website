@@ -43,8 +43,13 @@ export function createRenderer(options) {
 
     if (target.width !== canvas.width) target.width = canvas.width;
     if (target.height !== canvas.height) target.height = canvas.height;
-    target.style.width = canvas.style.width;
-    target.style.height = canvas.style.height;
+    /* Style writes only on change — per-frame writes dirty style for nothing. */
+    if (target.style.width !== canvas.style.width) {
+      target.style.width = canvas.style.width;
+    }
+    if (target.style.height !== canvas.style.height) {
+      target.style.height = canvas.style.height;
+    }
     targetCtx.setTransform(1, 0, 0, 1, 0, 0);
     targetCtx.drawImage(canvas, 0, 0);
   }
@@ -125,42 +130,12 @@ export function createRenderer(options) {
     ctx.fillRect(0, 0, grid.viewW, grid.viewH);
   }
 
-  /**
-   * Future path: paint from PixelStateManager buffers.
-   * V1 styles still own their simulation paint loops; this exists so
-   * future Pixel FS plugins can modify state without touching canvas code.
-   * @param {ReturnType<import('./pixel-state.js').createPixelStateManager>['getBuffers'] extends Function ? any : never} buffers
-   */
-  function paintFromState(buffers) {
-    if (!buffers || !buffers.count) {
-      paintRest();
-      return;
-    }
-    const cell = grid.cell || CELL;
-    const dot = DOT;
-    clear(FIELD);
-    for (let i = 0; i < buffers.count; i++) {
-      if (buffers.active && !buffers.active[i]) continue;
-      const size = dot;
-      const cx = (buffers.x[i] + (buffers.offsetX ? buffers.offsetX[i] : 0));
-      const cy = (buffers.y[i] + (buffers.offsetY ? buffers.offsetY[i] : 0));
-      const a = buffers.opacity ? buffers.opacity[i] : 1;
-      const r = buffers.colorR ? (buffers.colorR[i] * 255) | 0 : COOL[0];
-      const g = buffers.colorG ? (buffers.colorG[i] * 255) | 0 : COOL[1];
-      const b = buffers.colorB ? (buffers.colorB[i] * 255) | 0 : COOL[2];
-      ctx.fillStyle = a < 1 ? `rgba(${r},${g},${b},${a})` : `rgb(${r},${g},${b})`;
-      ctx.fillRect(cx - size * 0.5, cy - size * 0.5, size, size);
-    }
-    present();
-  }
-
   return {
     canvas,
     canvases,
     ctx,
     applySurface,
     paintRest,
-    paintFromState,
     clear,
     present,
     syncSurfaces,

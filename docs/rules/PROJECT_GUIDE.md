@@ -47,7 +47,7 @@ Accepted subsystems are stable architecture. Build upon them; do not redesign th
 
 Pixel FS uses an established two-screen full-screen layout.
 
-- **Screen 1** (`#pixel-fs-screen-1`) is the primary landing experience: boot, intro, pixel stage, settings, and first impression.
+- **Screen 1** (`#pixel-fs-screen-1`) is the primary landing experience: intro, pixel stage, settings, and first impression.
 
 - **Screen 2** (`#pixel-fs-screen-2`) is the continuation of the Pixel FS experience within the same application frame.
 
@@ -59,17 +59,9 @@ This layout and navigation model are protected architecture.
 
 ---
 
-# Boot Sequence
+# Startup
 
-The boot sequence is a core identity feature.
-
-It should never be modified unless explicitly requested.
-
-The current Screen 1 boot pipeline is:
-
-powering on → grid generation → calibration → typography construction → stabilizing → ready
-
-The boot sequence establishes the visual language for the rest of the website.
+The startup boot animation was removed at the user's request. Page load goes straight to the ready state: resting lattice + Screen 1 directory.
 
 ---
 

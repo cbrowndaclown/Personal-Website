@@ -176,16 +176,6 @@ export function createPixelBehaviorSystem(options) {
     return values[key];
   }
 
-  /** Shallow copy of the current snapshot (safe to stash). */
-  function getSnapshot() {
-    return {
-      reactionStrength: values.reactionStrength,
-      movementSpeed: values.movementSpeed,
-      decaySpeed: values.decaySpeed,
-      trailLifetime: values.trailLifetime,
-    };
-  }
-
   function getRevision() {
     return revision;
   }
@@ -234,7 +224,6 @@ export function createPixelBehaviorSystem(options) {
     keys: BEHAVIOR_KEYS,
     sync,
     get,
-    getSnapshot,
     getRevision,
     didChange,
     onChange,

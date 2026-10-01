@@ -4,7 +4,6 @@
 :root {
   /* Fonts — Porca for all CSS/UI text; Pixel FS LEDs bake Josefin Sans in JS */
   --f-ui: 'Porca', system-ui, sans-serif;
-  --f-serif: var(--f-ui);
   --f-sans: var(--f-ui);
   --f-mono: var(--f-ui);
   --f-ribbon: var(--f-ui);
@@ -15,9 +14,6 @@
   --heat-field: #D2D2D2;
 
   /* Shared accent — kept in sync with Settings Global Color (JS) */
-  --accent-r: 255;
-  --accent-g: 52;
-  --accent-b: 158;
   --accent-rgb: 255, 52, 158;
 
   /* Nav height — site-frame parks at -navH, reveals at 0 */
@@ -968,25 +964,6 @@ body {
   cursor: not-allowed;
 }
 
-.settings__seg-placeholder {
-  appearance: none;
-  width: 100%;
-  height: 30px;
-  margin: 0;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 999px;
-  background: rgba(28, 20, 10, 0.06);
-  box-shadow: inset 0 0 0 1px rgba(28, 20, 10, 0.05);
-  font-family: var(--f-settings);
-  font-size: 0.7rem;
-  font-weight: 400;
-  letter-spacing: 0.015em;
-  color: rgba(58, 50, 40, 0.4);
-  cursor: not-allowed;
-  text-align: left;
-}
-
 /* Toggle switch */
 .settings__toggle {
   appearance: none;
@@ -1180,7 +1157,6 @@ body {
    ============================================================ */
 .page-shell {
   --shell-pad-y: clamp(27px, 3.5vh, 38px);
-  --shell-pad-top: var(--shell-pad-y);
   --shell-pad-x: clamp(8px, 1.7vw, 24px);
 
   /* Ribbon boundary flip — the open edge moves from bottom to top.
@@ -1265,12 +1241,6 @@ body[data-boot] .app-scroll {
   overflow-y: hidden;
 }
 
-/* Full screen settings owns the field — pin the scrollport until it closes. */
-body[data-settings-stage] .app-scroll {
-  overflow: hidden;
-  scroll-snap-type: none;
-  touch-action: none;
-}
 
 /* ============================================================
    PIXEL FS SCREENS — one full application viewport each.
@@ -1473,408 +1443,6 @@ body[data-settings-stage] .app-scroll {
 }
 
 
-/* ============================================================
-   FULL SCREEN SETTINGS — the inspector mounted in the stage.
-   Replaces the old Motion off state: rather than leaving a dead
-   gray field, that same space becomes the settings surface. The
-   host lives inside .stage__field, so it inherits the squircle
-   clip and only ever covers the screen it was opened on.
-
-   Master / detail: the rail of categories is pinned left at a
-   fixed track, the detail column is the second grid track and
-   animates 0fr → 1fr so opening a category reads as the surface
-   growing out to the right until it spans the display.
-   ============================================================ */
-.settings-stage {
-  --stage-pad: clamp(14px, 2vw, 30px);
-  --stage-rail-w: clamp(300px, 27%, 420px);
-  --stage-radius: 22px;
-  --stage-card: rgba(255, 255, 255, 0.97);
-  --stage-ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --stage-pop: cubic-bezier(0.34, 1.32, 0.64, 1);
-  /* Floor for detail content so a growing track reveals it instead of
-     reflowing it column by column on the way open. */
-  --stage-detail-min: clamp(320px, 38vw, 780px);
-
-  position: absolute;
-  inset: 0;
-  z-index: 30;
-  padding: var(--stage-pad);
-  background-color: var(--heat-field);
-  opacity: 0;
-  transition: opacity 0.26s var(--stage-ease);
-}
-
-/* Revealing the nav pushes the whole frame down, so the last nav-height of
-   the field sits under the fold. The gear only exists in that state, so the
-   surface always has to hold itself clear of it. */
-.site-frame.is-nav-revealed .settings-stage {
-  padding-bottom: calc(var(--stage-pad) + var(--topnav-h));
-  transition:
-    opacity 0.26s var(--stage-ease),
-    padding-bottom 0.58s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.settings-stage.is-open {
-  opacity: 1;
-}
-
-.settings-stage__shell {
-  display: grid;
-  grid-template-columns: var(--stage-rail-w) 0fr;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-  transition: grid-template-columns 0.42s var(--stage-ease);
-}
-
-.settings-stage.has-detail .settings-stage__shell {
-  grid-template-columns: var(--stage-rail-w) 1fr;
-}
-
-.settings-stage__rail {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
-  padding: clamp(18px, 2vw, 28px) 0 0;
-  border-radius: var(--stage-radius);
-  corner-shape: squircle;
-  background: var(--stage-card);
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  box-shadow:
-    inset 0 1.5px 0 rgba(255, 255, 255, 0.9),
-    0 1px 2px rgba(28, 20, 10, 0.04),
-    0 18px 52px rgba(28, 20, 10, 0.1);
-  /* The pop: the surface arrives after the display has already cleared. */
-  opacity: 0;
-  transform: translate3d(-20px, 0, 0) scale(0.965);
-  transition:
-    transform 0.44s var(--stage-pop),
-    opacity 0.24s linear,
-    border-radius 0.42s var(--stage-ease),
-    border-right-color 0.42s var(--stage-ease);
-}
-
-.settings-stage.is-open .settings-stage__rail {
-  opacity: 1;
-  transform: translate3d(0, 0, 0) scale(1);
-}
-
-.settings-stage.has-detail .settings-stage__rail {
-  border-radius: var(--stage-radius) 0 0 var(--stage-radius);
-  border-right-color: rgba(58, 50, 40, 0.09);
-}
-
-.settings-stage__detail {
-  position: relative;
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
-  overflow: hidden;
-  border-radius: 0 var(--stage-radius) var(--stage-radius) 0;
-  corner-shape: squircle;
-  background: var(--stage-card);
-  box-shadow:
-    inset 0 1.5px 0 rgba(255, 255, 255, 0.9),
-    0 18px 52px rgba(28, 20, 10, 0.1);
-  opacity: 0;
-  transition: opacity 0.3s var(--stage-ease);
-}
-
-.settings-stage.has-detail .settings-stage__detail {
-  opacity: 1;
-}
-
-/* The category's own panel, moved here out of the rail. Its collapse
-   animation is retired — the detail track carries the motion instead. */
-.settings-stage__detail > .settings__section-panel {
-  width: 100%;
-  min-width: var(--stage-detail-min);
-  height: 100% !important;
-  opacity: 1 !important;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-  transition: none;
-}
-
-.settings-stage__detail > .settings__section-panel::-webkit-scrollbar {
-  width: 0;
-  height: 0;
-  background: transparent;
-}
-
-/* A single column of rows would strand most of the display, so rows flow
-   into as many columns as the open track can hold. */
-.settings-stage__detail .settings__section-body {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
-  align-content: start;
-  gap: clamp(20px, 2.2vw, 32px);
-  padding: clamp(20px, 2.2vw, 32px) clamp(22px, 2.4vw, 38px)
-    clamp(26px, 2.8vw, 42px);
-}
-
-.settings-stage__detail .settings__section--nested,
-.settings-stage__detail .settings__empty {
-  grid-column: 1 / -1;
-}
-
-.settings-stage__detail .settings__section--nested {
-  margin: 0;
-  padding-top: clamp(4px, 0.8vw, 10px);
-  border-top: 1px solid rgba(58, 50, 40, 0.08);
-}
-
-.settings-stage__head {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: clamp(14px, 1.6vh, 22px);
-  padding: 0 clamp(18px, 1.7vw, 26px);
-}
-
-.settings-stage__title {
-  margin: 0;
-  font-family: var(--f-settings);
-  font-size: clamp(1.5rem, 2.1vw, 2rem);
-  font-weight: 500;
-  letter-spacing: 0.01em;
-  line-height: 1.2;
-  color: rgba(28, 20, 10, 0.94);
-}
-
-.settings-stage__close {
-  appearance: none;
-  flex-shrink: 0;
-  width: 38px;
-  height: 38px;
-  border: 0;
-  border-radius: 12px;
-  background: transparent;
-  color: rgba(58, 50, 40, 0.45);
-  cursor: pointer;
-  font-size: 1rem;
-  line-height: 1;
-  transition: color 0.18s ease, background 0.18s ease;
-}
-
-.settings-stage__close:hover {
-  color: rgba(58, 50, 40, 0.88);
-  background: rgba(58, 50, 40, 0.06);
-}
-
-.settings-stage__close:focus-visible {
-  outline: 2px solid rgba(58, 50, 40, 0.35);
-  outline-offset: 2px;
-}
-
-/* The display is the panel now — everything is sized for a screen rather
-   than for the nav dropdown's 320px column. */
-.settings-stage__rail .settings__body {
-  gap: 4px;
-  padding: 0 clamp(12px, 1.1vw, 18px) 16px;
-}
-
-.settings-stage__rail .settings__section > .settings__section-header {
-  gap: 12px;
-  padding: clamp(12px, 1.4vh, 16px) 14px;
-  border-radius: 14px;
-}
-
-.settings-stage__rail .settings__section-title {
-  font-size: clamp(1.02rem, 1.25vw, 1.2rem);
-}
-
-.settings-stage__rail .settings__section-chevron {
-  width: 12px;
-  height: 12px;
-}
-
-/* The open category is the rail's selection, not just an expanded row. */
-.settings-stage__rail .settings__section.is-open > .settings__section-header {
-  background: rgba(var(--accent-rgb), 0.10);
-}
-
-.settings-stage__rail .settings__foot {
-  padding: 14px clamp(18px, 1.7vw, 26px) clamp(16px, 1.6vh, 22px);
-}
-
-.settings-stage__rail .settings__reset {
-  padding: 14px 14px;
-  border-radius: 14px;
-  font-size: 0.98rem;
-}
-
-.settings-stage__detail .settings__section--nested > .settings__section-header {
-  gap: 10px;
-  padding: 10px 8px;
-  border-radius: 12px;
-}
-
-.settings-stage__detail .settings__section--nested .settings__section-title {
-  font-size: 1.02rem;
-}
-
-.settings-stage__detail .settings__section--nested .settings__section-chevron {
-  width: 10px;
-  height: 10px;
-}
-
-.settings-stage__detail .settings__row {
-  gap: 12px;
-}
-
-/* Swatch rows pair the label block against the swatch. The dropdown's column
-   is narrow enough to wrap it; at this width the two spans need stacking. */
-.settings-stage__detail .settings__meta--row > div {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-
-.settings-stage__detail .settings__label {
-  font-size: 1.02rem;
-}
-
-.settings-stage__detail .settings__desc,
-.settings-stage__detail .settings__empty {
-  font-size: 0.84rem;
-}
-
-.settings-stage__detail .settings__seg {
-  height: 40px;
-}
-
-.settings-stage__detail .settings__seg-opt {
-  font-size: 0.86rem;
-}
-
-.settings-stage__detail .settings__seg--triple .settings__seg-opt,
-.settings-stage__detail .settings__seg--n .settings__seg-opt {
-  font-size: 0.8rem;
-}
-
-.settings-stage__detail .settings__seg-placeholder {
-  height: 36px;
-  font-size: 0.8rem;
-}
-
-.settings-stage__detail .settings__select {
-  height: 42px;
-  padding: 0 34px 0 16px;
-  border-radius: 14px;
-  background-position: right 14px center;
-  font-size: 0.9rem;
-}
-
-.settings-stage__detail .settings__slider {
-  grid-template-columns: 22px 1fr 48px;
-  gap: 12px;
-}
-
-.settings-stage__detail .settings__slider--solo {
-  grid-template-columns: 1fr 56px;
-}
-
-.settings-stage__detail .settings__slider-label,
-.settings-stage__detail .settings__slider-val {
-  font-size: 0.86rem;
-}
-
-.settings-stage__detail .settings__slider input[type="range"] {
-  height: 6px;
-}
-
-.settings-stage__detail
-  .settings__slider
-  input[type="range"]::-webkit-slider-thumb {
-  width: 18px;
-  height: 18px;
-}
-
-.settings-stage__detail .settings__slider input[type="range"]::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
-}
-
-.settings-stage__detail .settings__toggle {
-  width: 52px;
-  height: 30px;
-}
-
-.settings-stage__detail .settings__toggle-thumb {
-  width: 24px;
-  height: 24px;
-}
-
-.settings-stage__detail .settings__toggle.is-on .settings__toggle-thumb {
-  transform: translateX(22px);
-}
-
-.settings-stage__detail .settings__swatch {
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-}
-
-.settings-stage__detail .settings__color-input {
-  width: 42px;
-  height: 42px;
-}
-
-.settings-stage__detail .settings__color-hex {
-  font-size: 0.86rem;
-}
-
-.settings-stage__detail .settings__number-input {
-  width: 92px;
-  height: 42px;
-  border-radius: 14px;
-  font-size: 0.9rem;
-}
-
-.settings-stage__detail .settings__number-unit {
-  font-size: 0.84rem;
-}
-
-.settings-stage__detail .settings__action {
-  padding: 11px 20px;
-  border-radius: 12px;
-  font-size: 0.94rem;
-}
-
-/* Pixel clear sweep — a throwaway overlay carrying one borrowed frame while
-   the display wipes itself down to the flat field (and back on close). */
-.settings-stage__clear {
-  position: absolute;
-  left: 0;
-  top: 0;
-  z-index: 25;
-  display: block;
-  pointer-events: none;
-}
-
-@media (max-width: 900px) {
-  .settings-stage {
-    --stage-rail-w: clamp(220px, 38%, 320px);
-    --stage-detail-min: 0px;
-    --stage-radius: 18px;
-  }
-
-  .settings-stage__detail .settings__section-body {
-    grid-template-columns: 1fr;
-  }
-}
-
-
 /* ── App startup lock — shell isolation (geometry stays final) ────────────
    Screen 2 stays in layout so the stage lattice stays two screens tall.
    Scroll is locked at Screen 1; nav/settings are inert. No reflow. */
@@ -1898,19 +1466,6 @@ body[data-app-startup] .topnav * {
 body[data-boot] #pixel-fs-screen-1 .stage__field {
   touch-action: none;
   user-select: none;
-}
-
-/* Energy / self-test boot — dormant black field inside the Pixel Engine only.
-   Includes stabilizing so the completed lattice is not abandoned mid-handoff. */
-body[data-boot="powering_on"] #pixel-fs-screen-1 .stage__field,
-body[data-boot="grid_generation"] #pixel-fs-screen-1 .stage__field,
-body[data-boot="calibration"] #pixel-fs-screen-1 .stage__field,
-body[data-boot="display_clear"] #pixel-fs-screen-1 .stage__field,
-body[data-boot="self_test"] #pixel-fs-screen-1 .stage__field,
-body[data-boot="typography_construction"] #pixel-fs-screen-1 .stage__field,
-body[data-boot="typography"] #pixel-fs-screen-1 .stage__field,
-body[data-boot="stabilizing"] #pixel-fs-screen-1 .stage__field {
-  background-color: #000000;
 }
 
 /* ============================================================
@@ -1970,10 +1525,6 @@ body[data-motion="on"][data-bg-mode="lightning"] .lightning-cursor.is-in-field {
   .settings__section-panel,
   .settings__section-chevron::before,
   .settings__action,
-  .settings-stage,
-  .settings-stage__shell,
-  .settings-stage__rail,
-  .settings-stage__detail,
   .site-frame,
   .app-scroll,
   .nameplate,
@@ -2081,7 +1632,6 @@ body[data-motion="on"][data-bg-mode="lightning"] .lightning-cursor.is-in-field {
 
   .page-shell {
     --shell-pad-y: 25px;
-    --shell-pad-top: var(--shell-pad-y);
     --shell-pad-x: clamp(4px, 1.35vw, 8px);
   }
 

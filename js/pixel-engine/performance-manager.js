@@ -142,7 +142,6 @@ export function createPerformanceManager(options = {}) {
   let _appliedDensity = NaN;
   /** Requested density from Settings while teardown/rebuild is in flight. */
   let _pendingDensity = null;
-  let _density = NaN;
   let _qualityUi = NaN;
   let _frameTarget = '';
   let _adaptive = null;
@@ -193,10 +192,6 @@ export function createPerformanceManager(options = {}) {
     return _pendingDensity != null;
   }
 
-  function getPendingDensity() {
-    return _pendingDensity;
-  }
-
   /**
    * Apply a previously deferred density remount (post-teardown rebuild).
    * Bumps revision before setCellSize so style PixelDensityChanged handlers
@@ -214,7 +209,6 @@ export function createPerformanceManager(options = {}) {
     const next = normalizePixelDensity(_pendingDensity);
     _pendingDensity = null;
     _appliedDensity = next;
-    _density = next;
     values.pixelDensity = next;
     recomputeDerived();
     revision += 1;
@@ -255,7 +249,6 @@ export function createPerformanceManager(options = {}) {
 
     if (!Number.isFinite(_appliedDensity)) {
       _appliedDensity = density;
-      _density = density;
       values.pixelDensity = density;
     }
 
@@ -265,7 +258,6 @@ export function createPerformanceManager(options = {}) {
         values.pixelDensity = density;
       } else {
         _pendingDensity = density;
-        _density = density;
         values.pixelDensity = density;
         densityTeardown = true;
         dirty = true;
@@ -330,26 +322,9 @@ export function createPerformanceManager(options = {}) {
     return derived.cell;
   }
 
-  function getDotSize() {
-    return derived.dot;
-  }
-
-  /** Base Effect Quality scale 0–1 (ignores adaptive). */
-  function getQuality() {
-    return derived.quality;
-  }
-
   /** Quality after adaptive scaling — prefer this in paint/sim loops. */
   function getEffectiveQuality() {
     return derived.effectiveQuality;
-  }
-
-  function getFpsCap() {
-    return derived.fpsCap;
-  }
-
-  function isAdaptiveEnabled() {
-    return values.adaptivePerformance;
   }
 
   /**
@@ -435,20 +410,6 @@ export function createPerformanceManager(options = {}) {
     monitorEnabled = !!on;
   }
 
-  /** @deprecated Prefer getEffectiveQuality / derived.effectiveQuality */
-  function getQualityTier() {
-    const q = derived.effectiveQuality;
-    let tier = 'full';
-    if (q < 0.35) tier = 'low';
-    else if (q < 0.7) tier = 'medium';
-    return {
-      tier,
-      cellScale: CELL > 0 ? derived.cell / CELL : 1,
-      throttle: derived.fpsCap ? Math.max(1, Math.round(60 / derived.fpsCap)) : 1,
-      quality: q,
-    };
-  }
-
   recomputeDerived();
   sync();
 
@@ -474,22 +435,16 @@ export function createPerformanceManager(options = {}) {
     getRevision,
     didChange,
     getCellSize,
-    getDotSize,
-    getQuality,
     getEffectiveQuality,
-    getFpsCap,
-    isAdaptiveEnabled,
     shouldRender,
     beginFrame,
     endFrame,
     beginFrameIfDue,
     onChange,
     hasPendingDensity,
-    getPendingDensity,
     commitPendingDensity,
     isEnabled,
     setEnabled,
-    getQualityTier,
     destroy,
   };
 }
