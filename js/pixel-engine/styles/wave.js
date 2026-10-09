@@ -2,6 +2,7 @@
    Wave energy model: Decay Speed → how quickly wave motion settles. */
 
 import { PixelEvents } from '../constants.js';
+import { OPENING_BOUNCE } from '../boot/constants.js';
 import { computeGridLayout } from '../grid-manager.js';
 import { applyDecayRate } from '../pixel-behavior.js';
 
@@ -31,6 +32,9 @@ export function createWaveStyle(deps) {
   let DOT = Math.max(1, CELL - 2);
   const FIELD = [210, 210, 210];
   const COOL  = [255, 255, 255];
+  /* Opening wave — popped dots dim toward a muted gray */
+  const WAVE_GRAY  = OPENING_BOUNCE.SHADE_RGB;
+  const WAVE_SHADE = OPENING_BOUNCE.SHADE;
   const EPS   = 0.00045;
   let _perfRev = -1;
   let effectQuality = 1;
@@ -638,6 +642,10 @@ export function createWaveStyle(deps) {
         ];
 
     const introAlive = pixelField.update(nowMs);
+    /* Opening jump wave — dots leave home for real; no resting ghost. */
+    const openingWave =
+      typeof pixelField.openingWaveActive === 'function' &&
+      pixelField.openingWaveActive();
     const n = cols * rows;
     let alive = !!introAlive;
     if (
@@ -829,13 +837,16 @@ export function createWaveStyle(deps) {
       const presenceScale = densitySync
         ? Math.min(1, 0.55 + Math.max(presence, introHv) * 0.45)
         : Math.min(1, 0.35 + presence * 0.65);
-      const size = DOT * presenceScale * (1 + mag * SIZE_RESP);
+      /* Opening wave pops dots toward the viewer */
+      const popScale = openingWave ? pixelField.waveScale(i) : 1;
+      const size = DOT * presenceScale * popScale * (1 + mag * SIZE_RESP);
       const homeX = x * CELL + CELL * 0.5;
       const homeY = y * CELL + CELL * 0.5 + disp * DISP_PX;
       const cx = homeX + introDX;
       const cy = homeY + introDY;
 
       if (
+        !openingWave &&
         introDrift &&
         Math.hypot(introDX, introDY) > 2.5 &&
         Math.abs(disp) < EPS &&
@@ -881,6 +892,15 @@ export function createWaveStyle(deps) {
         r += (255 - r) * lift;
         g += (220 - g) * lift * 0.35;
         b += (240 - b) * lift * 0.45;
+      }
+
+      if (openingWave) {
+        const sh = pixelField.waveShade(i) * WAVE_SHADE;
+        if (sh > 0) {
+          r += (WAVE_GRAY[0] - r) * sh;
+          g += (WAVE_GRAY[1] - g) * sh;
+          b += (WAVE_GRAY[2] - b) * sh;
+        }
       }
 
       const ri = r | 0;

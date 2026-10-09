@@ -3,10 +3,7 @@
 
 import { getStyleSegmentOptions } from './styles.js';
 import { scaledSliderSetting } from '../scale.js';
-import {
-  PERFORMANCE_DEFAULTS,
-  FRAME_RATE_OPTIONS,
-} from '../../pixel-engine/performance-manager.js';
+import { PERFORMANCE_DEFAULTS } from '../../pixel-engine/performance-manager.js';
 
 /**
  * @typedef {'segment' | 'rgb' | 'slider' | 'dropdown' | 'toggle' | 'color' | 'number' | 'button'} SettingType
@@ -175,7 +172,7 @@ export const SETTINGS = [
     get: (api) => api.getEffectColor(),
     set: (api, rgb, publish) => api.setEffectColor(rgb.r, rgb.g, rgb.b, publish),
   },
-  /* Performance — density, FPS, adaptive. Defaults preserve V1 look. */
+  /* Performance — density, adaptive. Defaults preserve V1 look. */
   {
     id: 'pixel-density',
     label: 'Pixel Density',
@@ -199,17 +196,6 @@ export const SETTINGS = [
     disabledWhen: (api) =>
       typeof api.isPixelDensityLocked === 'function' &&
       api.isPixelDensityLocked(),
-  },
-  {
-    id: 'frame-rate-target',
-    label: 'Frame Rate Target',
-    desc: 'Preferred frame rate for Pixel FS rendering',
-    categoryId: 'performance',
-    type: 'dropdown',
-    defaultValue: PERFORMANCE_DEFAULTS.frameRateTarget,
-    options: FRAME_RATE_OPTIONS.slice(),
-    get: (api) => api.getFrameRateTarget(),
-    set: (api, value) => api.setFrameRateTarget(value),
   },
   {
     id: 'adaptive-performance',

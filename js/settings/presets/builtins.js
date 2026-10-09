@@ -43,7 +43,6 @@ export const BUILTIN_PRESETS = [
       performance: {
         pixelDensity: PERFORMANCE_DEFAULTS.pixelDensity,
         effectQuality: PERFORMANCE_DEFAULTS.effectQuality,
-        frameRateTarget: PERFORMANCE_DEFAULTS.frameRateTarget,
         adaptivePerformance: PERFORMANCE_DEFAULTS.adaptivePerformance,
       },
     },
@@ -72,7 +71,6 @@ export const BUILTIN_PRESETS = [
       performance: {
         pixelDensity: 3,
         effectQuality: 8,
-        frameRateTarget: 'auto',
         adaptivePerformance: true,
       },
     },
@@ -102,7 +100,6 @@ export const BUILTIN_PRESETS = [
       performance: {
         pixelDensity: 5,
         effectQuality: 10,
-        frameRateTarget: '60',
         adaptivePerformance: true,
       },
     },
@@ -132,7 +129,6 @@ export const BUILTIN_PRESETS = [
       performance: {
         pixelDensity: 4,
         effectQuality: 10,
-        frameRateTarget: 'unlimited',
         adaptivePerformance: true,
       },
     },
@@ -162,7 +158,6 @@ export const BUILTIN_PRESETS = [
       performance: {
         pixelDensity: 2,
         effectQuality: 5,
-        frameRateTarget: '30',
         adaptivePerformance: true,
       },
     },

@@ -1,11 +1,9 @@
-/* Performance Manager — density, effect quality, frame pacing, adaptive scaling.
+/* Performance Manager — density, effect quality, adaptive scaling.
    Settings write animConfig.performance; this layer caches once per soft publish
-   (revision gate). Modes read cell / quality / shouldRender without reallocating
-   every frame. Defaults match pre-settings V1 (CELL=5, full quality, uncapped). */
+   (revision gate). Modes read cell / quality without reallocating every frame.
+   Defaults match pre-settings V1 (CELL=5, full quality). */
 
 import { CELL, PixelEvents } from './constants.js';
-
-/** @typedef {'auto'|'30'|'60'|'120'|'unlimited'} FrameRateTarget */
 
 /** Discrete Pixel Density levels (slider snaps to these only). */
 export const PIXEL_DENSITY_MIN = 1;
@@ -18,20 +16,8 @@ export const PERFORMANCE_DEFAULTS = Object.freeze({
   pixelDensity: PIXEL_DENSITY_DEFAULT,
   /** UI 0–10 — 10 = full current fidelity. */
   effectQuality: 10,
-  /** @type {FrameRateTarget} */
-  frameRateTarget: 'auto',
   adaptivePerformance: true,
 });
-
-export const FRAME_RATE_OPTIONS = Object.freeze([
-  { value: 'auto', label: 'Auto' },
-  { value: '30', label: '30 FPS' },
-  { value: '60', label: '60 FPS' },
-  { value: '120', label: '120 FPS' },
-  { value: 'unlimited', label: 'Unlimited' },
-]);
-
-const FRAME_RATE_SET = new Set(FRAME_RATE_OPTIONS.map((o) => o.value));
 
 /**
  * Five curated cell sizes (CSS px) for density levels 1–5.
@@ -59,17 +45,6 @@ export function normalizePixelDensity(value) {
 }
 
 /**
- * @param {string} value
- * @returns {FrameRateTarget}
- */
-export function normalizeFrameRateTarget(value) {
-  const v = String(value || '');
-  return FRAME_RATE_SET.has(v)
-    ? /** @type {FrameRateTarget} */ (v)
-    : PERFORMANCE_DEFAULTS.frameRateTarget;
-}
-
-/**
  * Discrete density level 1–5 → curated CSS cell size.
  * Level 3 returns CELL exactly (preserve current Pixel FS appearance).
  * @param {number} density
@@ -93,18 +68,6 @@ export function qualityScaleFromUi(qualityUi) {
 }
 
 /**
- * Resolve a numeric FPS cap, or null when uncapped (Auto / Unlimited).
- * @param {FrameRateTarget} target
- * @returns {number|null}
- */
-export function fpsCapFromTarget(target) {
-  const t = normalizeFrameRateTarget(target);
-  if (t === 'auto' || t === 'unlimited') return null;
-  const n = Number(t);
-  return Number.isFinite(n) && n > 0 ? n : null;
-}
-
-/**
  * @param {object} options
  * @param {object} options.animConfig
  * @param {import('./events.js').EventSystem} [options.events]
@@ -118,7 +81,6 @@ export function createPerformanceManager(options = {}) {
   const values = {
     pixelDensity: PERFORMANCE_DEFAULTS.pixelDensity,
     effectQuality: PERFORMANCE_DEFAULTS.effectQuality,
-    frameRateTarget: PERFORMANCE_DEFAULTS.frameRateTarget,
     adaptivePerformance: PERFORMANCE_DEFAULTS.adaptivePerformance,
   };
 
@@ -132,8 +94,6 @@ export function createPerformanceManager(options = {}) {
     adaptiveScale: 1,
     /** quality * adaptiveScale — what styles should read. */
     effectiveQuality: 1,
-    /** FPS cap or null (uncapped). */
-    fpsCap: null,
   };
 
   let revision = 0;
@@ -143,11 +103,9 @@ export function createPerformanceManager(options = {}) {
   /** Requested density from Settings while teardown/rebuild is in flight. */
   let _pendingDensity = null;
   let _qualityUi = NaN;
-  let _frameTarget = '';
   let _adaptive = null;
 
   /* Frame pacing */
-  let lastRenderTime = 0;
   let frameStart = 0;
   let emaFrameMs = 16.7;
   let adaptiveScale = 1;
@@ -175,7 +133,6 @@ export function createPerformanceManager(options = {}) {
       0,
       Math.min(1, derived.quality * derived.adaptiveScale),
     );
-    derived.fpsCap = fpsCapFromTarget(values.frameRateTarget);
   }
 
   /**
@@ -242,7 +199,6 @@ export function createPerformanceManager(options = {}) {
       0,
       Math.min(10, Math.round(Number(src.effectQuality))),
     );
-    const frameTarget = normalizeFrameRateTarget(src.frameRateTarget);
     const adaptive = !!src.adaptivePerformance;
     let dirty = false;
     let densityTeardown = false;
@@ -275,12 +231,6 @@ export function createPerformanceManager(options = {}) {
         ? qualityUi
         : PERFORMANCE_DEFAULTS.effectQuality;
       dirty = true;
-    }
-    if (frameTarget !== _frameTarget) {
-      _frameTarget = frameTarget;
-      values.frameRateTarget = frameTarget;
-      dirty = true;
-      lastRenderTime = 0;
     }
     if (adaptive !== _adaptive) {
       _adaptive = adaptive;
@@ -333,18 +283,7 @@ export function createPerformanceManager(options = {}) {
    * @param {number} nowMs
    * @returns {boolean}
    */
-  function shouldRender(nowMs) {
-    const cap = derived.fpsCap;
-    if (cap == null) return true;
-    const minDelta = 1000 / cap;
-    if (lastRenderTime > 0 && nowMs - lastRenderTime < minDelta - 0.75) {
-      return false;
-    }
-    lastRenderTime = nowMs;
-    return true;
-  }
-
-  /** Call at the start of a rendered frame (after shouldRender passes). */
+  /** Call at the start of a rendered frame. */
   function beginFrame(nowMs) {
     frameStart = nowMs > 0 ? nowMs : 0;
   }
@@ -380,13 +319,12 @@ export function createPerformanceManager(options = {}) {
   }
 
   /**
-   * Convenience: begin + shouldRender. Skipped frames still schedule rAF
-   * but avoid beginFrame/endFrame accounting.
+   * Start frame-cost accounting. Every frame renders (no frame cap); kept as
+   * a boolean so style loops can keep their existing guard.
    * @param {number} nowMs
    * @returns {boolean}
    */
   function beginFrameIfDue(nowMs) {
-    if (!shouldRender(nowMs)) return false;
     beginFrame(nowMs);
     return true;
   }
@@ -436,7 +374,6 @@ export function createPerformanceManager(options = {}) {
     didChange,
     getCellSize,
     getEffectiveQuality,
-    shouldRender,
     beginFrame,
     endFrame,
     beginFrameIfDue,

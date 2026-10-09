@@ -2,6 +2,7 @@
    Thermal energy model: Decay Speed → how quickly heat cools + springs settle. */
 
 import { PixelEvents } from '../constants.js';
+import { OPENING_BOUNCE } from '../boot/constants.js';
 import { computeGridLayout } from '../grid-manager.js';
 import { applyDecayRate } from '../pixel-behavior.js';
 
@@ -59,6 +60,9 @@ export function createHeatStyle(deps) {
   /* Flat field · white pixels → coral heat under pressure */
   const FIELD = [210, 210, 210];
   const COOL  = [255, 255, 255];
+  /* Opening wave — popped dots dim toward a muted gray */
+  const WAVE_GRAY  = OPENING_BOUNCE.SHADE_RGB;
+  const WAVE_SHADE = OPENING_BOUNCE.SHADE;
 
   /** Density sync — pixels materialize over an already-powered gray panel. */
   function densitySyncActive() {
@@ -562,6 +566,10 @@ export function createHeatStyle(deps) {
     const bloomStrength = BLOOM_STRENGTH * q;
     const bloomThreshold = BLOOM_THRESHOLD + (1 - q) * 0.12;
     const introAlive = pixelField.update(nowMs);
+    /* Opening jump wave — dots leave home for real; no resting ghost. */
+    const openingWave =
+      typeof pixelField.openingWaveActive === 'function' &&
+      pixelField.openingWaveActive();
     const materialize = densitySyncActive();
     const tearingDown = teardownActive();
     const applyCursorMod =
@@ -867,6 +875,7 @@ export function createHeatStyle(deps) {
       if (
         useLattice &&
         presence >= 1 &&
+        (!openingWave || pixelField.waveScale(i) === 1) &&
         introHv === 0 &&
         !introDrift &&
         heat[i] === 0 &&
@@ -916,7 +925,9 @@ export function createHeatStyle(deps) {
       const presenceScale = materialize
         ? Math.min(1, 0.55 + Math.max(presence, typeSignal) * 0.45)
         : Math.min(1, 0.35 + presence * 0.65);
-      const size  = DOT * scale * presenceScale * (1 + (heat[i] > 0 ? tint * GLOW_SIZE : 0));
+      /* Opening wave pops dots toward the viewer */
+      const popScale = openingWave ? pixelField.waveScale(i) : 1;
+      const size  = DOT * scale * presenceScale * popScale * (1 + (heat[i] > 0 ? tint * GLOW_SIZE : 0));
 
       const homeX = x * CELL + CELL * 0.5 + ox[i] * CELL;
       const homeY = y * CELL + CELL * 0.5 + oy[i] * CELL;
@@ -926,6 +937,7 @@ export function createHeatStyle(deps) {
       /* While a glyph LED drifts away, restore the idle resting dot at home.
          Sub-pixel lattice nudges (Menu Impact compress/reverb) move in place. */
       if (
+        !openingWave &&
         introDrift &&
         Math.hypot(introDX, introDY) > 2.5 &&
         heat[i] < EPS &&
@@ -976,6 +988,15 @@ export function createHeatStyle(deps) {
         r += (255 - r) * lift;
         g += (248 - g) * lift;
         b += (250 - b) * lift;
+      }
+
+      if (openingWave) {
+        const sh = pixelField.waveShade(i) * WAVE_SHADE;
+        if (sh > 0) {
+          r += (WAVE_GRAY[0] - r) * sh;
+          g += (WAVE_GRAY[1] - g) * sh;
+          b += (WAVE_GRAY[2] - b) * sh;
+        }
       }
 
       const ri = r | 0;

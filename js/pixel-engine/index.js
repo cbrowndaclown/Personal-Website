@@ -184,8 +184,6 @@ export function createPixelEngine(options = {}) {
       ),
     getEffectQuality: config.getEffectQuality,
     setEffectQuality: config.setEffectQuality,
-    getFrameRateTarget: config.getFrameRateTarget,
-    setFrameRateTarget: config.setFrameRateTarget,
     getAdaptivePerformance: config.getAdaptivePerformance,
     setAdaptivePerformance: config.setAdaptivePerformance,
     beginBatch: config.beginBatch,
@@ -229,7 +227,6 @@ export {
 export {
   createPerformanceManager,
   PERFORMANCE_DEFAULTS,
-  FRAME_RATE_OPTIONS,
   PIXEL_DENSITY_MIN,
   PIXEL_DENSITY_MAX,
   PIXEL_DENSITY_DEFAULT,

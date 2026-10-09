@@ -170,8 +170,6 @@ import { initCommandPalette } from './command-palette/index.js';
       getPixelDensity: engine.getPixelDensity,
       setPixelDensity: engine.setPixelDensity,
       isPixelDensityLocked: engine.isPixelDensityLocked,
-      getFrameRateTarget: engine.getFrameRateTarget,
-      setFrameRateTarget: engine.setFrameRateTarget,
       getAdaptivePerformance: engine.getAdaptivePerformance,
       setAdaptivePerformance: engine.setAdaptivePerformance,
       loadPreset: (id) => presets.loadPreset(id),

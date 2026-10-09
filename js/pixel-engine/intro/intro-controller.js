@@ -14,6 +14,7 @@ import { computeGridLayout } from '../grid-manager.js';
 import { CELL as DEFAULT_CELL } from '../constants.js';
 import { cellRadialOrder } from '../boot/organic-radial.js';
 import { clearAppStartup } from '../../app-startup.js';
+import { installPixelFont, usesPixelFont, visualFontPx } from './pixel-font.js';
 
 /**
  * @param {object} deps
@@ -201,6 +202,8 @@ export function createIntroController(deps) {
     const ctx = off.getContext('2d', { alpha: false });
     if (!ctx) return null;
     ctx.setTransform(S, 0, 0, S, 0, 0);
+    /* Small type draws as crisp 5×7 LED glyphs instead of smeared outlines */
+    installPixelFont(ctx);
     return ctx;
   }
 
@@ -851,6 +854,8 @@ export function createIntroController(deps) {
    */
   function reinforceTrailingPunct(octx, text, cx, cy) {
     if (!text || text.length < 2) return;
+    /* Pixel-font glyphs already carry crisp punctuation */
+    if (usesPixelFont(octx.font)) return;
     const mark = text.charAt(text.length - 1);
     if (mark !== ',' && mark !== '.' && mark !== '!' && mark !== '?') return;
 
@@ -924,7 +929,11 @@ export function createIntroController(deps) {
     octx.font = `500 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
     lineGap = fontPx * 1.55;
 
-    const blockH = lineGap * (lineCount - 1);
+    const items = wrapLines(octx, INTRO_LINES, fontPx, cols * 0.90);
+    octx.font = `500 ${fontPx}px "Josefin Sans", system-ui, sans-serif`;
+    const rowYs = rowOffsets(items, lineGap, fontPx);
+    const rowCount = items.length;
+    const blockH = rowYs[rowCount - 1] || 0;
     const startY = rows * 0.5 - blockH * 0.5;
     const cx = cols * 0.5;
 
@@ -932,9 +941,10 @@ export function createIntroController(deps) {
     const lineMeta = [];
     let maxArrive = 0;
 
-    for (let L = 0; L < lineCount; L++) {
-      const cy = startY + L * lineGap;
-      const sampled = sampleLineGlyphs(octx, INTRO_LINES[L].text, cx, cy, fontPx);
+    for (let L = 0; L < rowCount; L++) {
+      const introLine = items[L].line;
+      const cy = startY + rowYs[L];
+      const sampled = sampleLineGlyphs(octx, introLine.text, cx, cy, fontPx);
       if (!sampled.glyph.length) {
         lineMeta.push(null);
         continue;
@@ -944,13 +954,13 @@ export function createIntroController(deps) {
       const spanY = Math.max(1, sampled.maxY - sampled.minY);
       const revealMs = Math.min(
         INTRO_REVEAL_MAX,
-        Math.max(INTRO_REVEAL_MIN, spanX * INTRO_MS_PER_COL * INTRO_LINES[L].pace)
+        Math.max(INTRO_REVEAL_MIN, spanX * INTRO_MS_PER_COL * introLine.pace)
       );
       const lineStart = cursor;
       const lineCx = (sampled.minX + sampled.maxX) * 0.5;
       const lineCy = (sampled.minY + sampled.maxY) * 0.5;
 
-      const lineText = INTRO_LINES[L].text;
+      const lineText = introLine.text;
       const textW = octx.measureText(lineText).width;
       const bands = wordBandsAt(octx, lineText, cx - textW * 0.5);
       const bandCount = Math.max(1, bands.length);
@@ -1053,7 +1063,7 @@ export function createIntroController(deps) {
       });
 
       cursor = lineEnd;
-      if (L < lineCount - 1) cursor += INTRO_LINE_PAUSE;
+      if (L < rowCount - 1) cursor += INTRO_LINE_PAUSE;
     }
 
     /* Smile → typography: earliest glyphs spawn from self-test smile pixels */
@@ -1359,7 +1369,9 @@ export function createIntroController(deps) {
     return true;
   }
 
-  function arrowSizeFor(fontPx, scale) {
+  function arrowSizeFor(textFontPx, scale) {
+    /* Match the letters as drawn — pixel-font type reads smaller than its px. */
+    const fontPx = visualFontPx(textFontPx);
     const s = scale != null ? scale : 1.15;
     /* Screen 1 keeps the larger chevron; Screen 2 passes a sub-1 scale. */
     if (s >= 1) return Math.max(fontPx * s, fontPx + 2);
@@ -1371,7 +1383,7 @@ export function createIntroController(deps) {
     const textW = octx.measureText(line.text).width;
     if (!line.arrow) return textW;
     const arrowW = arrowSizeFor(fontPx, arrowScale) * 1.05;
-    const gap = Math.max(2, Math.round(fontPx * (arrowScale != null && arrowScale < 1 ? 0.28 : 0.35)));
+    const gap = Math.max(2, Math.round(visualFontPx(fontPx) * (arrowScale != null && arrowScale < 1 ? 0.28 : 0.35)));
     return textW + gap + arrowW;
   }
 
@@ -1390,6 +1402,73 @@ export function createIntroController(deps) {
       if (fontPx <= MIN_FONT) break;
     }
     return fontPx;
+  }
+
+  /**
+   * Narrow screens — a line still wider than maxWidth at its fitted size is
+   * word-wrapped into rows. Lines that fit pass through untouched, so wide
+   * layouts are unchanged. The arrow rides on the last row; a keyed line keeps
+   * its key on every row (metrics merge) and its prefix on the first.
+   * @param {CanvasRenderingContext2D} octx
+   * @param {object[]} lines
+   * @param {number} fontPx
+   * @param {number} maxWidth
+   * @param {number} [arrowScale]
+   * @returns {{ line: object, first: boolean }[]}
+   */
+  function wrapLines(octx, lines, fontPx, maxWidth, arrowScale) {
+    const out = [];
+    for (let L = 0; L < lines.length; L++) {
+      const line = lines[L];
+      if (lineLayoutWidth(octx, line, fontPx, arrowScale) <= maxWidth) {
+        out.push({ line, first: true });
+        continue;
+      }
+      const words = line.text.split(' ');
+      const rowsText = [];
+      let current = '';
+      for (let w = 0; w < words.length; w++) {
+        const next = current ? current + ' ' + words[w] : words[w];
+        if (current && octx.measureText(next).width > maxWidth) {
+          rowsText.push(current);
+          current = words[w];
+        } else {
+          current = next;
+        }
+      }
+      if (current) rowsText.push(current);
+      for (let k = 0; k < rowsText.length; k++) {
+        const piece = Object.assign({}, line, { text: rowsText[k] });
+        if (k < rowsText.length - 1) delete piece.arrow;
+        if (k > 0) delete piece.prefix;
+        out.push({ line: piece, first: k === 0 });
+      }
+    }
+    return out;
+  }
+
+  /** Row pitch inside one wrapped line (tighter than the gap between lines). */
+  function wrapRowGap(fontPx) {
+    return Math.round(visualFontPx(fontPx) * 1.45);
+  }
+
+  /**
+   * Centre-line y offsets for wrapped rows, measured from the first row.
+   * @param {{ first: boolean }[]} items
+   */
+  function rowOffsets(items, lineGap, fontPx) {
+    const rowGap = wrapRowGap(fontPx);
+    /* Once anything wraps, keep separate lines clearly further apart than
+       the rows inside one line. */
+    const wrapped = items.some((it) => !it.first);
+    const groupGap = wrapped ? Math.max(lineGap, Math.round(rowGap * 1.7)) : lineGap;
+    const ys = [];
+    let y = 0;
+    for (let k = 0; k < items.length; k++) {
+      if (k > 0) y += items[k].first ? groupGap : rowGap;
+      ys.push(y);
+    }
+    return ys;
   }
 
   function drawPixelArrow(octx, cx, cy, size, dir) {
@@ -1446,7 +1525,7 @@ export function createIntroController(deps) {
       arrowSize = arrowSizeFor(fontPx, arrowScale);
       gap = Math.max(
         2,
-        Math.round(fontPx * (arrowScale != null && arrowScale < 1 ? 0.28 : 0.35))
+        Math.round(visualFontPx(fontPx) * (arrowScale != null && arrowScale < 1 ? 0.28 : 0.35))
       );
       arrowW = arrowSize * 1.05;
       totalW = textW + gap + arrowW;
@@ -1539,17 +1618,21 @@ export function createIntroController(deps) {
       lineGap = fontPx * 1.85;
     }
     fontPx = fitDirFont(octx, DIR_LINES, cols * 0.90, fontPx);
-    octx.font = `500 ${fontPx}px ${DIR_FONT}`;
     lineGap = fontPx * 1.85;
 
-    const blockH = lineGap * (lineCount - 1);
+    const items = wrapLines(octx, DIR_LINES, fontPx, cols * 0.90);
+    octx.font = `500 ${fontPx}px ${DIR_FONT}`;
+    const rowYs = rowOffsets(items, lineGap, fontPx);
+    const rowCount = items.length;
+    const blockH = rowYs[rowCount - 1] || 0;
     const startY = rows * 0.5 - blockH * 0.5;
     const cx = cols * 0.5;
     let cursor = 0;
 
-    for (let L = 0; L < lineCount; L++) {
-      const cy = startY + L * lineGap;
-      const sampled = sampleLineWithArrow(octx, DIR_LINES[L], cx, cy, fontPx);
+    for (let L = 0; L < rowCount; L++) {
+      const dirLine = items[L].line;
+      const cy = startY + rowYs[L];
+      const sampled = sampleLineWithArrow(octx, dirLine, cx, cy, fontPx);
       if (!sampled.glyph.length) continue;
 
       const spanX = Math.max(1, sampled.maxX - sampled.minX);
@@ -1560,25 +1643,28 @@ export function createIntroController(deps) {
             timing.revealMax,
             Math.max(
               timing.revealMin,
-              spanX * timing.msPerCol * DIR_LINES[L].pace,
+              spanX * timing.msPerCol * dirLine.pace,
             ),
           );
       const lineStart = cursor;
       const lineCx = (sampled.minX + sampled.maxX) * 0.5;
       const lineCy = (sampled.minY + sampled.maxY) * 0.5;
 
-      const arrowSize = arrowSizeFor(fontPx);
-      const gap = Math.max(3, Math.round(fontPx * 0.35));
-      const textW = octx.measureText(DIR_LINES[L].text).width;
-      const arrowW = arrowSize * 1.05;
+      const textW = octx.measureText(dirLine.text).width;
+      const gap = dirLine.arrow
+        ? Math.max(3, Math.round(visualFontPx(fontPx) * 0.35))
+        : 0;
+      const arrowW = dirLine.arrow ? arrowSizeFor(fontPx) * 1.05 : 0;
       const totalW = textW + gap + arrowW;
       const startX = cx - totalW * 0.5;
-      const bands = wordBandsAt(octx, DIR_LINES[L].text, startX);
+      const bands = wordBandsAt(octx, dirLine.text, startX);
       /* Arrow glyphs ride as their own idle word */
-      bands.push({
-        x0: startX + textW + gap * 0.35,
-        x1: startX + totalW + 1,
-      });
+      if (dirLine.arrow) {
+        bands.push({
+          x0: startX + textW + gap * 0.35,
+          x1: startX + totalW + 1,
+        });
+      }
       const bandCount = Math.max(1, bands.length);
       const baseWid = dIdleWords.length;
       const wordReady = new Float32Array(bandCount);
@@ -1670,7 +1756,7 @@ export function createIntroController(deps) {
       }
 
       cursor = lineStart + revealMs;
-      if (L < lineCount - 1) cursor += instant ? 0 : timing.linePause;
+      if (L < rowCount - 1) cursor += instant ? 0 : timing.linePause;
     }
 
     assembleMs = cursor;
@@ -1788,9 +1874,13 @@ export function createIntroController(deps) {
     const padX = Math.max(2, Math.round(entryFontPx * 0.28));
     const padY = Math.max(1, Math.round(entryFontPx * 0.16));
     const boxH = Math.max(3, entryFontPx + padY * 2);
-    const boxW = Math.max(8, Math.round(entryFontPx * CMD_BOX_W_EM));
     const radius = Math.max(1, Math.round(entryFontPx * 0.22));
     const boxLeft = Math.round(m.minX) - padX;
+    /* Narrow screens — keep the right edge on the lattice. */
+    const boxW = Math.max(
+      8,
+      Math.min(Math.round(entryFontPx * CMD_BOX_W_EM), cols - boxLeft - 1),
+    );
     /* `/clear` slides the box down; the shift is committed into the bake so
        the option stack re-raises from the box's new home row. */
     const cy = m.cy + cmdShiftRows;
@@ -1991,7 +2081,8 @@ export function createIntroController(deps) {
         r + 1,
         optInk
       );
-      if (opt.hint) {
+      /* Narrow screens drop a hint that would run off the lattice. */
+      if (opt.hint && nameX + nameCol + octx.measureText(opt.hint).width <= cols - 1) {
         stampCommandPass(
           octx,
           cmdChrome,
@@ -2651,13 +2742,18 @@ export function createIntroController(deps) {
     const padX = Math.max(2, Math.round(fontPx * 0.28));
     const padY = Math.max(1, Math.round(fontPx * 0.16));
     const boxH = Math.max(3, fontPx + padY * 2);
-    const boxW = Math.max(8, Math.round(fontPx * TXT_BOX_W_EM));
     const radius = Math.max(1, Math.round(fontPx * 0.22));
     const rail = s2LineMetrics.get('options');
     const left = rail ? Math.round(rail.minX) : Math.round(s2Layout.insetX);
+    const boxLeft = Math.max(0, left - padX);
+    /* Narrow screens — keep the right edge on the lattice. */
+    const boxW = Math.max(
+      8,
+      Math.min(Math.round(fontPx * TXT_BOX_W_EM), cols - boxLeft - 1),
+    );
     return {
       fontPx,
-      boxLeft: Math.max(0, left - padX),
+      boxLeft,
       boxTop: Math.max(0, Math.round(s2Layout.insetY - boxH * 0.5)),
       boxW,
       boxH,
@@ -3017,25 +3113,41 @@ export function createIntroController(deps) {
        same rails as the menu it grows out of. */
     s2Layout = { fontPx, lineGap, insetX, insetY };
 
-    const topLines = S2_LINES.filter((l) => l.region === 'top');
-    const bottomLines = S2_LINES.filter((l) => l.region === 'bottom');
+    /* Top lines centre on the full width; bottom lines start at insetX. */
+    const topItems = wrapLines(
+      octx,
+      S2_LINES.filter((l) => l.region === 'top'),
+      fontPx,
+      cols * 0.92,
+      S2_ARROW_SCALE,
+    );
+    const bottomItems = wrapLines(
+      octx,
+      S2_LINES.filter((l) => l.region === 'bottom'),
+      fontPx,
+      cols - insetX - 2,
+      S2_ARROW_SCALE,
+    );
+    octx.font = `500 ${fontPx}px ${DIR_FONT}`;
 
     /** @type {{ line: typeof S2_LINES[0], cx: number, cy: number }[]} */
     const jobs = [];
-    for (let t = 0; t < topLines.length; t++) {
+    const topYs = rowOffsets(topItems, lineGap, fontPx);
+    for (let t = 0; t < topItems.length; t++) {
       jobs.push({
-        line: topLines[t],
+        line: topItems[t].line,
         cx,
-        cy: insetY + t * lineGap,
+        cy: insetY + topYs[t],
       });
     }
-    const bottomBlock = Math.max(0, bottomLines.length - 1) * lineGap;
+    const bottomYs = rowOffsets(bottomItems, lineGap, fontPx);
+    const bottomBlock = bottomYs[bottomYs.length - 1] || 0;
     const bottomBase = rows - insetY - bottomBlock;
-    for (let b = 0; b < bottomLines.length; b++) {
+    for (let b = 0; b < bottomItems.length; b++) {
       jobs.push({
-        line: bottomLines[b],
+        line: bottomItems[b].line,
         cx: insetX,
-        cy: bottomBase + b * lineGap,
+        cy: bottomBase + bottomYs[b],
       });
     }
 
@@ -3085,7 +3197,14 @@ export function createIntroController(deps) {
         dIdleWords.push(createIdleWord(lineStart));
       }
 
-      if (line.key) {
+      const prevMetrics = line.key ? s2LineMetrics.get(line.key) : null;
+      if (prevMetrics) {
+        /* Wrapped continuation row — grow the keyed line's bounds. */
+        prevMetrics.minX = Math.min(prevMetrics.minX, sampled.minX);
+        prevMetrics.maxX = Math.max(prevMetrics.maxX, sampled.maxX);
+        prevMetrics.minY = Math.min(prevMetrics.minY, sampled.minY);
+        prevMetrics.maxY = Math.max(prevMetrics.maxY, sampled.maxY);
+      } else if (line.key) {
         s2LineMetrics.set(line.key, {
           cell: ledCell,
           fontPx,

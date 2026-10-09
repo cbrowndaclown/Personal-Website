@@ -49,9 +49,13 @@ export function createBootController(options) {
   let rafId = 0;
   let lastNow = 0;
 
-  /* Opening bounce — page-load lattice pop-in before the intro menu */
+  /* Opening wave — page-load jump wave before the intro typography */
   let bouncing = false;
   let bounceStartedAt = 0;
+  /** @type {Float32Array|null} per-cell size multiplier during the wave */
+  let waveScaleBuf = null;
+  /** @type {Float32Array|null} per-cell 0..1 gray shade during the wave */
+  let waveShadeBuf = null;
 
   /* Density recalibration — center-out sync after PixelDensityChanged */
   let recalibrating = false;
@@ -919,30 +923,73 @@ export function createBootController(options) {
   }
 
   /* ── Opening sequence ─────────────────────────────────────────────────
-     bounce → hero typography ("Hey there, my name is Canaan…") → hold →
+     jump wave → hero typography ("Hey there, my name is Canaan…") → hold →
      directory menu assemble. Driven from the boot rAF loop. */
 
-  /** @type {Float32Array|null} normalised centre distance per cell */
+  /** @type {Float32Array|null} wave arrival time (ms) per cell */
   let bounceDist = null;
+  /** @type {Float32Array|null} per-cell swell strength multiplier */
+  let bounceAmp = null;
   let bounceDistCols = 0;
   let bounceDistRows = 0;
+  let bounceLastArrival = 0;
 
-  function bounceDistances(cols, rows) {
+  /* Cheap deterministic per-cell scatter in [0, 1). */
+  function cellNoise(i) {
+    let h = (i * 2654435761) >>> 0;
+    h ^= h >>> 15;
+    h = Math.imul(h, 2246822519) >>> 0;
+    h ^= h >>> 13;
+    return (h >>> 0) / 4294967296;
+  }
+
+  function waveArrivals(cols, rows) {
     if (bounceDist && bounceDistCols === cols && bounceDistRows === rows) {
       return bounceDist;
     }
-    const midX = (cols - 1) * 0.5;
-    const midY = (rows - 1) * 0.5;
-    const maxR = Math.hypot(midX, midY) || 1;
+    const {
+      SPREAD_MS, JITTER_MS, FRONT_WOBBLE_MS, SPEED_WOBBLE, AMP_VARY,
+    } = OPENING_BOUNCE;
+    const TAU = Math.PI * 2;
+    const rnd = Math.random;
+    /* Fresh ripple phases each load so the wave never looks the same twice */
+    const fp1 = rnd() * TAU, fp2 = rnd() * TAU, fp3 = rnd() * TAU;
+    const sp = rnd() * TAU;
+    const ap1 = rnd() * TAU, ap2 = rnd() * TAU;
+    const spanX = Math.max(1, cols - 1);
+    const spanY = Math.max(1, rows - 1);
     bounceDist = new Float32Array(cols * rows);
+    bounceAmp = new Float32Array(cols * rows);
+    let last = 0;
     for (let y = 0; y < rows; y++) {
-      const dy = y - midY;
+      const v = y / spanY;
+      /* Front shape — overlapping slow ripples down the line's length */
+      const front =
+        (Math.sin(v * TAU * 0.8 + fp1) * 0.55 +
+          Math.sin(v * TAU * 1.9 + fp2) * 0.3 +
+          Math.sin(v * TAU * 4.3 + fp3) * 0.15) *
+        FRONT_WOBBLE_MS;
       for (let x = 0; x < cols; x++) {
-        bounceDist[y * cols + x] = Math.hypot(x - midX, dy) / maxR;
+        const i = y * cols + x;
+        const u = x / spanX;
+        /* Surge and ease — still always moving forward */
+        const travel = u + (SPEED_WOBBLE * Math.sin(u * TAU * 1.3 + sp)) / (TAU * 1.3);
+        const t =
+          travel * SPREAD_MS + FRONT_WOBBLE_MS + front +
+          (cellNoise(i) - 0.5) * JITTER_MS;
+        bounceDist[i] = t;
+        if (t > last) last = t;
+        /* Swell height drifts across the field */
+        bounceAmp[i] =
+          1 +
+          AMP_VARY *
+            (Math.sin(u * TAU * 1.1 + v * TAU * 0.7 + ap1) * 0.6 +
+              Math.sin(v * TAU * 2.3 - u * TAU * 0.9 + ap2) * 0.4);
       }
     }
     bounceDistCols = cols;
     bounceDistRows = rows;
+    bounceLastArrival = last;
     return bounceDist;
   }
 
@@ -950,38 +997,73 @@ export function createBootController(options) {
     if (!bouncing) return false;
     if (!bounceStartedAt) bounceStartedAt = now;
     const elapsed = now - bounceStartedAt;
-    const presenceBuf = field.presence;
+    const ox = field.ox;
     const oy = field.oy;
     const cols = field.cols;
     const rows = field.rows;
-    if (!presenceBuf || !oy || cols <= 0 || rows <= 0) return true;
+    if (!ox || !oy || cols <= 0 || rows <= 0) return true;
 
-    const { SPREAD_MS, POP_MS, HOP_PX, BOUNCES } = OPENING_BOUNCE;
-    const dist = bounceDistances(cols, rows);
+    const {
+      SPREAD_MS, BAND_CELLS, POP_SCALE, LIFT_CELLS,
+      BOUNCE_SCALE, BOUNCE_MS, BOUNCE_HALF_MS,
+      SETTLE_DAMP_MS, SETTLE_DROP_CELLS, SETTLE_SWAY_CELLS, SETTLE_VARY,
+    } = OPENING_BOUNCE;
+    const cell = sharedGrid && sharedGrid.cell > 0 ? sharedGrid.cell : 5;
+    const lift = LIFT_CELLS * cell;
+    const drop = SETTLE_DROP_CELLS * cell;
+    const sway = SETTLE_SWAY_CELLS * cell;
+    const arrive = waveArrivals(cols, rows);
+    const amp = bounceAmp;
     const n = cols * rows;
-    const invPop = 1 / POP_MS;
-    const bounceFreq = Math.PI * BOUNCES;
+    if (!waveScaleBuf || waveScaleBuf.length !== n) waveScaleBuf = new Float32Array(n);
+    if (!waveShadeBuf || waveShadeBuf.length !== n) waveShadeBuf = new Float32Array(n);
+    const scale = waveScaleBuf;
+    const shade = waveShadeBuf;
+    /* Time the line takes to cross one pixel; its centre passes mid-way. */
+    const bandMs = (BAND_CELLS * SPREAD_MS) / Math.max(1, cols - 1);
+    const half = bandMs * 0.5;
+    const sigma = Math.max(1, bandMs * 0.42);
+    const tailStart = -half;
 
     for (let i = 0; i < n; i++) {
-      const local = (elapsed - dist[i] * SPREAD_MS) * invPop;
-      if (local <= 0) {
-        presenceBuf[i] = 0;
+      /* t = 0 when the centre of the line is over this pixel */
+      const t = elapsed - arrive[i] - half;
+      if (t <= tailStart - bandMs || t >= BOUNCE_MS) {
+        ox[i] = 0;
         oy[i] = 0;
-      } else if (local >= 1) {
-        presenceBuf[i] = 1;
-        oy[i] = 0;
-      } else {
-        /* Quick ease-out grow, then damped hops off the resting position */
-        const g = local < 0.4 ? 1 - local * 2.5 : 0;
-        presenceBuf[i] = 1 - g * g * g;
-        const decay = (1 - local) * (1 - local);
-        oy[i] = -HOP_PX * Math.abs(Math.sin(local * bounceFreq)) * decay;
+        scale[i] = 1;
+        shade[i] = 0;
+        continue;
       }
+      const a = amp[i];
+      /* Pop — a sharp bump that only exists while the line is overhead. */
+      const g = Math.exp(-(t * t) / (2 * sigma * sigma)) * a;
+      /* Settle — after the line passes the pixel drops back past rest, then
+         rings down on a damped spring. Each pixel's spring is slightly
+         different so the field settles organically instead of in lockstep. */
+      let spring = 0;
+      if (t > 0) {
+        const vary = (cellNoise(i + 0x9e37) - 0.5) * 2 * SETTLE_VARY;
+        const phase = (t / (BOUNCE_HALF_MS * (1 + vary))) * Math.PI;
+        spring =
+          Math.exp(-t / SETTLE_DAMP_MS) *
+          (1 - vary * 0.5) *
+          Math.sin(phase) *
+          (1 - Math.pow(t / BOUNCE_MS, 4)) *
+          a;
+      }
+      /* Squash on the drop, stretch on the rebound */
+      scale[i] = 1 + POP_SCALE * g - BOUNCE_SCALE * spring;
+      oy[i] = -lift * g + drop * spring;
+      /* Dragged along by the line, then swinging back through rest */
+      ox[i] = sway * (g + spring * 0.6);
+      /* Muted gray while popped, easing back to the resting white */
+      shade[i] = Math.min(1, Math.max(g, Math.abs(spring) * 0.6));
     }
 
-    if (elapsed >= SPREAD_MS + POP_MS) {
+    if (elapsed >= bounceLastArrival + half + BOUNCE_MS) {
       endOpeningBounce();
-      /* Hand off on the next frame so the bake does not land on the bounce's
+      /* Hand off on the next frame so the bake does not land on the wave's
          last paint. */
       openingStep = 'typography-start';
       return true;
@@ -994,8 +1076,12 @@ export function createBootController(options) {
     bouncing = false;
     bounceStartedAt = 0;
     bounceDist = null;
+    bounceAmp = null;
+    if (waveScaleBuf) waveScaleBuf.fill(1);
+    if (waveShadeBuf) waveShadeBuf.fill(0);
     field.fillPresence(1);
     field.clearMotion();
+    field.clearBrightness();
   }
 
   /** @type {null|'typography-start'|'typography'|'hold'} */
@@ -1046,10 +1132,11 @@ export function createBootController(options) {
     return true;
   }
 
-  /* Page load: lattice pops in from the centre, then the intro plays. */
+  /* Page load: a jump wave sweeps the lattice left → right, then the intro plays. */
   function startOpening() {
     ensureFieldSize();
     field.clear();
+    field.fillPresence(1);
     setInteractive(true);
     phase = BootPhase.READY;
     started = true;
@@ -1063,7 +1150,7 @@ export function createBootController(options) {
     bouncing = true;
     bounceStartedAt = 0;
     startLoop();
-    /* Wake style rAF loops so they paint the bounce */
+    /* Wake style rAF loops so they paint the wave */
     window.dispatchEvent(new CustomEvent('pixelintrostart'));
   }
 
@@ -1194,7 +1281,7 @@ export function createBootController(options) {
   }
 
   function skip() {
-    /* Space during the opening bounce — land the lattice and settle the menu. */
+    /* Space during the opening wave — land the lattice and settle the menu. */
     if (bouncing || openingStep === 'typography-start') {
       jumpToReady({ settle: true });
       return;
@@ -1364,6 +1451,21 @@ export function createBootController(options) {
     return intro.offsetY(i);
   }
 
+  /** True while the opening jump wave owns the lattice offsets. */
+  function openingWaveActive() {
+    return bouncing;
+  }
+
+  /** Per-cell dot size multiplier from the opening wave (1 = rest). */
+  function waveScale(i) {
+    return bouncing && waveScaleBuf ? waveScaleBuf[i] || 1 : 1;
+  }
+
+  /** Per-cell 0..1 pull toward the wave's muted gray (0 = rest). */
+  function waveShade(i) {
+    return bouncing && waveShadeBuf ? waveShadeBuf[i] || 0 : 0;
+  }
+
   function update(now) {
     /* Styles call update each paint frame; ensure boot loop is alive during boot */
     if (
@@ -1403,6 +1505,8 @@ export function createBootController(options) {
   }
 
   function interactionsEnabled() {
+    /* Opening wave owns the lattice — the cursor style waits for it. */
+    if (bouncing) return false;
     /* Cursor tracking stays live; teardown still blocks forces.
        During recalibration, styles gate per-cell via cellInteractive(). */
     if (tearingDown) return true; /* per-cell gate via cellInteractive */
@@ -1421,6 +1525,8 @@ export function createBootController(options) {
    * @param {number} i
    */
   function cellInteractive(i) {
+    /* No cursor forces until the opening wave has finished. */
+    if (bouncing) return false;
     if (tearingDown) {
       if (!field.presence) return false;
       return field.getPresence(i) >= TEARDOWN.INTERACT_PRESENCE;
@@ -1532,6 +1638,9 @@ export function createBootController(options) {
     schedule,
     cancel,
     skip,
+    openingWaveActive,
+    waveScale,
+    waveShade,
     beginFastForward,
     endFastForward,
     update,

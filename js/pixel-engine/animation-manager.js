@@ -61,6 +61,18 @@ export function createAnimationManager(options) {
     update: function (now) { return bootController.update(now); },
     isActive: function () { return bootController.isActive(); },
     isReady: function () { return bootController.isReady(); },
+    /* Opening jump wave — styles skip resting ghosts while it runs */
+    openingWaveActive: function () {
+      return typeof bootController.openingWaveActive === 'function'
+        ? bootController.openingWaveActive()
+        : false;
+    },
+    waveScale: typeof bootController.waveScale === 'function'
+      ? bootController.waveScale
+      : function () { return 1; },
+    waveShade: typeof bootController.waveShade === 'function'
+      ? bootController.waveShade
+      : function () { return 0; },
     interactionsEnabled: function () {
       return bootController.interactionsEnabled();
     },
@@ -253,7 +265,10 @@ export function createAnimationManager(options) {
     const tag = e.target && e.target.tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
     if (e.target && e.target.isContentEditable) return;
-    if (bootController.isReady() && !introController.isControllable()) return;
+    const waveRunning =
+      typeof bootController.openingWaveActive === 'function' &&
+      bootController.openingWaveActive();
+    if (bootController.isReady() && !introController.isControllable() && !waveRunning) return;
     if (bootController.getPhase() === 'skipped') return;
     e.preventDefault();
     bootController.skip();

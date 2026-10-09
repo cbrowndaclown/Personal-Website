@@ -15,7 +15,6 @@ import {
 } from './cursor-mode.js';
 import {
   PERFORMANCE_DEFAULTS,
-  normalizeFrameRateTarget,
   normalizePixelDensity,
 } from './performance-manager.js';
 
@@ -72,11 +71,10 @@ export function createAnimConfig(options) {
     },
     /* Cursor Interaction — modifiers layered on active Pixel FS style */
     cursorMode: CURSOR_MODE_DEFAULT,
-    /* Performance — density / quality / FPS / adaptive (defaults = V1 look) */
+    /* Performance — density / quality / adaptive (defaults = V1 look) */
     performance: {
       pixelDensity: PERFORMANCE_DEFAULTS.pixelDensity,
       effectQuality: PERFORMANCE_DEFAULTS.effectQuality,
-      frameRateTarget: PERFORMANCE_DEFAULTS.frameRateTarget,
       adaptivePerformance: PERFORMANCE_DEFAULTS.adaptivePerformance,
     },
     /* Preset Manager — null = Custom; string id = active named preset.
@@ -276,17 +274,6 @@ export function createAnimConfig(options) {
     return clampInt(animConfig.performance.effectQuality, 0, 10);
   }
 
-  function setFrameRateTarget(value) {
-    const next = normalizeFrameRateTarget(value);
-    if (animConfig.performance.frameRateTarget === next) return;
-    animConfig.performance.frameRateTarget = next;
-    publishAnimConfig({ soft: true, changed: ['performance.frameRateTarget'] });
-  }
-
-  function getFrameRateTarget() {
-    return normalizeFrameRateTarget(animConfig.performance.frameRateTarget);
-  }
-
   function setAdaptivePerformance(on) {
     const next = !!on;
     if (animConfig.performance.adaptivePerformance === next) return;
@@ -325,8 +312,6 @@ export function createAnimConfig(options) {
     getPixelDensity,
     setEffectQuality,
     getEffectQuality,
-    setFrameRateTarget,
-    getFrameRateTarget,
     setAdaptivePerformance,
     getAdaptivePerformance,
     setPixelReactionStrength: (v) => setPixelBehavior('reactionStrength', v),

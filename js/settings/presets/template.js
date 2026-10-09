@@ -35,7 +35,6 @@ export function createSettingsTemplate() {
     performance: {
       pixelDensity: PERFORMANCE_DEFAULTS.pixelDensity,
       effectQuality: PERFORMANCE_DEFAULTS.effectQuality,
-      frameRateTarget: PERFORMANCE_DEFAULTS.frameRateTarget,
       adaptivePerformance: PERFORMANCE_DEFAULTS.adaptivePerformance,
     },
     /* null = Custom; named ids persist without a format change when new

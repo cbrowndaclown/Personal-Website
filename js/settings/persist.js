@@ -8,10 +8,7 @@
 
 import { PIXEL_FIELD_STYLES, PixelEvents } from '../pixel-engine/constants.js';
 import { normalizeCursorMode } from '../pixel-engine/cursor-mode.js';
-import {
-  normalizeFrameRateTarget,
-  normalizePixelDensity,
-} from '../pixel-engine/performance-manager.js';
+import { normalizePixelDensity } from '../pixel-engine/performance-manager.js';
 
 /** @type {string} */
 export const SETTINGS_STORAGE_KEY = 'pixel-fs-settings';
@@ -198,11 +195,6 @@ export function validateSettings(saved, defaults) {
         clampNum(perf.effectQuality, 0, 10, out.performance.effectQuality)
       );
     }
-    if ('frameRateTarget' in perf) {
-      out.performance.frameRateTarget = normalizeFrameRateTarget(
-        perf.frameRateTarget
-      );
-    }
     if ('adaptivePerformance' in perf) {
       out.performance.adaptivePerformance = !!perf.adaptivePerformance;
     }
@@ -262,8 +254,6 @@ export function applySettings(animConfig, validated) {
   if (validated.performance && animConfig.performance) {
     animConfig.performance.pixelDensity = validated.performance.pixelDensity;
     animConfig.performance.effectQuality = validated.performance.effectQuality;
-    animConfig.performance.frameRateTarget =
-      validated.performance.frameRateTarget;
     animConfig.performance.adaptivePerformance =
       !!validated.performance.adaptivePerformance;
   }

@@ -3,6 +3,7 @@
 
 import { createLightningStrikeController } from './lightning-strike.js';
 import { PixelEvents } from '../constants.js';
+import { OPENING_BOUNCE } from '../boot/constants.js';
 import { computeGridLayout } from '../grid-manager.js';
 import { applyDecayDuration } from '../pixel-behavior.js';
 
@@ -320,6 +321,9 @@ export function createLightningStyle(deps) {
     let DOT = Math.max(1, CELL - 2);
     const FIELD = [210, 210, 210];
     const COOL  = [255, 255, 255];
+    /* Opening wave — popped dots dim toward a muted gray */
+    const WAVE_GRAY  = OPENING_BOUNCE.SHADE_RGB;
+    const WAVE_SHADE = OPENING_BOUNCE.SHADE;
 
     function applyPerformanceDensity() {
       if (!perfMgr || typeof perfMgr.getCellSize !== 'function') return false;
@@ -2330,6 +2334,12 @@ export function createLightningStyle(deps) {
       const n = cols * rows;
       let any = false;
       let lastFill = -1;
+      /* Opening jump wave — the dot leaves home, so clear its resting spot
+         to the panel instead of re-lighting it. */
+      const openingWave =
+        typeof pixelField.openingWaveActive === 'function' &&
+        pixelField.openingWaveActive();
+      const homeFill = openingWave ? FIELD : COOL;
 
       for (let i = 0; i < n; i++) {
         const introHv = pixelField.brightness(i);
@@ -2345,11 +2355,12 @@ export function createLightningStyle(deps) {
         const homeY = y * CELL + CELL * 0.5;
         const cx = homeX + introDX;
         const cy = homeY + introDY;
-        const size = DOT;
+        /* Opening wave pops dots toward the viewer */
+        const size = openingWave ? DOT * pixelField.waveScale(i) : DOT;
 
         /* Glyph migration leaves a resting lattice ghost; sub-pixel nudges do not. */
-        if (introDrift && Math.hypot(introDX, introDY) > 2.5) {
-          ctx.fillStyle = `rgb(${COOL[0]},${COOL[1]},${COOL[2]})`;
+        if (introDrift && (openingWave || Math.hypot(introDX, introDY) > 2.5)) {
+          ctx.fillStyle = `rgb(${homeFill[0]},${homeFill[1]},${homeFill[2]})`;
           lastFill = -1;
           ctx.fillRect(homeX - DOT * 0.5, homeY - DOT * 0.5, DOT, DOT);
         }
@@ -2384,6 +2395,15 @@ export function createLightningStyle(deps) {
           r += (HI[0] - r) * lift;
           g += (HI[1] - g) * lift * 0.85;
           b += (HI[2] - b) * lift * 0.9;
+        }
+
+        if (openingWave) {
+          const sh = pixelField.waveShade(i) * WAVE_SHADE;
+          if (sh > 0) {
+            r += (WAVE_GRAY[0] - r) * sh;
+            g += (WAVE_GRAY[1] - g) * sh;
+            b += (WAVE_GRAY[2] - b) * sh;
+          }
         }
 
         const ri = r | 0;
